@@ -26,6 +26,7 @@ import { TextItem, Texts } from "./Texts";
 import { SceneCard, SceneView, TR_S, Transition, footageX, phases, sceneGrounds } from "./Scene";
 import { captionFade, groundCovers } from "./ground";
 import { Ground, onGround } from "./look";
+import { hidesCaptions } from "./kinetic";
 
 // Shapes follow skills/style-edit/references/contracts.md "plan.json". Times are seconds on the cut's timeline.
 // origin: the top centre of the head over the zoom, % of the frame (plan.py from face.json): the face holds its place, the hair never rises into a card.
@@ -413,7 +414,11 @@ export const StyleEdit: React.FC<Plan> = ({ video, captions, zooms, cards, layou
     split && layout ? layout.caption_full_y : captions.style.y_pct ?? 70, split);
   const capStyle = capAt(t);
   // captions a scene hides fade out and back in (ground.ts captionFade), never gone in one frame
-  const capFade = cards.some((c) => c.layout === "scene") ? captionFade((tt) => capAt(tt).present === false, t) : 1;
+  const sceneFade = cards.some((c) => c.layout === "scene") ? captionFade((tt) => capAt(tt).present === false, t) : 1;
+  // a kinetic title says the beat in its own type: the word captions fade out while it is up and come back after it
+  // (card props.hide_captions, on by default for the kinetic family: kinetic/index.ts)
+  const quiet = cards.filter((c) => hidesCaptions(c.anim));
+  const capFade = Math.min(sceneFade, quiet.length ? captionFade((tt) => quiet.some((c) => tt >= c.start && tt < c.end), t) : 1);
   const up = fonts.ready ? slots(cards, split).filter((s) => t >= s.from && t < s.to) : [];
   const view = (s: Slot) => (
     <CardView key={`${s.card.src ?? s.card.anim?.type}${s.card.start}`} card={s.card} t={t} prev={s.prev} next={s.next} covered={s.covered}

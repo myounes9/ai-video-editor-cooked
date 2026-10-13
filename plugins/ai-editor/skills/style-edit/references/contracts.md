@@ -319,6 +319,10 @@ A zoom may carry `ease` (the creator's fitted `zoom.ease`, pushes only) and `ori
 `hook`): `{"first_graphic_s", "control_first_graphic_s"}`; check.py plan WARNs when the first card lands over
 0.5 s after `first_graphic_s`.
 
+`kinetic` (optional, true when style.json `graphics.kinetic` is true): the style draws the kinetic family
+(references/kinetic.md); check.py plan, ai_tells.py and quality.py then treat those cards as the style's own titles,
+not text cards (without it a kinetic card FAILs as one). A kinetic card's box is the whole frame, its lane `kinetic`.
+
 `card_kinds` (optional, a card edit: style.json `card_kinds` without `"text"`): the kinds allowed; check.py plan
 FAILs a sentence set alone on white and only WARNs a screenshot whose text reads small. `texts` (optional, from
 visuals.json `title` / `list` / `stamp` beats): `[{"kind": "title", "text", "start", "end", "y_pct", "size_pct"} |

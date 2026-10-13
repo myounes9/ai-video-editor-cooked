@@ -36,7 +36,7 @@ sys.dont_write_bytecode = True
 sys.path.insert(0, str(HERE))
 sys.path.insert(1, str(HERE.parents[2] / "lib"))
 from ai_editor import numbers  # noqa: E402
-from plan import GAP_S, QUIET_HOLD_S, card_gaps, INK_MIN_W, OVERLAY_EDGE, READ_XH, SAFE, capture_xh, explain_ink, clean, cut_lines, cut_points, head_during, overlay_led, small_lines, sticker_crop  # noqa: E402
+from plan import GAP_S, KINETIC, QUIET_HOLD_S, card_gaps, INK_MIN_W, OVERLAY_EDGE, READ_XH, SAFE, capture_xh, explain_ink, clean, cut_lines, cut_points, head_during, overlay_led, small_lines, sticker_crop  # noqa: E402
 
 CENTRE_PLAN = 1.5      # % of the width a vertical card's box centre may sit off 50
 CENTRE_INK = 2.0       # % of the width a card's drawn content may sit off centre
@@ -193,6 +193,10 @@ def check_plan(plan, face=None, cuts=(), static_s=STATIC_S, visuals=None, brand=
         name = f"'{c['trigger_word']}' {c.get('src') or c['anim']['type']}"
         x, y, w, h = c["box"]
         word = re.sub(r"[^\w'-]+", "", c["trigger_word"]).lower()
+        if (c.get("anim") or {}).get("type") in KINETIC and not plan.get("kinetic"):
+            out.append(finding("FAIL", c["start"], f"{name} is a kinetic title: words set over the footage, a text card this "
+                               "style has not opted in to", "show the real source (a capture, post or logo), or opt the style "
+                               "in (\"graphics\": {\"kinetic\": true} in style.json or taste) and plan again"))
         if c.get("layout") == "scene" and beats is not None and not any(
                 b.get("layout") in ("scene", "split") and re.sub(r"[^\w'-]+", "", b.get("word") or "").lower() == word for b in beats):
             out.append(finding("FAIL", c["start"], f"{name} is a full-frame scene nobody asked for: the speaker leaves the frame",
@@ -358,27 +362,38 @@ MOTION_KEYS = {"enter", "exit", "ambient", "ease", "stagger", "duration", "dur",
                "accent", "side", "seed", "point", "size", "crop", "zoom", "rotate", "rate", "cursor"}
 # What a motion key holds when it is not words: an ease ("power2.out", "back.out(1.7)", "steps(12)"), a colour
 # ("#ff3300", "rgba(0,0,0,.5)"), a length, an angle or a time ("48px", "-3deg", "0.3s", "1.2").
+# A kinetic card (plan.KINETIC) shows its figures under these keys, a number as well as a string ("pct": 50); its part
+# times are "<part>_at" / "at_<part>" and its "band" is where it sits. Its "target" is a shown figure, not quoted content.
+FIGURE_KEYS = {"num", "value", "pct", "target", "figure"}
+KINETIC_MOTION = {"band", "label_at", "out_at", "hide_captions", "variant"}
 MOTION_TEXT = re.compile(r"(?i)\s*(#[0-9a-f]{3,8}|rgba?\([^)]*\)|[a-z]+\d?(\.(in|out|inout))?(\([^)]*\))?"
                          r"|-?\d*\.?\d+(px|%|deg|s|ms|em|rem|vh|vw|x)?)\s*")
 
 
-def shown_texts(props):
+def shown_texts(props, kinetic=False):
     """The words a card's props put on screen: every string but ids, urls and quoted real content (ai_tells
     SKIP_KEYS) and what a motion key holds (MOTION_KEYS), at any depth, unless that is words: "37 clients"
-    under "size" is shown, "back.out(2.5)" under "ease" and "#ff3300" under "accent" are not."""
+    under "size" is shown, "back.out(2.5)" under "ease" and "#ff3300" under "accent" are not. kinetic: a kinetic
+    card's props, where a figure may be a bare number (FIGURE_KEYS), "target" is shown and each part's spoken word
+    ("label_word", "word_goal") and time ("label_at", "at_goal") are not."""
     from ai_tells import SKIP_KEYS
+    skip = SKIP_KEYS - {"target", "mark"} if kinetic else SKIP_KEYS
     out = []
 
-    def walk(node, motion):
+    def walk(node, motion, key=None):
         if isinstance(node, dict):
             for k, v in node.items():
-                if k not in SKIP_KEYS:
-                    walk(v, motion or k in MOTION_KEYS)
+                if k in skip or kinetic and (k.endswith("_word") or k.startswith("word_")):
+                    continue   # ids, urls and quoted content; a kinetic part's spoken word
+                timed = kinetic and (k.endswith("_at") or k.startswith("at_") or k in KINETIC_MOTION)
+                walk(v, motion or k in MOTION_KEYS or timed, k)
         elif isinstance(node, list):
             for v in node:
-                walk(v, motion)
+                walk(v, motion, key)
         elif isinstance(node, str) and not (motion and MOTION_TEXT.fullmatch(node)):
             out.append(node)
+        elif kinetic and key in FIGURE_KEYS and isinstance(node, (int, float)) and not isinstance(node, bool) and not motion:
+            out.append(numbers.norm(node))
     walk(props or {}, False)
     return out
 
@@ -433,7 +448,7 @@ def unsaid_numbers(plan, heard=None):
         if a.get("type") in REAL_ANIMS:
             continue
         texts = (shown_texts((c.get("props") or {}).get("texts")) if str(c.get("src", "")).endswith(".json")
-                 else shown_texts(a.get("props")))
+                 else shown_texts(a.get("props"), kinetic=a.get("type") in KINETIC))
         seen = set()
         for w in (w for t in texts for w in numbers.written(t)):
             v, raw, n = numbers.norm(w["value"]), numbers.norm(w["raw"]), w["text"]
@@ -506,6 +521,7 @@ def still_runs(diffs, thr):
 INK_DIFF = {"overlay": 40, "split": 8}   # a pixel is the card's when it differs this much from what is behind
 STILL_DIFF = 0.4                          # mean abs grey change per sample under this = not moving
 FACE_COVER = 0.02                         # card pixels on more than this share of the head = covering it
+BROW_UP = 0.12                            # the brows sit this share of the face's height above the eyes
 
 
 def stream(video, vf, w, h, fps=FPS):
@@ -604,7 +620,8 @@ def check_render(edit, plan, video):
             for f in faces if faces is not None else []:
                 b = facemod.head_box(f[:4].tolist(), sw, sh)
                 if not split or b[1] + b[3] / 2 > plan["layout"]["seam"]:   # split: the speaker is in the window
-                    heads.append(b)
+                    # 5th: the brows (% down), BROW_UP of the face's height over the higher eye (YuNet landmarks)
+                    heads.append(b + [round(100 * (min(f[5], f[7]) - BROW_UP * f[3]) / sh, 1)])
             heads = sorted(heads, key=lambda b: -b[2] * b[3])[:1]
         grey = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY).astype(np.float32)
         al = None if split or not any(cards[i].get("layer") == "behind" for i in up) else cutout_alpha(edit, plan, t)
@@ -617,6 +634,9 @@ def check_render(edit, plan, video):
             mask = np.zeros_like(ink)
             mask[y0:y1, x0:x1] = ink[y0:y1, x0:x1]
             for hb in heads:
+                if plan.get("kinetic") and (c.get("anim") or {}).get("type") in KINETIC:
+                    # a kinetic title sits on the hair and forehead by design: on the face is from the brows down
+                    hb = [hb[0], max(hb[1], hb[4]), hb[2], hb[1] + hb[3] - max(hb[1], hb[4])]
                 st["cover"].append((t, face_cover(mask, pix(hb), person if c.get("layer") == "behind" else None)))
             region = grey[y0:y1, x0:x1]
             if st["prev"] is not None:
@@ -932,6 +952,20 @@ def demo():
     assert any("shows 37, a number nobody says" in f["what"] and f["level"] == "FAIL" for f in check_plan(grounded, face))
     spoken, pct, bare = said_numbers(" ".join(ch["text"] for ch in said["chunks"]))
     assert {"3", "100", "40", "340", "4500", "20000"} <= spoken and "40" in pct and bare == {"4.5", "20"}, (spoken, pct, bare)
+    # a kinetic card: a text card unless the plan says the style opted in (plan.py writes "kinetic"); its figures are
+    # checked like any card's words, a bare number and its "target" too, never its parts' spoken words or times
+    def kin(*figs, chain=("340", "€4.5K")):
+        return [{"anim": {"type": "number_chain", "props": {"items": [{"num": n, "label": "flyers", "at": 0.1 + i, "label_at": 0.6 + i,
+                 "label_word": "flyers"} for i, n in enumerate(chain)], "band": [8.6, 26.2]}}, "trigger_word": "printed", "start": 0,
+                 "end": 3, "box": [0, 0, 100, 100], "lane": "kinetic"},
+                {"anim": {"type": "goal_bar", "props": {"pct": figs[0], "target": figs[1], "at_pct": 0.1, "word_pct": "forty", "at_goal": 1.2}},
+                 "trigger_word": "goal", "start": 3, "end": 5, "box": [0, 0, 100, 100], "lane": "kinetic"}]
+    kp = {**plan, "captions": said, "cards": kin(40, "20K")}
+    assert any("kinetic title" in f["what"] and f["level"] == "FAIL" for f in check_plan(kp, face)), check_plan(kp, face)
+    kp["kinetic"] = True
+    assert not any("kinetic title" in f["what"] or "nobody says" in f["what"] for f in check_plan(kp, face)) and unsaid_numbers(kp) == []
+    bad = {**kp, "cards": kin(55, "30K", chain=(37, "6"))}
+    assert sorted(n for _, n, near in unsaid_numbers(bad) if near is None) == ["30K", "37", "55", "6"], unsaid_numbers(bad)
     # an unsaid number anywhere a card shows words: after a dot ("No.1", "...37"), a Lottie's texts, words under a
     # motion key ("size"); never an ease or a colour
     def check(chunks, *texts, heard=None):

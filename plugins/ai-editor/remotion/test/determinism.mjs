@@ -5,8 +5,9 @@
 // StyleEdit.tsx LottieCard, entering with a pop) and a product page zoom (ProductVideo.tsx, on two
 // tiles ffmpeg draws), rendered across 6 Chrome tabs (--tabs; each tab
 // jumps several frames at a time and lands on held frames from different places, as a real render does),
-// must equal the same frame rendered in one tab in order. Prints each differing frame with its largest channel difference (0-255)
-// and exits 1 on any difference.
+// must equal the same frame rendered in one tab in order. The kinetic family runs too: its primitives (KineticKit)
+// and each format's case marked "determinism" in test/kinetic/*.json. Prints each differing frame with its largest
+// channel difference (0-255) and exits 1 on any difference.
 //   node test/determinism.mjs [outDir] [--only <case-substring>] [--tabs <n>]
 import fs from "node:fs";
 import path from "node:path";
@@ -32,6 +33,11 @@ const CARDS = {
   // laid out under a scaled box differs on its glyph edges on most frames, over 60 to 300 px (up to 95/255).
   "card-lottie": { dur: 3, card: { src: "lottie/title-60fps.json", start: 0.5, box: [10, 30, 80, 25] }, edge: { max: 8, px: 4 } },
 };
+// The kinetic family: its primitives on one frame (KineticKit), and every case in test/kinetic/*.json marked
+// "determinism": true (one per format, over a gradient ground: no assets).
+const KINETIC = Object.fromEntries(fs.readdirSync(path.join(HERE, "kinetic")).filter((f) => f.endsWith(".json")).sort()
+  .flatMap((f) => JSON.parse(fs.readFileSync(path.join(HERE, "kinetic", f), "utf8")))
+  .filter((c) => c.determinism).map(({ name, determinism, ...c }) => [`kinetic-${name}`, c]));
 // A page shot: the camera zooms from the whole window onto a small part of it while scrolling.
 const PRODUCT = { width: 1920, height: 1080, fps: 30, durationInFrames: 90, variant: "linear", url: "https://example.com",
   brand: { ground: "#FFFFFF", ink: "#0A0A0A", muted: "#6B6B6B", accent: "#0A0A0A", dark: false, radius_px: 8,
@@ -107,8 +113,9 @@ for (const plugin of PLUGINS.filter((p) => p.includes(only))) {
 }
 
 const cases = [...[...PLUGINS, "eases"].map((plugin) => [plugin, "Proof", { plugin }]),
-  ...Object.entries(CARDS).map(([name, { edge, ...c }]) => [name, "Preview",
+  ...Object.entries({ ...CARDS, ...KINETIC }).map(([name, { edge, ...c }]) => [name, "Preview",
     { width: 1080, height: 1920, ...c, card: { start: 0, end: c.dur, entrance: "pop", ...c.card } }, edge]),
+  ["kinetic-kit", "KineticKit", {}],
   ["product-page", "ProductVideo", PRODUCT]].filter(([n]) => n.includes(only));
 const t0 = Date.now();
 let total = 0, differ = 0;

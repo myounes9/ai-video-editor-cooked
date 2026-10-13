@@ -234,6 +234,12 @@ A Part is `{src?, label?, lines?, at?, off_at?}` (plan.py turns `icon`/`logo` in
 words on a ground read as AI-made. plan.py skips a beat that names one and says which overlay format
 shows the real source instead. Of the old names, `logo` (-> `logo_sting`) and `flow` still work.
 
+### Kinetic titles (opt-in)
+
+A style that sets `"graphics": {"kinetic": true}` may use the kinetic family (`number_chain`, `kinetic_number`,
+`goal_bar`, `step_build`, `stat_stack`, `kinetic_title`, `cta_follow`): key figures and words over the footage on
+their spoken words, the word captions hidden while one is up. Props, look and rules: `kinetic.md`.
+
 ## Motion design rules
 
 The vendored LottieFiles skill (`../../motion-design/`, MIT) is the reference for timing and review;

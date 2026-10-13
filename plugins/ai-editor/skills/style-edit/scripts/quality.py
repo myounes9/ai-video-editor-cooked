@@ -763,7 +763,7 @@ def run(edit, plan, video, plan_path, style=None, cuts=(), brand=None):
     import numpy as np
     from check import INK_DIFF, footage_affine, stream, TEXT_ANIMS, STATIC_S
     from edit import footage_filter, still_frames
-    from plan import CARD_LEAD_S, ENTRANCES, MOTION_K, OVERLAY_LEAD_S, overlay_led, probe
+    from plan import CARD_LEAD_S, ENTRANCES, KINETIC, MOTION_K, OVERLAY_LEAD_S, hides_captions, overlay_led, probe
     cj = edit / "captions.json"
     cwords = json.loads(cj.read_text(encoding="utf-8")) if cj.exists() else []
     out, meas = [], {}
@@ -1075,7 +1075,10 @@ def run(edit, plan, video, plan_path, style=None, cuts=(), brand=None):
             out.append(F("FAIL" if cr < CONTRAST_FAIL else "WARN", c["start"],
                          f"{name}: its text against the card is {cr}:1 at the worst spot",
                          "a darker or more opaque card ground, or brighter ink (look in style.json)"))
-        # the AI-made look on the settled card (ai_tells.check_still runs generic_pixels and ai_title_card)
+        # the AI-made look on the settled card (ai_tells.check_still runs generic_pixels and ai_title_card); a kinetic
+        # title the style opted in to is its own designed look (references/kinetic.md), not a generic title card
+        if plan.get("kinetic") and anim.get("type") in KINETIC:
+            continue
         from ai_tells import check_still, for_brand
         gen = for_brand(check_still(crop, name), brand)
         rr["generic"] = [f"{g['tell']}: {g['where']}" for g in gen]
@@ -1101,6 +1104,8 @@ def run(edit, plan, video, plan_path, style=None, cuts=(), brand=None):
     # ponytail: the scene's own ink-on-ground pair is not measured here.
     k_cap = MOTION_K.get(plan.get("motion"), 1.0)
     inked = [(c["start"] + 0.31 * k_cap, c["end"]) for c in cards if c.get("layout") == "scene"]
+    # a kinetic title hides the captions while it is up (they fade over 0.24 s either side, ground.ts captionFade)
+    inked += [(c["start"] - 0.24, c["end"] + 0.24) for c in cards if hides_captions(c)]
     for t, chunk in caps:
         if any(a <= t < b for a, b in inked):
             continue
@@ -1134,7 +1139,8 @@ def run(edit, plan, video, plan_path, style=None, cuts=(), brand=None):
                          f"captions read at {lo[0]}:1 against what is around them ({len(bad)} of {len(worst_cap)} samples under {CONTRAST_WARN}:1)",
                          f"plan again: plan.py reads this check and gives each page under {CONTRAST_TARGET}:1 the next treatment "
                          "(shadow, stroke, backing; contrast.json keeps it); then render"))
-    # pages under a landed scene draw in the scene's ink, not the caption colour: not read here
+    # pages under a landed scene draw in the scene's ink, not the caption colour, and pages a kinetic title hides are
+    # not drawn: neither is read here
     wrapped = [w for w in wrapped if not any(a <= w[0] < b for a, b in inked)]
     meas["caption_lines"] = {"pages": len(page_frames), "over": [[round(t, 2), txt, nl] for t, txt, nl in wrapped]}
     if wrapped:

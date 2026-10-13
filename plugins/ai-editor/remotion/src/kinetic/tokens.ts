@@ -1,0 +1,86 @@
+// The kinetic family's design tokens (references/kinetic.md): one type system, one key colour, one grid and one
+// set of timings for every format (number_chain, kinetic_number, goal_bar, step_build, stat_stack, kinetic_title,
+// cta_follow). A format reads these and never sets its own colour, face or timing. Sizes are px on a frame whose short
+// side is 1080; multiply by k = short side / 1080 (fit.ts layoutBox).
+
+// ---------- colour ----------
+/** The key colour: a figure's highlighter marker, and the face of the foil. */
+export const KEY = "#FFD400";
+/** Ink on the marker. */
+export const INK = "#0B0B0B";
+export const WHITE = "#FFFFFF";
+/** The restrained foil: [colour, position] with positions as shares of the cap height from the cap top (0) to the
+ *  baseline (1). Pale just above the caps, #FFD400 across the face, never darker than #E0A300 at the foot. */
+export const FOIL: [string, number][] = [["#FFF3B8", -0.083], ["#FFE36A", 0.083], ["#FFD400", 0.333], ["#FFCC00", 0.611],
+  ["#F2B800", 0.889], ["#E0A300", 1.083]];
+/** The foil's hairline outline and the shade under its upward edges. */
+export const BRONZE = "#5A3700";
+/** The one warm sheen that crosses foil text as it lands (its peak; never white, so it never bleaches). */
+export const SHEEN = "rgba(255,244,200,0.6)";
+/** One soft shadow for white type over footage: lifts it off a bright wall without an outline. */
+export const SOFT = "0 2px 24px rgba(0,0,0,0.38), 0 1px 3px rgba(0,0,0,0.22)";
+/** The connector's underlay: a crisp offset stroke under the white one (no blur: a blurred shadow on a moving
+ *  layer is the least stable thing to draw across render tabs). */
+export const UNDER = "rgba(0,0,0,0.28)";
+
+// ---------- type ----------
+/** Figures: Anton, a tall condensed display face. Supporting lines and labels: Oswald 500 (its sibling). */
+export const DISPLAY = { family: "Anton", weight: 400 };
+export const TEXT = { family: "Oswald", weight: 500 };
+/** Letter-spacing in em: figures run a hair tight, labels are tracked caps, lines a little open. */
+export const TRACK = { figure: -0.005, label: 0.12, line: 0.02 };
+/** A currency sign before a figure and a % after it are set smaller, their cap tops on the figure's cap top. */
+export const PREFIX_K = 0.6;
+export const PERCENT_K = 0.56;
+/** A label's size: k x its figure's size, never under `size` px; to let the figures grow it may step down to kMin x the
+ *  figure and `soft` px, and only when nothing else fits to `floor` px (then a two-word label wraps onto two lines).
+ *  over: how far an outer label may reach past the grid into the side margin. px on a 1080 short side. */
+export const LABEL = { k: 0.2, kMin: 0.16, size: 46, soft: 40, floor: 36, over: 36 };
+
+// ---------- grid and placement ----------
+/** Every lockup hangs from one left text edge and stops at one right edge: 72 and 1008 px of 1080. */
+export const GRID = { left: 72 / 1080, right: 1008 / 1080 };
+/** Where a title may sit when the planner passes no `band`: % of the frame height, over the hair and forehead,
+ *  under the Reels header and above the eyes on a close talking head. */
+export const BAND: [number, number] = [8.6, 26.2];
+/** The Reels header: no title ever starts above this, % of the frame height. */
+export const HEADER = 8;
+
+// ---------- timing (seconds unless named in frames) ----------
+export const TIME = {
+  /** A figure is pulled on (the marker's leading edge runs across) from at - lead over pull. */
+  lead: 0.1, pull: 0.17,
+  /** The marker's leading edge leans this many degrees while it runs, and straightens as it lands. */
+  lean: 10,
+  /** The figure's cut-in settle: from this scale to 1 over settleFrames, expo.out. */
+  settleFrom: 1.06, settleFrames: 6,
+  /** A label lands no earlier than its figure + this. */
+  labelAfter: 0.15,
+  /** A title holds at least this long after its last landing, unless the card ends sooner (the next speech). */
+  hold: 1.2,
+  /** The exit: one feathered sweep, left to right. */
+  exit: 0.23,
+  /** The held lockup's slow push: this much scale over its life. */
+  push: 0.015,
+  /** Line reveal: each character starts this long after the one before and rises over rise. */
+  stagger: 0.018, rise: 0.3,
+  /** A connector draws from the next figure's at - connectorLead over connectorDur: done before it lands. */
+  connectorLead: 0.22, connectorDur: 0.16,
+  /** A marker hands its figure to the foil (pulled off) from the next figure's at - handoffLead over handoff. */
+  handoffLead: 0.3, handoff: 0.15,
+  /** The sheen starts this long after a landing and crosses in sheenDur. */
+  sheenDelay: 0.24, sheenDur: 0.8,
+  /** The top scrim fades in over this before the first landing, and out with the exit. */
+  scrim: 0.35,
+};
+/** Counters start at this share of their value on their first visible frame: no "0" is ever shown. */
+export const COUNT_FROM = 0.4;
+
+// ---------- motion blur ----------
+/** A moving glyph's vertical blur from its travel across one frame: none under minPx, k per px, capped at maxPx
+ *  (px on a 1080 short side). */
+export const BLUR = { k: 0.15, minPx: 6, maxPx: 7 };
+
+// ---------- eases ----------
+export const EASE = { pull: "power3.out", settle: "expo.out", rise: "expo.out", exit: "power2.in", draw: "power3.out",
+  handoff: "power3.in", count: "expo.out", sheen: "power1.inOut", scrimIn: "sine.out", scrimOut: "sine.in" };

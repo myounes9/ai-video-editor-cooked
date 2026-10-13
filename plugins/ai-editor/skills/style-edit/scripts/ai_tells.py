@@ -16,7 +16,7 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
-from plan import EMOJI, STOCK, TYPE_ONLY, icon_only  # noqa: E402
+from plan import EMOJI, KINETIC, STOCK, TYPE_ONLY, icon_only  # noqa: E402
 from quality import ai_title_card, generic_pixels, text_bands  # noqa: E402
 
 LOOK_TSX = HERE.parents[2] / "remotion" / "src" / "look.tsx"
@@ -259,10 +259,14 @@ def check_plan(plan, visuals=None, table=None):
     out = check_look(plan.get("look"), table)
     cards = plan.get("cards") or []
     content = [c for c in cards if c.get("lane") != "logo"]
+    # the kinetic family is words over the footage: a type card unless the style opted in (plan.py writes "kinetic")
+    typed_types = TYPE_ONLY if plan.get("kinetic") else TYPE_ONLY + KINETIC
     for i, c in enumerate(cards):
         where = f"card {i} '{c.get('trigger_word', '?')}' {(c.get('anim') or {}).get('type') or c.get('src') or c.get('lane')}"
         out += check_card(c, where)
-    typed = [c for c in content if (c.get("anim") or {}).get("type") in TYPE_ONLY]
+        if not plan.get("kinetic") and (c.get("anim") or {}).get("type") in KINETIC:
+            out.append(tell("type-card", where, f"{c['anim']['type']} (the style has not opted in to kinetic titles)"))
+    typed = [c for c in content if (c.get("anim") or {}).get("type") in typed_types]
     if content and len(typed) / len(content) >= 0.5:
         out.append(tell("text-only-cards", "cards", f"{len(typed)} of {len(content)} cards are words on a ground"))
     if len(content) >= 4:
@@ -452,6 +456,8 @@ def check_stills(stills, plan):
         f = Path(stills) / f"{4 + i}-card.png"
         if c.get("lane") == "logo" or c.get("src") or not f.exists():   # a capture is the real page, not our design
             continue
+        if plan.get("kinetic") and (c.get("anim") or {}).get("type") in KINETIC:   # the style's own titles (kinetic.md)
+            continue
         img = cv2.imread(str(f))
         if img is None:
             continue
@@ -512,6 +518,17 @@ def demo():
     sc = [{"src": f"images/capture-{i}.png", "entrance": e, "layout": "scene", "transition_in": "cut", "transition_out": "cut"}
           for i, e in enumerate(("pop", "slide", "fade"))]
     assert not [f for f in check_plan({"cards": sc}, [], T) if f["tell"] == "same-transition"]
+    # a kinetic title is a type card unless the plan says the style opted in (plan.py writes "kinetic"); its copy is
+    # still checked either way
+    kin = [{"anim": {"type": "number_chain", "props": {"items": [{"num": "340", "label": "flyers"}, {"num": "6", "label": "tastings"}]}},
+            "entrance": "pop", "box": [0, 0, 100, 100]},
+           {"anim": {"type": "kinetic_title", "props": {"lines": [{"words": [{"text": "unlock your bakery"}]}]}}, "entrance": "pop"},
+           {"src": "images/capture-1.png", "entrance": "pop"}]
+    look = {"preset": "neutral", "font": "Newsreader"}
+    off = check_plan({"cards": kin, "look": look}, [], T)
+    assert {"type-card", "text-only-cards", "slop-copy"} <= ids(off), off
+    on = check_plan({"cards": kin, "look": look, "kinetic": True}, [], T)
+    assert ids(on) == {"slop-copy"}, on
 
     # pixels: the rejected title card (cream ground, centred heading, small line, short bar)
     W, H = 540, 960

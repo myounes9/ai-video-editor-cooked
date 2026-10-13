@@ -5,6 +5,7 @@ import { resolveLook, useFonts } from "./look";
 import { EASES, PERSONALITIES, SplitText, pickMotion, useTl } from "./motion";
 import { footageX } from "./Scene";
 import { ProductVideo, ProductPlan, productMeta } from "./product/ProductVideo";
+import { KineticKit } from "./kinetic/Kit";
 
 // Real values come from plan.json via --props; these only let the studio open.
 const empty: Plan = {
@@ -97,6 +98,8 @@ export const Root: React.FC = () => (
       defaultProps={{ width: 1080, height: 1920, dur: 3, card: { anim: { type: "logo_sting", props: { src: "images/logo.svg" } }, start: 0, end: 3, entrance: "pop",
         box: [8, 20, 84, 30] } } as PreviewProps} />
     <Composition id="Proof" component={Proof} width={1080} height={1080} fps={30} durationInFrames={90} defaultProps={{ plugin: "drawsvg" }} />
+    {/* the kinetic family's primitives on one frame (kinetic/Kit.tsx), for test/determinism.mjs */}
+    <Composition id="KineticKit" component={KineticKit} width={1080} height={1920} fps={30} durationInFrames={105} />
     {/* product-video skill: a website's real UI as a launch video (plan from skills/product-video/scripts/product.py) */}
     <Composition id="ProductVideo" component={ProductVideo} calculateMetadata={productMeta} width={1920} height={1080} fps={30}
       durationInFrames={90} defaultProps={{ width: 1920, height: 1080, fps: 30, durationInFrames: 90, variant: "apple", url: "",

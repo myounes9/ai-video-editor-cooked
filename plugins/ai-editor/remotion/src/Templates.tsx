@@ -10,6 +10,7 @@ import { fitTextOnNLines, measureText } from "@remotion/layout-utils";
 import { Motion, SplitText, camera, exit, prog, rng, useTl } from "./motion";
 import { Fonts, Look, Texture, shadowOf, textCase } from "./look";
 import { Diagram } from "./Diagrams";
+import { KINETIC } from "./kinetic";
 
 export type TP = { p: Record<string, any>; w: number; h: number; look: Look; m: Motion; fonts: Fonts; dur: number; id: string };
 
@@ -315,8 +316,9 @@ const IconBurst: React.FC<TP> = ({ p, w, h, look, m, fonts, dur }) => {
 // Type cards (slam, title, phrase_mark, counter, bar_chart, line_chart, versus, checklist, lower_third,
 // pile) were removed 2026-10-06: words on a ground read as AI-made. The real source, captured and marked,
 // carries those beats (references/visuals.md).
+// The kinetic family (kinetic/, opt-in per style) sets key figures and words over the footage on their words.
 export const TEMPLATES: Record<string, React.FC<TP>> = {
-  flow: Diagram, logo_sting: LogoSting, social_post: SocialPost, arrow_callout: ArrowCallout, icon_burst: IconBurst,
+  flow: Diagram, logo_sting: LogoSting, social_post: SocialPost, arrow_callout: ArrowCallout, icon_burst: IconBurst, ...KINETIC,
 };
 /** Templates that float over the footage with no card under them (flow: its nodes are the cards, Diagrams.tsx). */
-export const FLOATING = new Set(["arrow_callout", "caption_page", "flow"]);
+export const FLOATING = new Set(["arrow_callout", "caption_page", "flow", ...Object.keys(KINETIC)]);

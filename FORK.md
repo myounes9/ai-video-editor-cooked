@@ -89,6 +89,24 @@ Why: a render split across Chrome tabs gave different pixels from a render in on
   in one tab and compares them pixel for pixel; a Lottie card with text is one case.
 - `skills/style-edit/references/motion.md`: the one-line rule.
 
+### 5. Kinetic titles, the foundation (`p2-foundation`, Phase 2)
+
+Why: the fork's goal is graphics through the whole video, and a talking head's own results (a count, a goal, a
+chain of figures) have no page to capture. The kinetic family sets them over the footage, opt-in per style.
+
+- `plugins/ai-editor/remotion/src/kinetic/` (new): the design system (`tokens.ts`, `type.ts`, `time.ts`, `fit.ts`,
+  `primitives.tsx`), `NumberChain.tsx` (the reference format), a registered placeholder per format still to build,
+  `Kit.tsx` (every primitive on one frame, a `KineticKit` composition in `Root.tsx`).
+- `Templates.tsx` registers them as floating templates; `StyleEdit.tsx` fades the word captions out while one is up.
+- `skills/style-edit/scripts/plan.py` (`KINETIC`, `kinetic_on`, `hides_captions`), `check.py`, `ai_tells.py`,
+  `quality.py`: the opt-in (`graphics.kinetic`), the kinetic lane and whole-frame box, part words to times, number
+  grounding on every figure, not a text card once opted in.
+- `references/kinetic.md` (new), pointers in `motion.md` and `contracts.md`; tests in `remotion/test/kinetic/` and
+  `test/determinism.mjs`.
+
+Fork-only: a look this fork chose (words over the footage, a house key colour), against upstream's rule that a
+number is shown inside the page that published it. Off unless a style opts in.
+
 ## What to offer upstream, and what stays here
 
 Neutral fixes, worth a pull request to upstream (each a real bug any user hits):

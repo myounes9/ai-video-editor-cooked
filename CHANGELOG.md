@@ -4,6 +4,34 @@ What changed for every user, newest first.
 
 ## Unreleased
 
+- Kinetic titles, the foundation (fork, opt-in). A style that sets `"graphics": {"kinetic": true}` (style.json or
+  taste) may set key figures and words over the footage on their spoken words; every other style plans and checks
+  exactly as before. The renderer has a new family under `remotion/src/kinetic/` with one design system for all of
+  it (`tokens.ts`): Anton figures and Oswald labels on one grid (72 px side margins at 1080), the key figure pulled
+  on as ink on a flat #FFD400 highlighter marker (leading edge leaning 10° and straightening) with a 1.06 -> 1
+  settle over 6 frames, earlier figures handed to a restrained gold foil (gradient on the glyphs' own caps, quiet
+  bevel, bronze hairline, one warm sheen) so every key figure stays key-coloured, lines rising per character
+  through a mask with a short vertical blur trail (at most 7 px), a 1.5% push while held and one feathered sweep
+  out. Primitives for the formats to come: a counter that starts at 40% of its value and lands on the first frame
+  it reads final, a € at 0.6x and a % at 0.56x cap-aligned, a heavy connector, measured fitting to the grid and to
+  a face band from props (`band`, [top, bottom] % of the frame; default over the hair, under the Reels header).
+  `number_chain` is built (2-4 figures, fixed columns and equal connectors, labels that never land before their
+  figure + 0.15 s nor sit closer than 40 px, a hold of at least 1.2 s after the last landing); `kinetic_number`,
+  `goal_bar`, `step_build`, `stat_stack`, `kinetic_title` and `cta_follow` are registered and stop the render with
+  their name until built. While a kinetic card is up the word captions fade out and come back after it
+  (`hide_captions`, per card, on by default for the family). plan.py passes these beats through only when the style
+  opts in: the whole frame as their box, their own lane (`kinetic`, so one can share the frame with a capture), each
+  part's spoken word turned into its time (`label_word` -> `label_at`, `word_goal` -> `at_goal`), and
+  `"kinetic": true` in plan.json. Without it plan.py skips them with a warning, check.py plan FAILs one as a text
+  card and ai_tells.py flags it (type-card, text-only-cards). With it they are not text cards: ai_tells and
+  quality.py leave their designed look alone, check.py render measures face cover from the brows down (a title sits
+  on the hair and forehead, never the eyes) and quality.py does not read captions they hide. Every figure they show
+  is still checked against what is said, a bare number and a goal's `target` included. Measured on a real take:
+  about +0.03 s a frame at 1080x1920 with a chain up. Docs: `references/kinetic.md`. Tests: made-up cases in
+  `remotion/test/kinetic/number_chain.json` (`test/templates.mjs` now takes a folder of case files), a KineticKit
+  composition with every primitive, both in `test/determinism.mjs` (0 of 255 frames differ across 6 tabs), and the
+  plan.py, check.py and ai_tells.py demos.
+
 ## ai-editor 2.6.2-cooked.1 (fork, 2026-10-13)
 
 Fork release on upstream ai-editor 2.6.2: the four entries below (spoken numbers, final quality, Lottie cards, same frames in every tab). See FORK.md.

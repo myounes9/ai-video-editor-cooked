@@ -95,7 +95,11 @@ ASPECT = {"browser": 1.45, "chat": 1.9, "terminal": 1.8, "toasts": 3.2, "social_
           "video_card": 16 / 9, "flow": 2.4, "icon_burst": 1.6}
 FIXED_BOX = ("logo", "logo_sting", "arrow_callout", "caption_page")   # keep their own box
 LEGACY = ("logo", "flow")
-ANIMS = tuple(dict.fromkeys(TEMPLATES + OVERLAYS + LEGACY))
+# The kinetic family (remotion/src/kinetic, references/kinetic.md): key figures and key words set over the footage on
+# their spoken words, in their own lane, the whole frame as their box (they fit themselves to props.band, over the hair
+# and under the Reels header). Words on the footage, so only when the style opts in: style.json graphics.kinetic.
+KINETIC = ("kinetic_number", "number_chain", "goal_bar", "step_build", "stat_stack", "kinetic_title", "cta_follow")
+ANIMS = tuple(dict.fromkeys(TEMPLATES + OVERLAYS + LEGACY + KINETIC))
 # Where each card sits (references/motion.md "Layout per template"). "scene": a full-frame cut-away on
 # the look's ground. "split": the split layout's top panel. "box": a card over the footage, only for these.
 BOX_OK = ("logo", "logo_sting", "arrow_callout", "caption_page")
@@ -388,8 +392,9 @@ def creator_motion(cards, style, aspect):
     """Deals the creator's measured entrances, exits and ambient moves over the box cards, in her shares
     (props.enter / props.exit / props.ambient; motion.ts plays them in place of dropIn / exitUp / the camera)."""
     g = graphics(style, "entrances")
-    # logo_cluster keeps its own pop round the head: a measured slide carries its logos across the face
-    box = [c for c in cards if c.get("layout") != "scene" and (c.get("anim") or {}).get("type") != "logo_cluster"]
+    # logo_cluster keeps its own pop round the head: a measured slide carries its logos across the face; a kinetic
+    # card lands each part on its own word and leaves in its own sweep
+    box = [c for c in cards if c.get("layout") != "scene" and (c.get("anim") or {}).get("type") not in ("logo_cluster",) + KINETIC]
     for key, out in (("entrances", False), ("exits", True)):
         rows = g.get(key) or []
         if not rows:
@@ -554,6 +559,20 @@ def with_presets(style, mine):
     keys still win (they are merged after this)."""
     from ai_editor import presets
     return presets.apply(style, mine)
+
+
+def kinetic_on(style):
+    """style.json "graphics": {"kinetic": true} (the user's taste.json can set it): the kinetic family may be planned.
+    Off by default: those cards are words over the footage, which the default style never draws."""
+    return bool((style.get("graphics") or {}).get("kinetic"))
+
+
+def hides_captions(card):
+    """The word captions fade out while this card is up (remotion/src/kinetic/index.ts hidesCaptions, StyleEdit.tsx):
+    a kinetic card unless its props say "hide_captions": false; any other card only when they say true."""
+    a = card.get("anim") or {}
+    v = (a.get("props") or {}).get("hide_captions")
+    return v if isinstance(v, bool) else a.get("type") in KINETIC
 
 
 def pictures_only(style):
@@ -727,9 +746,15 @@ def anim_items(visuals, edit_dir=None, style=None):
         if v.get("type") not in ANIMS:
             print(f"warning: unknown anim type {v.get('type')!r} on '{v.get('word')}', skipped", file=sys.stderr)
             continue
+        if v["type"] in KINETIC and not kinetic_on(style or {}):
+            print(f"warning: '{v.get('word')}' {v['type']} is a kinetic title (words over the footage) and this style has "
+                  "not opted in; set \"graphics\": {\"kinetic\": true} in style.json (taste) to plan it. Skipped", file=sys.stderr)
+            continue
         item = {k: v[k] for k in ("word", "nth", "box", "entrance", "hold_s", "layout", "transition_in", "transition_out", "focus") if k in v}
         if "box" in v:
             item["_own_box"] = True
+        if v["type"] in KINETIC:   # its own lane: it may share the frame with a capture (stat_stack beside a screenshot)
+            item["lane"] = "kinetic"
         item["anim"] = {"type": v["type"], "props": template_props(v["type"], v.get("props"))}
         out.append(item)
     return out
@@ -764,7 +789,8 @@ def word_at(words, card, node, key):
 
 def scene_parts(cards, words, edit_dir):
     """Fill in every anim card's props, anywhere they nest: "icon" / "logo" -> "src" (the file capture.mjs
-    fetched), "word" / "off_word" -> "at" / "off_at", seconds after the card lands. A word is the
+    fetched), "word" / "off_word" -> "at" / "off_at", seconds after the card lands (a kinetic card's parts too:
+    "label_word" -> "label_at", "word_goal" -> "at_goal"). A word is the
     first time it is said once the card is up ("nth" picks a later time). No word: the template staggers.
     A prop that wants a file path ("avatar", "logo_src", "src", "a_src", "b_src") may be given as
     {"logo": ...} and becomes the path. caption_page with no "words" gets the words said while it is up.
@@ -780,7 +806,11 @@ def scene_parts(cards, words, edit_dir):
             src = resolve_src(node, edit_dir)
             if src:
                 node["src"] = src
-        for key, out in (("word", "at"), ("off_word", "off_at")):
+        keys = [("word", "at"), ("off_word", "off_at")]
+        if kind_of(card) in KINETIC:   # each part's own word: "label_word" -> "label_at", "word_goal" -> "at_goal"
+            keys += [(k, k[:-5] + "_at") for k in node if k.endswith("_word") and k != "off_word"]
+            keys += [(k, "at_" + k[5:]) for k in node if k.startswith("word_")]
+        for key, out in keys:
             if key in node:
                 at = word_at(words, card, node, key)
                 if at is not None:
@@ -822,8 +852,9 @@ def place_cards(images, words, duration, style, aspect):
     hold, ent, box = card_defaults(style)
     out = []
     logos = [i for i in images if i.get("lane") == "logo"]
-    images = [i for i in images if i.get("lane") != "logo"]
-    for lane in ([i for i in images if "anim" not in i] + [i for i in images if "anim" in i], logos):
+    kinetic = [i for i in images if i.get("lane") == "kinetic"]
+    images = [i for i in images if i.get("lane") not in ("logo", "kinetic")]
+    for lane in ([i for i in images if "anim" not in i] + [i for i in images if "anim" in i], logos, kinetic):
         cards = []
         for group in ([i for i in lane if "anim" not in i], [i for i in lane if "anim" in i]):
             cards += _place(group, words, duration, hold, ent, box, aspect)
@@ -1855,7 +1886,14 @@ def build(style, words, meta, images=(), aspect="auto", cuts=(), visuals=(), edi
               file=sys.stderr)
     zooms = clear_entrances(zooms, cards)
     scenes = [c for c in cards if c["_f"] == "scene"]
-    rest = [c for c in cards if c["_f"] != "scene"]
+    kinetic = [c for c in cards if c["_f"] != "scene" and kind_of(c) in KINETIC]
+    rest = [c for c in cards if c["_f"] != "scene" and kind_of(c) not in KINETIC]
+    for c in kinetic:   # the whole frame: the card fits itself to props.band, clear of the head's eyes and the app's UI
+        c["box"] = [0, 0, 100, 100]
+    if kinetic and split_now:
+        print(f"warning: {len(kinetic)} kinetic card(s) dropped: they float over the full-frame speaker, and the split "
+              "layout has no room for them (plan with --layout overlay)", file=sys.stderr)
+        kinetic = []
     if split_now:
         art = split_art_box(seam)
         full_y = cap["y_pct"]   # where captions sit while the speaker has the whole frame
@@ -1882,7 +1920,7 @@ def build(style, words, meta, images=(), aspect="auto", cuts=(), visuals=(), edi
         if behind:
             rest = tuck_behind(rest, face, aspect)
         out = dict(head)
-    cards = clear_caption_paths(creator_motion(sorted(rest + scenes, key=lambda c: c["start"]), style, aspect), cap["y_pct"], aspect)
+    cards = clear_caption_paths(creator_motion(sorted(rest + scenes + kinetic, key=lambda c: c["start"]), style, aspect), cap["y_pct"], aspect)
     for c in cards:
         px = c.get("layout") != "scene" and c.get("size") and capture_xh(c, aspect)
         if px and px < READ_XH and (aspect == "9:16" or c.get("format") == "sticker") and not pictures_only(style):
@@ -1901,6 +1939,8 @@ def build(style, words, meta, images=(), aspect="auto", cuts=(), visuals=(), edi
     extra = {"cover": cover} if cover and not split_now else {}
     if pictures_only(style):
         extra["card_kinds"] = list(style["card_kinds"])
+    if kinetic_on(style):   # check.py and ai_tells.py read it: kinetic cards are this style's own, not text cards
+        extra["kinetic"] = True
     texts = text_items(visuals, words, duration, cards, face, cap["y_pct"])
     if texts:
         extra["texts"] = texts
@@ -2338,6 +2378,22 @@ def demo():
     sp2 = build(style, words, vm, [{"src": "images/c.png", "word": "every", "nth": 1}], visuals=tv[:1])
     assert "layout" not in sp2 and [c["layout"] for c in sp2["cards"]] == ["box", "scene"], sp2["cards"]
     assert build(style, words, vm, visuals=[{"word": "zooms", "kind": "anim", "type": "counter", "opt_in": True, "props": {"to": 3}}])["cards"] == []
+    # the kinetic family: skipped unless the style opts in (graphics.kinetic); then planned in its own lane over the whole
+    # frame, each part's word turned into its time, and the plan says so for check.py and ai_tells.py
+    kv = [{"word": "every", "nth": 1, "kind": "anim", "type": "number_chain", "hold_s": 3, "props": {"items": [
+        {"num": "3", "word": "every", "label": "videos", "label_word": "video"}, {"num": "1", "word": "zooms", "label": "edit"}]}}]
+    off = build(style, words, vm, visuals=kv)
+    assert off["cards"] == [] and "kinetic" not in off, off["cards"]
+    kp = build({**style, "graphics": {"kinetic": True}}, words, vm, [{"src": "images/c.png", "word": "every", "nth": 1}], visuals=kv)
+    kc = next(c for c in kp["cards"] if (c.get("anim") or {}).get("type") == "number_chain")
+    ev, vw = (next(w["start"] for w in words if w["text"] == x) for x in ("every", "video"))
+    assert kp["kinetic"] is True and kc["box"] == [0, 0, 100, 100] and kc["lane"] == "kinetic" and kc["start"] == round(ev - CARD_LEAD_S, 3), kc
+    it = kc["anim"]["props"]["items"]
+    assert it[0]["at"] == CARD_LEAD_S and it[0]["label_at"] == round(vw - kc["start"], 3) and it[1]["at"] > it[0]["label_at"], it
+    assert not {"enter", "exit", "ambient"} & set(kc["anim"]["props"]) and len(kp["cards"]) == 2, kp["cards"]   # beside the capture
+    assert not set(KINETIC) & set(TYPE_ONLY) and all(t in ANIMS for t in KINETIC)
+    assert hides_captions(kc) and not hides_captions({"anim": {"type": "number_chain", "props": {"hide_captions": False}}}) \
+        and hides_captions({"anim": {"type": "flow", "props": {"hide_captions": True}}}) and not hides_captions({"src": "images/c.png"})
     # an overlay goes to the free region its picture fills best; on vertical only the band above the head is centred
     # (check.py plan FAILs a card beside the head), so a tall one goes there too
     hd_face = {"step_s": 0.5, "heads": [{"t": float(i) / 2, "box": [32, 34, 28, 23]} for i in range(30)]}
