@@ -7,8 +7,15 @@ The page only queues jobs. Claude does every job with the usual skills and repor
 never decides anything itself.
 
 The `nextwork-editor` command (`setup.py install-launcher`) starts Claude Code in the library with the
-prompt "/ai-editor:start open the home page", or reopens the page when it is already served. Inside
-Claude Code, `/ai-editor:start` and "open the home page" do the same.
+prompt "/ai-editor:start open the home page". When the page is already served it reopens it, and when no
+Claude is listening it also opens a new Terminal window with a listening Claude (`--window-only` skips
+that). Inside Claude Code, `/ai-editor:start` and "open the home page" do the same.
+
+**Connect Claude.** When nobody listens, the page shows one button, Connect Claude. It opens a new
+Terminal window in the library running Claude Code with the prompt `/ai-editor:start listen for jobs` and
+only the editor's own commands allowed (`launcher.connect`, one at a time: a second press within a minute
+opens nothing). On that prompt run `python3 "$H" serve --no-open` and `python3 "$H" wait` (both in the
+background) and carry on as below. Do not say the page is open: it already is.
 
 `H="${CLAUDE_PLUGIN_ROOT}/lib/ai_editor/home.py"`. `python3` on Mac and Linux, `py` on Windows.
 
@@ -132,7 +139,7 @@ Five prompts, each one the user can paste into Claude Code as it is. Every numbe
 
 ### `JOB video <path> as=<mine|@handle|defaults> aspect=<9:16|16:9> edit=<dir> root=<dir>`
 ### `JOB video takes=<dir>/takes.txt as=... aspect=... edit=<dir> root=<dir>`
-### either one with ` script=<edit>/script.md` before `root=`
+### either one with ` script=<edit>/script.md` and/or ` skill=<skill>` before `root=`
 
 The user picked clips and a style and pressed "Make my video" (or "Start the cut" on a first run).
 `edit=` is the edit folder the page already made and listed in the library: use it, never make
@@ -148,6 +155,7 @@ no question: the page asked it). "Separate videos" arrives as one JOB per clip; 
 `script=`: the user added their script on the page. The page wrote it to `<edit>/script.md` (copy it
 there if the path is elsewhere). Pass `--script <edit>/script.md` to `transcribe.py`; the cut then runs
 `script_match.py` before deciding spans (cut skill step 2).
+`skill=`: a skill style (its `style.json` has `"skill"`), see Skill style below.
 
 The window turns into the review page as soon as it has a URL, so open it FIRST, on the raw clip
 (after the join for `takes=`), before transcribing:
@@ -172,6 +180,24 @@ the cut: run `wait` and carry on there. `status video --done` once round 1 is up
 run `build_timeline.py`, `render.py`, `verify_cut.py`, then `review.py <edit> round --video <edit>/cut.mp4`
 (`../../style-edit/references/review.md`, Transcript edits).
 
+#### Skill style
+
+The style points at a skill, so that skill makes the edit instead of style-edit. Cut as usual (start
+steps 2-4: the profile, blend and cut still run, so the fallback has the style's numbers). After the
+cut's approve run `/<skill>` on `<edit>/cut.mp4`: it makes its own captions, visuals and render. Then
+hand its render back as the edit round, as style-edit step 8 does:
+`python3 "$R" <edit> round --stage edit --video <its render>`, then `wait` on the page as usual.
+
+When `<skill>` is not in this session's skill list, never switch silently:
+`python3 "$R" <edit> status "This style needs the <skill> skill, which this Claude session doesn't have"`,
+then ask: **Continue with the generic edit, using the style's numbers (Recommended)** / **Stop here**.
+Continue: style-edit with `<edit>/style.json` as usual. Stop: `status video --failed "This style needs
+the <skill> skill. Open Claude Code where that skill is loaded and make the video again."`.
+
+Notes on a skill style's video become rules in that skill's own SKILL.md (`## Learned rules`), never in a
+settings file: the final approve's Teach panel does it (`review.py learn --done`), as do `learn --scope this-style` and a
+`style-change` job on a skill style, through the skill-improver skill.
+
 ### `JOB style-change <my-style|@handle> [style=<style.json>] text=<the user's words>`
 
 The user typed what to change on a style's page (My styles, "Tell it what to change"). Turn the words
@@ -193,14 +219,26 @@ and need no job.
 The user pressed "Log in with your browser". Follow the setup skill's step 6 (Modal), reporting
 each of its steps with `status modal --step "..."`, and `status modal --done` when it works.
 
+### `JOB setup`
+
+The user pressed Start setup on the first-run Home. Run `setup.py install-all --report` in the background
+(the setup skill's step 0); it reports its own steps onto this job, as in Setup from the page below.
+
 ### `JOB update`
 
 The user pressed Update in Settings (the page saw a newer version on GitHub main than this plugin.json).
-The update skill handles it when it is installed. Without it: for a marketplace install run
-`claude plugin marketplace update nextwork` then `claude plugin update ai-editor@nextwork` from the shell,
-each reported with `status update --step "..."`; if the `claude plugin` commands are missing, tell the user
-to type `/plugin marketplace update nextwork` and `/plugin update ai-editor@nextwork`. Then
-`status update --done` and ask them to type `/reload-plugins`. A git clone: `git pull` in the plugin folder.
+Do it here, not through the update skill, and end the job either way so the page never hangs on it:
+
+```bash
+python3 "$H" status update --step "Getting the new version"
+python3 "${CLAUDE_PLUGIN_ROOT}/skills/update/scripts/update.py" market
+```
+
+Exit 0: `status update --done`, then tell the user to type `/reload-plugins`. Exit 1 (no `claude`
+command, or it failed): `status update --failed "Type /plugin marketplace update nextwork, then /plugin update
+ai-editor@nextwork, then /reload-plugins."` and say the same lines. A git clone instead of the marketplace
+plugin: `git pull` in the plugin folder, then `--done`. Keep your background `wait` running afterwards: the
+update never ends listening.
 
 ### `JOB cancel teardown`
 

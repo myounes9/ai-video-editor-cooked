@@ -1,6 +1,6 @@
 ---
 name: setup
-description: Installs and checks everything the AI video editor needs on Mac, Windows or Linux (Python, ffmpeg, Node, git, the Python packages, the free transcription model and the Remotion renderer): on a first run it opens the editor's window first, then installs in the background. Then saves the user's style once. Also walks through the optional API keys (Gemini for reading a creator's look, ElevenLabs for verbatim transcripts), the optional CrisperWhisper model, cloud renders on Modal ($30 free credit a month), the GitHub CLI for free GitHub Actions renders and AWS Lambda. Use when the user says "set up the editor", "install ai-editor", "setup", "finish setup", "set up Modal", "cloud renders", "add my Gemini key", "add my ElevenLabs key", when they have just installed the plugin, or when another ai-editor or creator-teardown step fails because a tool is missing. Not for editing a video (that is start) and not for changing one edit preference (that is taste).
+description: Installs and checks everything cooked. needs on Mac, Windows or Linux (Python, ffmpeg, Node, git, the Python packages, the free transcription model and the Remotion renderer): on a first run it opens the editor's window first, then installs in the background. Then saves the user's style once. Also walks through the optional API keys (Gemini for reading a creator's look, ElevenLabs for verbatim transcripts), the optional CrisperWhisper model, cloud renders on Modal ($30 free credit a month), the GitHub CLI for free GitHub Actions renders and AWS Lambda. Use when the user says "set up the editor", "install ai-editor", "setup", "finish setup", "set up Modal", "cloud renders", "add my Gemini key", "add my ElevenLabs key", when they have just installed the plugin, or when another ai-editor or creator-teardown step fails because a tool is missing. Not for editing a video (that is start) and not for changing one edit preference (that is taste).
 license: MIT
 compatibility: Claude Code or any agent with a shell, on Mac, Windows or Linux. Installs Python 3.10+, ffmpeg 4.4+, Node 20+, git and the Remotion renderer; needs internet. Runs from the full ai-editor plugin folder.
 ---
@@ -165,7 +165,10 @@ is, what it costs, the card, then four checked steps.
 
 Run doctor again until it prints `Ready.` Skipped keys show as `--`; that is fine. Then
 `python3 "$U" install-launcher`: the `nextwork-editor` command opens the editor's window from any
-terminal (`uninstall-launcher` takes it off).
+terminal, with a listening Claude (`--window-only`: the window alone; `uninstall-launcher` takes it off).
+
+Then say this line once: "Turn on auto-updates: type /plugin, open Marketplaces, pick nextwork,
+choose Enable auto-update." Never write to their `~/.claude` files for them.
 
 ## 8. Your style (asked once)
 

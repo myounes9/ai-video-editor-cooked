@@ -99,6 +99,37 @@ sits in the split panel when the layout is split, else a box. A beat with its ow
 `"layout": "split"` (vertical only) puts a card in the split layout's top panel; `--layout split`
 does it for the whole edit. Neither is the default any more.
 
+## Card edit: pictures only
+
+A style.json `"card_kinds"` that leaves out `"text"` (the sample Card edit: `["capture", "logo", "photo",
+"animation"]`; a user's own `own-card-edit` style with no card settings takes the sample's, profile.py
+`like_sample`) makes every card a real picture: a screenshot of the page, app, repo or post named, a logo, the
+user's photo, or an animation built from real parts. In that style:
+
+- capture.mjs shoots a `sticker` beat as a `shot`, at a 640 px viewport (the page's narrow layout, as a phone
+  shows it), and with a `find` mark and no `clip` frames a band-shaped window (1.5:1, at most 1.2 times the mark wide) round the mark, so the
+  named thing fills the band above the head.
+- plan.py drops a re-set sentence (a capture.mjs sticker, `xh` in images.json), draws a sticker of the page as
+  a shot, and keeps a screenshot whose small text would read under 28 px as a picture (its push-in carries the
+  mark) instead of cutting it to a line of words; check.py plan FAILs a sentence on white and WARNs small text.
+- route.py prints the allowed kinds; a text card or chart in a creator's mix routes to `capture:shot`.
+- `"behind": true` tucks the card behind the speaker's hair (matte.py), and `graphics.per_min` sets the rate.
+
+A line that names nothing real gets a logo of a brand it names, an animation of the idea, or no card.
+
+A logo in a card edit is a card of its own on white in the band (plan.py `logo_items(card=True)`), not the small
+tile above the captions. Three word overlays go with the cards (plan.json `texts`, remotion `Texts.tsx`), each
+inside the reels safe zone:
+
+| beat | draws |
+|---|---|
+| `{"kind": "title", "text": "line one\nline two"}` (no `word`: from 0 s; with `word`, `nth`: on that word, e.g. the CTA) | each line its own off-white pill, bold near-black type, centred at the top of the safe zone (y 13.6%, not the dead zone above it), `hold_s` (3.8). A card up with it moves below the pills, or starts when the title ends |
+| `{"kind": "list", "items": [{"text", "word", "nth"}], "until"?: word}` | a running numbered list at the left, each line on its word, held to `until` (else the end); under the chin, else just above or below the captions, never over the head; skipped in a shot too close for it |
+| `{"kind": "stamp", "word", "nth"}` | a red circled X drawn over the card up on that word ("that one doesn't count") |
+
+Title and list words are the speaker's (a title may be the video's promise in a few of their words); emoji are
+stripped like everywhere else.
+
 ## From the teardown
 
 A creator-teardown style.json carries measured fields beyond captions and pace. Each one is used only when
@@ -224,6 +255,8 @@ python3 "$S/source.py" credits edits/<name>                          # credits.t
 Every time a brand or product is named in passing: `{"kind": "logo", "word": "Claude", "nth": 1,
 "brand": "claude"}`, plus `"domain": "example.com"` for brands Simple Icons lacks. It runs in its
 own lane above the captions for 1.2 s and is dropped while a scene or the split panel is up.
+When the logo-pack skill ran (`edits/<name>/logos.json`), its files are already checked in `images/`:
+route.py lists each sentence's `logos` (the `brand` to use), and each `together` group is one `logo_cluster`.
 
 ### Overlay formats (anim)
 
@@ -268,8 +301,10 @@ The pick-to-beat table and its rules: `shapes.md`.
 
 ## Safe areas
 
-On vertical, `plan.py` keeps every box card and the captions out of the right 14% (the like and
-share rail) and the bottom 22% (the username and description); overlays may use the top bar's
-margin from 10% down (it holds only small text). Overlays never cover the head. A scene's content sits in the renderer's scene
-box, clear of the same areas. In split, a panel card fills the top panel between the top 14% and
-the seam.
+On vertical, nothing a plan draws leaves the reels safe zone: x 60-940, y 250-1440 of 1080x1920
+(`plan.py` SAFE: 5.6% left, 13.1% top, 13% right, 25% bottom). Cards and captions are centred, so they
+keep the 13% margin on both sides (x 140-940); an overlay beside the head may reach x 60. That keeps
+the top bar, the like and share rail and the username and description clear, and `check.py plan`
+FAILs any card (behind cards too) or caption width outside it. Overlays never cover the head. A
+scene's content sits in the renderer's scene box, inside the same zone. In split, a panel card fills
+the top panel between the top 13.1% and the seam.

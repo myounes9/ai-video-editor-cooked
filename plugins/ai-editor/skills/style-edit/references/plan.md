@@ -14,11 +14,14 @@ Moved out of SKILL.md step 4. Read the section the step points at.
 ## Prepared while the cut was reviewed
 
 Called by start for a whole edit, the cut skill starts the `visual-prep` agent as the cut page opens.
-It does steps 1-3 and `face.py` on the first cut and copies its `decisions.json` to
-`prep-decisions.json`. Every visual it writes names a word and which time it is said (`nth`), never a
-second. It plans, renders and uploads nothing, and spends nothing.
+It does steps 1-3, `face.py`, the plan, `check.py plan` and the stills sheet on the first cut, and copies
+its `decisions.json` to `prep-decisions.json`. Every visual it writes names a word and which time it is
+said (`nth`), never a second. It renders no video, uploads nothing and spends nothing.
 
-Wait for its JSON if it is still running. Cut approved unchanged: go to step 4. Cut changed after notes:
+Wait for its JSON if it is still running. Cut approved unchanged and `stills/sheet.png` there: go straight
+to step 5 (look at the sheet, ask Approve). No sheet (it skipped step 6 for the cutout or music): step 4.
+Never run route.py again, rewrite visuals.json or ask what to show: the sheet shows the visuals and takes
+the changes. Cut changed after notes:
 
 ```bash
 python3 "${CLAUDE_PLUGIN_ROOT}/skills/cut/scripts/retakes.py" remap edits/<name>
@@ -30,7 +33,7 @@ python3 "$VPY" "$S/face.py" edits/<name>
 `remap` re-points each beat in visuals.json and images.json to the new cut and prints the ones it
 dropped because their word was cut. Add a beat (step 3) for a line the re-cut brought back that names
 something real, then run `capture.mjs` again (it keeps files already fetched). Captures and logos do
-not change with the cut. Then step 4.
+not change with the cut. Then step 4 (plan and stills again: the sheet was for the old cut).
 
 ## No creator: the default style
 
@@ -80,7 +83,10 @@ that fails to load stops the render. Cards still come from visuals.json (step 3)
   face.json says it is not) until the first sentence ends. The photo is the first image in images.json: the
   user's own photo (`assets_dir`) or a capture, never a generated image; none means no photo. No zooms, no
   other cards, visuals.json is not drawn. Everything stays inside x 60-940, y 250-1440 of 1080x1920. Cut
-  lightly for it: `--max-pause 0.5` on the cut.
+  lightly for it: `--max-pause 0.5` on the cut. Write the title yourself (`--title`): one short lowercase
+  line in the speaker's words that says what a stranger gets for staying (a number, a surprise, a how), never
+  the first sentence cut short. Give the photo on the first sentence's key word: the user's own photo, else a
+  capture of the thing that line names; no real picture fits, leave it out.
 - **Timing:** each card lands 0.1 s before its word, landing as the render check measures it (an
   overlay starts `OVERLAY_LEAD_S` earlier, the time it takes to carry half its ink; both read it); every part, bar, item and capture mark lands on
   its own word (`word` / `at_word`); a caption_page gets the words said while it is up.
@@ -99,7 +105,7 @@ that fails to load stops the render. Cards still come from visuals.json (step 3)
 
 ## Behind the speaker (the cutout)
 
-When the profile says `"behind": true` (or `plan.py ... --behind on`), shots, stickers, social
+When the profile or the style.json says `"behind": true` (the sample Card edit style does; `--behind on|off` overrides both), shots, stickers, social
 posts and logo clusters get `"layer": "behind"`: they draw over the footage and under a cutout of
 the speaker, and a card above the head grows down behind the hair while its marked words stay
 clear of the head. Overlay layout only. Then cut the speaker out where those cards are up:

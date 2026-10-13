@@ -113,6 +113,13 @@ Fork-only, a choice of this fork rather than a fix:
 
 Run from the repo root, on a clean tree. Do the merge on a branch, never straight on `main`.
 
+Upstream ships a helper for exactly this (`plugins/ai-editor/skills/update`; say "update the editor" in
+Claude Code from this folder, or run it by hand): `update.py check` lists upstream's new commits and the
+files both sides changed, `update.py merge` makes a backup branch and merges `upstream/main` (it stops
+on conflicts and lists them), `update.py verify` runs the fast checks, and `update.py rollback` returns
+to the backup. It never pushes. Use it for steps 1-3, then run the full gates below, which are wider
+than `verify` (the renderer tests, golden and smoke).
+
 1. Get the release:
 
    ```bash
@@ -171,6 +178,12 @@ Run from the repo root, on a clean tree. Do the merge on a branch, never straigh
    claude plugin marketplace add <the fork on GitHub, or this folder's path>
    claude plugin install ai-editor@nextwork --scope local   # from the folder you edit in; or --scope user
    ```
+
+   Also point the marketplace entry in `~/.claude/settings.json` at the fork, or a later session can
+   add upstream's `nextwork` back:
+   `"extraKnownMarketplaces": {"nextwork": {"source": {"source": "github", "repo": "<you>/ai-video-editor-cooked"}}}`.
+   Reinstall creator-teardown from the same marketplace (`claude plugin install creator-teardown@nextwork`,
+   same scope), and check both with `claude plugin list`.
 
    After every release:
 

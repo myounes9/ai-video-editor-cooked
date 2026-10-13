@@ -1,25 +1,31 @@
 #!/usr/bin/env python3
-"""nextwork-editor: open the AI editor's window, with Claude Code behind it. Stdlib only.
+"""nextwork-editor: open the cooked. window, with Claude Code behind it. Stdlib only.
 
-    nextwork-editor                 open the window (the same address every time)
+    nextwork-editor                 open the window (the same address every time), with a listening Claude behind it
+    nextwork-editor --window-only   open the window only, never start Claude
     nextwork-editor --dry-run [--os Darwin|Linux|Windows]   print what it would run, and where
     open_claude(folder, prompt)     the home page's "Open a new Claude for this video": a new terminal window
+    connect(folder)                 the home page's "Connect Claude": a new terminal with a listening Claude
     python3 launcher.py demo        self-check
 
 `setup.py install-launcher` puts the `nextwork-editor` command on the PATH; `uninstall-launcher` takes
 it off. Inside Claude Code the same thing is `/ai-editor:start`.
 
 When the home page is already served (a Claude Code session has it open), its address opens again in
-the browser and nothing else starts. Otherwise Claude Code starts in the library folder (library.py)
+the browser, and when no Claude is listening (`home.py wait`), connect() opens one in a new terminal
+window. Otherwise Claude Code starts in the library folder (library.py)
 with one first prompt, PROMPT, and opens the page there, so Claude is listening behind it. The user's
-permission settings apply as always: nothing is bypassed.
+permission settings apply as always: nothing is bypassed. The session gets one extra settings layer
+(--settings, allow_rules): the editor's own commands run without an Allow prompt, nothing else.
 """
+import json
 import os
 import platform
 import shlex
 import shutil
 import subprocess
 import sys
+import time
 import webbrowser
 from pathlib import Path
 
@@ -29,6 +35,16 @@ import library  # noqa: E402
 
 PLUGIN = Path(__file__).resolve().parents[2]          # plugins/ai-editor
 PROMPT = "/ai-editor:start open the home page"
+LISTEN = "/ai-editor:start listen for jobs"   # serve --no-open + wait: takes the queued jobs, not one video
+CONNECT_S = 60   # how long a connect counts as pending: the page shows "Opening Claude..." and no second terminal opens
+
+
+def allow_rules(plugin=PLUGIN):
+    """The narrowest Allow rules for what the skills run: the plugin's own scripts (python3 / py / node, the path
+    quoted or not), ffmpeg, ffprobe and the Remotion CLI. Never Bash on its own, never another folder."""
+    root = Path(plugin).as_posix()
+    own = [f"Bash({exe} {q}{root}/*)" for exe in ("python3", "py", "node") for q in ("", '"')]
+    return own + ["Bash(ffmpeg *)", "Bash(ffprobe *)", "Bash(npx remotion *)"]
 
 
 def plan(os_name=None, plugin=PLUGIN, claude=None, prompt=PROMPT):
@@ -40,7 +56,7 @@ def plan(os_name=None, plugin=PLUGIN, claude=None, prompt=PROMPT):
     cmd = [claude]
     if "/.claude/plugins/" not in Path(plugin).as_posix() + "/":
         cmd += ["--plugin-dir", str(Path(plugin).parent)]
-    return cmd + [prompt]
+    return cmd + ["--settings", json.dumps({"permissions": {"allow": allow_rules(plugin)}}), prompt]
 
 
 def show(cmd, os_name):
@@ -88,15 +104,45 @@ def open_claude(folder, prompt, os_name=None, run=start):
     run(argv, folder, os_name) -> bool; the demos pass a recorder so no real window opens."""
     os_name = os_name or platform.system()
     cmd = plan(os_name, prompt=prompt)
+    # the window's own folders: a Terminal opened by osascript does not inherit them, so the new Claude would
+    # listen on another home. Windows and x-terminal-emulator start as children and inherit them.
+    pairs = [f"{k}={os.environ[k]}" for k in ("AI_EDITOR_HOME", "AI_EDITOR_LIBRARY") if os.environ.get(k)]
+    if pairs and os_name != "Windows":
+        cmd = ["env", *pairs] + cmd
     text = (f"cd /d {show([str(folder)], os_name)} && " if os_name == "Windows" else f"cd {show([str(folder)], os_name)} && ") \
         + show(cmd, os_name)
     argv = terminal(folder, cmd, os_name)
     return (bool(argv) and run(argv, folder, os_name)), text
 
 
+def connect(folder, now=None):
+    """The page's "Connect Claude" and nextwork-editor: a new terminal running Claude with LISTEN, one at a time.
+    (status, command to copy): "listening" (one already is), "pending" (one opened under CONNECT_S ago),
+    "opened", or "manual" (no terminal opened: the command is for the user to run)."""
+    if home.listening():
+        return "listening", ""
+    now = now or time.time()
+
+    def claim(d):
+        if now - (d.get("connect") or 0) < CONNECT_S:
+            return False
+        d["connect"] = now   # the page reads it; home.py wait clears it once Claude listens
+        return True
+    if not home.update(claim):
+        return "pending", ""
+    opened, text = open_claude(folder, LISTEN)
+    if not opened:
+        home.update(lambda d: d.pop("connect", None))
+    return ("opened" if opened else "manual"), text
+
+
+CONNECTED = {"listening": "Claude is already listening.", "pending": "Claude is already starting in another Terminal window.",
+             "opened": "Claude is starting in a new Terminal window. It picks up what you make in the window."}
+
+
 def main(argv=None):
     a = list(sys.argv[1:] if argv is None else argv)
-    dry = "--dry-run" in a
+    dry, window_only = "--dry-run" in a, "--window-only" in a
     os_name = a[a.index("--os") + 1] if "--os" in a else platform.system()
     lib = library.path(make=not dry)
     url = home.running()
@@ -104,7 +150,17 @@ def main(argv=None):
         print(f"Opening your editor...\n  Already open at {url.split('?')[0]}")
         if not dry:
             webbrowser.open(url)
+        if not window_only:
+            st, text = ("listening" if home.listening() else "opened", "") if dry else connect(lib)
+            print("  " + CONNECTED.get(st, f"Run this in a new Terminal window so Claude picks up your jobs:\n  {text}"))
         return 0
+    if window_only:   # the page alone, served from this terminal; jobs wait until a Claude listens
+        serve = [sys.executable, str(Path(home.__file__)), "serve"]
+        if dry:
+            print(show(serve, os_name))
+            return 0
+        print("Opening your editor...\n  Window only: Claude is not started. Keep this terminal open while you use it.", flush=True)
+        return subprocess.call(serve)
     cmd = plan(os_name)
     if dry:
         print(f"cd {show([str(lib)], os_name)}\n{show(cmd, os_name)}")
@@ -122,6 +178,7 @@ def main(argv=None):
 
 
 def demo():
+    global open_claude
     import contextlib
     import io
     import tempfile
@@ -130,8 +187,12 @@ def demo():
     os.environ["AI_EDITOR_LIBRARY"] = str(tmp / "My Videos")
     for os_name in ("Darwin", "Linux", "Windows"):
         cmd = plan(os_name, plugin=Path("/repo/plugins/ai-editor"), claude="claude")
-        assert cmd == ["claude", "--plugin-dir", str(Path("/repo/plugins")), PROMPT], cmd
+        assert cmd[:3] == ["claude", "--plugin-dir", str(Path("/repo/plugins"))] and cmd[-1] == PROMPT, cmd
         assert not any("dangerously" in c or "bypass" in c.lower() for c in cmd), "never bypass permissions"
+        rules = json.loads(cmd[cmd.index("--settings") + 1])["permissions"]["allow"]
+        assert "Bash(python3 /repo/plugins/ai-editor/*)" in rules and "Bash(ffmpeg *)" in rules, rules
+        assert all(r.startswith("Bash(") and r != "Bash(*)" and len(r) > 12 for r in rules), "never broad Bash"
+        assert set(json.loads(cmd[cmd.index("--settings") + 1])) == {"permissions"}, "only Allow rules"
         cached = plan(os_name, plugin=Path.home() / ".claude/plugins/cache/nextwork/ai-editor/2.3.0", claude="claude")
         assert "--plugin-dir" not in cached, cached
         o = io.StringIO()
@@ -165,11 +226,50 @@ def demo():
     try:
         o = io.StringIO()
         with contextlib.redirect_stdout(o):
-            assert main([]) == 0
+            assert main(["--window-only"]) == 0   # Claude's side is checked below, with the terminal faked
         assert opened == ["http://127.0.0.1:47821/?t=x"] and "Already open at http://127.0.0.1:47821/" in o.getvalue()
         assert "t=x" not in o.getvalue(), "the token is not printed"
     finally:
         home.running, webbrowser.open = real
+    # "Connect Claude": the start prompt and the narrow settings layer, one terminal at a time (recorded, never run)
+    real_open, ran = open_claude, []
+    open_claude = lambda f, p: real_open(f, p, "Darwin", run=lambda w, fo, o: ran.append(w) or True)
+    try:
+        st, text = connect(tmp)
+        assert st == "opened" and len(ran) == 1 and text.endswith(shlex.quote(LISTEN)), (st, text)
+        script = ran[0][2]   # osascript -e '<the Terminal script>'
+        assert LISTEN in script and "Bash(python3 " in script and "Bash(ffmpeg *)" in script and "Bash(*)" not in script, script
+        os.environ["AI_EDITOR_HOME"] = str(tmp / "home")
+        assert " && env " + shlex.quote(f"AI_EDITOR_HOME={tmp / 'home'}") + " " in open_claude(tmp, LISTEN)[1], "the new Claude uses the window's home"
+        assert "dangerously" not in script and "bypass" not in script.lower(), "never bypass permissions"
+        ran.clear()
+        assert connect(tmp) == ("pending", "") and not ran, "no second terminal while one is pending"
+        assert connect(tmp, now=time.time() + CONNECT_S + 1)[0] == "opened" and len(ran) == 1, "retry after the minute"
+        home.update(lambda d: d.pop("connect", None))
+        (home.home() / ".listening").write_text("sess-A", encoding="utf-8")
+        ran.clear()
+        assert connect(tmp) == ("listening", "") and not ran, "one is listening: nothing opens"
+        # nextwork-editor with the window open: Claude only when nobody listens, never with --window-only
+        home.running, webbrowser.open = (lambda: "http://127.0.0.1:47821/?t=x"), (lambda u: None)
+        for args, listen, want, n in (([], True, "already listening", 0), (["--window-only"], False, None, 0),
+                                       ([], False, "starting in a new Terminal", 1)):
+            home.update(lambda d: d.pop("connect", None))
+            (home.home() / ".listening").unlink(missing_ok=True)
+            if listen:
+                (home.home() / ".listening").write_text("sess-A", encoding="utf-8")
+            ran.clear()
+            o = io.StringIO()
+            with contextlib.redirect_stdout(o):
+                assert main(args) == 0
+            assert len(ran) == n and (want in o.getvalue() if want else "Claude" not in o.getvalue()), (args, o.getvalue())
+        o = io.StringIO()
+        home.running = lambda: None
+        with contextlib.redirect_stdout(o):
+            assert main(["--window-only", "--dry-run"]) == 0
+        assert o.getvalue().strip().endswith("home.py serve") and "--settings" not in o.getvalue(), o.getvalue()
+        print("connect  ok: start prompt, narrow Allow rules, one at a time, --window-only")
+    finally:
+        open_claude, (home.running, webbrowser.open) = real_open, real
     shutil.rmtree(tmp, ignore_errors=True)
     print("launcher demo ok")
 

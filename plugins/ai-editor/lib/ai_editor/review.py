@@ -25,10 +25,13 @@ product video). Notes save with the edit, never in the plugin:
                                      the round's preference notes into the user's taste (taste.py add); --none if
                                      none. Each note records it: "taste": rule id | video-only | suggested | one-off.
                                      this-style: the creator style the edit used (<folder>/style.json "source", or
-                                     --style <style.json>): its overrides and its edit-like-<slug> skill
+                                     --style <style.json>): its overrides and its edit-like-<slug> skill; a skill
+                                     style's rules go into that skill's SKILL.md "## Learned rules" (skillrules.py)
     python3 review.py <folder> learn --propose '<json>'   the final approve's LEARN block: candidate rules
-                                     [{"rule", "section", "set"?}] onto the page's "Teach <style>" panel
-    python3 review.py <folder> learn --done ["summary"]   save the rules the user ticked (styleskill.learn) and
+                                     [{"rule", "section", "set"?, "why"?, "replace"?}] onto the page's "Teach <style>"
+                                     panel (the skill-improver skill writes them)
+    python3 review.py <folder> learn --done ["summary"]   save the rules the user ticked (styleskill.learn; a skill
+                                     style's rules go into its SKILL.md, skillrules.py) and
                                      show "Saved to <style>. Next video uses it."
     python3 review.py demo                         self-check on a generated 6 s clip
 
@@ -118,7 +121,7 @@ class FileLock:
             try:
                 os.close(os.open(self.p, os.O_CREAT | os.O_EXCL | os.O_WRONLY))
                 return self
-            except FileExistsError:
+            except (FileExistsError, PermissionError):   # Windows: a lock being deleted refuses a new open
                 try:   # a writer that died holding it: older than 10 s is stale
                     if time.time() - self.p.stat().st_mtime > 10:
                         self.p.unlink(missing_ok=True)
@@ -384,6 +387,16 @@ def home_url():
         url = None
     _HOME.update(at=time.time(), url=url)
     return url
+
+
+def home_jobs():
+    """How many videos the home window is making (its state.json jobs queued or taken): the rail's Making ring."""
+    f = Path(os.environ.get("AI_EDITOR_HOME", "").strip() or Path.home() / ".ai-video-editor") / "home" / "state.json"
+    try:
+        jobs = json.loads(f.read_text(encoding="utf-8")).get("jobs") or []
+    except (OSError, ValueError, AttributeError):
+        return 0
+    return sum(1 for j in jobs if isinstance(j, dict) and j.get("type") == "video" and j.get("state") in ("queued", "taken"))
 
 
 def listening(folder):
@@ -740,6 +753,7 @@ def make_handler(folder, token):
                 d["cutcheck"] = (folder / "cut-check.html").exists()
                 d["rawvideo"] = raw_video(folder, d) is not None   # the transcript editor's preview plays the raw take
                 d["home"] = home_url()   # the Home button: back to the editor's window, or how to start it
+                d["jobs"] = home_jobs() if d["home"] else 0   # the rail's Making ring
                 d["intro"] = intro(folder, d)
                 for x in d.get("activity", [])[-1:]:
                     if x.get("log") and not x.get("done"):
@@ -870,6 +884,8 @@ def make_handler(folder, token):
                     d.pop("stopped", None)
                     if body["type"] == "approve" and (d["stage"] == "edit" or d.get("final")):   # the finished video
                         d["learn"] = {"state": "reading" if session_notes(d) else "none", "style": style}
+                    elif body["type"] == "approve" and d["stage"] == "cut":
+                        prepared_steps(folder, d)
                     return True
                 if not update(rj, ev):
                     return self.send(409, {"error": "Claude is applying your transcript changes"})
@@ -1080,6 +1096,7 @@ def serve(folder, port=0, open_browser=True):
     except OSError:   # the old port is taken now: a new one, same token
         srv = cls(("127.0.0.1", port), make_handler(folder, token))
     url = f"http://127.0.0.1:{srv.server_address[1]}/?t={token}"
+    last.parent.mkdir(parents=True, exist_ok=True)   # a video made elsewhere has no review/ folder yet
     with os.fdopen(os.open(last, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), "w", encoding="utf-8") as f:
         f.write(url)   # private: the token in it lets a page in
     if os.name != "nt":
@@ -1239,6 +1256,22 @@ def add_step(d, text, log=None, key=None, done=False):
     d["activity"] = act[-30:]
 
 
+def prepared_steps(folder, d):
+    """visual-prep made these while the cut was reviewed, on this very cut (prep-decisions.json = decisions.json):
+    the Making the edit card shows them done the moment the cut is approved, not as steps still to come."""
+    try:
+        if (folder / "prep-decisions.json").read_bytes() != (folder / "decisions.json").read_bytes():
+            return []
+    except OSError:
+        return []
+    keys = [k for k, f in (("captions", "captions.json"), ("visuals", "visuals.json"), ("plan", "stills/sheet.png"))
+            if (folder / f).exists()]
+    for k in keys:
+        add_step(d, None, None, k)
+    add_step(d, None, done=True)
+    return keys
+
+
 def making_edit(d):
     """Claude is making the styled edit: the cut was approved and no edit round has landed yet, or a sent edit
     round is being redone."""
@@ -1271,8 +1304,12 @@ def making_style(folder):
         src = styleskill.sources(folder)
     except Exception:
         src = []
-    if len(src) == 1:
-        return f"@{re.sub(r'-mine$', '', src[0].parent.name)}'s style"
+    if len(src) == 1:   # the name the style has on the home page ("Card edit"), never the folder id
+        try:
+            n = styleskill.display(src[0])
+        except Exception:
+            n = "@" + re.sub(r"-mine$", "", src[0].parent.name)
+        return f"{n}'s style" if n.startswith("@") else "your style" if n == "My style" else f"the {n} style"
     return "your blended style" if src else "your style"
 
 
@@ -1412,7 +1449,21 @@ def learn_prompt(folder, d):
              f"  python3 {Path(__file__).resolve()} {folder} learn --propose "
              f"'[{{\"rule\": \"...\", \"section\": \"cut|captions|visuals|sound|layout\", \"set\": \"captions.size_pct=4.5\"}}]'",
              "  (or a path to a .json file holding that list). \"set\" only when a taste setting maps (the taste "
-             "skill's table). Then run `wait` again: it returns with the rules the user ticked."]
+             "skill's table). Then run `wait` again: it returns with the rules the user ticked. The skill-improver "
+             "skill has the steps (one-offs stay with the video, sharpen an old rule rather than add a twin)."]
+    try:
+        from ai_editor import skillrules
+        tg = skillrules.target(folder)
+    except Exception:
+        tg = {"kind": "settings"}
+    if tg["kind"] == "skill":
+        lines.append(f"This style runs the {tg['skill']} skill: rules go into "
+                     + (f"{tg['path']} under \"## Learned rules\". Give each a \"why\" (the reason, one line); "
+                        "to sharpen or overrule one already there, add \"replace\": \"<its rule>\". Rules there now:"
+                        if tg["path"] else "its SKILL.md, which is not in your skill folders: say so and propose [].")
+                     )
+        if tg["path"]:
+            lines += ["  " + ln for ln in skillrules.learned(Path(tg["path"]).read_text(encoding="utf-8"))] or ["  (none yet)"]
     for c in sorted(session_notes(d), key=lambda c: (c["stage"] != "cut", c["round"], c["t"])):
         saved = f" [saved as rule {c['taste']}]" if isinstance(c.get("taste"), int) else ""
         lines.append(f"#{c['id']} {stage_name(c['stage'])} r{c['round']}: {c['text']}"
@@ -1456,7 +1507,8 @@ def learn_propose(folder, raw):
         st = r.get("set") or None
         if st is not None and (not isinstance(st, str) or "=" not in st):
             sys.exit(f"\"set\" is key.path=value: {r}")
-        out.append({"rule": str(r["rule"]).strip().rstrip("."), "section": sec, "set": st})
+        out.append({"rule": str(r["rule"]).strip().rstrip("."), "section": sec, "set": st,
+                    **{k: str(r[k]).strip() for k in ("why", "replace") if r.get(k)}})
 
     def f(d):
         if not d.get("learn"):
@@ -1473,7 +1525,16 @@ def learn_done(folder, summary):
     if lr.get("state") != "chosen":
         sys.exit("nothing ticked to save: run `wait` for the user's pick first")
     sp = edit_style(folder)
-    for r in (lr["rules"][i] for i in lr["chosen"]):
+    from ai_editor import skillrules
+    tg = skillrules.target(folder)
+    if tg["kind"] == "skill":   # a skill style: its skill made the edit, so the rules go into its SKILL.md
+        if not tg["path"]:
+            sys.exit(f"the {tg['skill']} skill is not in your skill folders; nothing saved")
+        for r in (lr["rules"][i] for i in lr["chosen"]):
+            status, line = skillrules.add(tg["path"], r["rule"], r.get("why") or f"from the notes on {folder.name}",
+                                          r.get("replace"), edit=str(folder))
+            print(f"{status}: {line} ({tg['path']})")
+    for r in (lr["rules"][i] for i in lr["chosen"] if tg["kind"] == "settings"):
         setting, _, raw = (r.get("set") or "").partition("=")
         status, x = styleskill.learn(sp, r["section"], r["rule"], setting or None, taste.parse(raw) if setting else None,
                                      edit=folder, source="review")
@@ -1533,6 +1594,14 @@ def cmd_learn(a, folder):
             sys.exit("--scope this-style: " + ("this edit used no creator style" if not src else "this edit blends several creators")
                      + "; pass --style creator-teardowns/<handle>/style.json, or use --scope style")
         sp = src[0]
+    skill_md = None   # a skill style ("skill" in its style.json): rules go into that skill's own SKILL.md
+    if sp is not None:
+        from ai_editor import skillrules
+        sk = (json.loads(Path(sp).read_text(encoding="utf-8") or "{}") or {}).get("skill")
+        if sk:
+            skill_md = skillrules.find_skill(sk)
+            if not skill_md:
+                sys.exit(f"the {sk} skill is not in your skill folders; nothing saved")
 
     def f(d):
         stage, rnd = learned_round(d)
@@ -1545,6 +1614,12 @@ def cmd_learn(a, folder):
                 section, rule, *kv = rules[c["id"]]
                 setting, _, raw = kv[0].partition("=") if kv else (None, "", "")
                 value = taste.parse(raw) if setting else None
+                if skill_md:
+                    status, line = skillrules.add(skill_md, rule, f"review note: {c['text']}", edit=str(folder))
+                    c.update(rule=rule, taste="skill")
+                    out.append(f"#{c['id']} -> {status}: {line} ({skill_md})"
+                               + (f"; {setting} not saved (a skill style has no settings)" if setting else ""))
+                    continue
                 scope = f"video:{d['name']}" if a.scope == "video" else styleskill.scope(sp)
                 status, r = taste.add(section, rule, setting, value, scope, folder, source="review", style=sp)
                 c.update(rule=rule, taste={"style": r["id"], "this-style": r["id"], "video": "video-only"}.get(a.scope, "suggested"))
@@ -1715,6 +1790,12 @@ def demo():
     (tmp / "home" / "home" / ".server").write_text(hurl, encoding="utf-8")
     _HOME["at"] = 0
     assert json.loads(get("/state").read())["home"] == hurl, "the Home button reads home.py's fixed address"
+    hsf = tmp / "home" / "home" / "state.json"
+    keep_hs = hsf.read_text(encoding="utf-8") if hsf.exists() else None
+    hsf.write_text(json.dumps({"jobs": [{"type": "video", "state": "taken"}, {"type": "video", "state": "queued"},
+                                        {"type": "video", "state": "done"}, {"type": "teardown", "state": "taken"}]}), encoding="utf-8")
+    assert json.loads(get("/state").read())["jobs"] == 2, "the rail's Making ring counts the home window's videos being made"
+    hsf.write_text(keep_hs, encoding="utf-8") if keep_hs is not None else hsf.unlink()
     hs.shutdown()
     hs.server_close()
     # the cut's transcript: kept words on the cut's timeline, the cut word struck, the removed pause a chip
@@ -1904,6 +1985,29 @@ def demo():
         raise AssertionError("a second pick")
     except urllib.error.HTTPError as e:
         assert e.code == 409
+    # a skill style ("skill" in its style.json): the ticked rules go into that skill's own SKILL.md (skillrules.py)
+    sk_md = tmp / "skills" / "alice-edit" / "SKILL.md"
+    sk_md.parent.mkdir(parents=True)
+    sk_md.write_text("---\nname: alice-edit\ndescription: x\n---\n\n# Alice edit\n", encoding="utf-8")
+    sp.write_text('{"handle": "alice", "skill": "alice-edit"}', encoding="utf-8")
+    update(folder / "review.json", lambda d: d["learn"].update(state="reading"))
+    with contextlib.redirect_stdout(io.StringIO()):
+        learn(propose=json.dumps([{"rule": "Logos beside the head", "section": "visuals", "why": "one covered the chin"}]))
+    assert "alice-edit skill" in learn_prompt(folder, load(folder / "review.json")), learn_prompt(folder, load(folder / "review.json"))
+    update(folder / "review.json", lambda d: d["learn"].update(state="chosen", chosen=[0]))
+    with contextlib.redirect_stdout(io.StringIO()):
+        learn(done="")
+    t = sk_md.read_text(encoding="utf-8")
+    assert "## Learned rules\n\n- Logos beside the head. Why: one covered the chin. (" in t and "## Log" in t, t
+    # the per-round learn at this-style on a skill style: the same SKILL.md, never the settings or edit-like skill
+    with contextlib.redirect_stdout(io.StringIO()):
+        learn(scope="this-style", rule=[[str(c2["id"]), "captions", "Captions two lines at most", "captions.size_pct=5"]])
+    t = sk_md.read_text(encoding="utf-8")
+    assert "- Captions two lines at most. Why: review note: " in t and t.count("\n- ") >= 3, t
+    assert next(c for c in load(folder / "review.json")["comments"] if c["id"] == c2["id"])["taste"] == "skill"
+    assert not any(r["rule"] == "Captions two lines at most" for r in taste.load_rules())
+    assert json.loads((sp.parent / "style.overrides.json").read_text(encoding="utf-8"))["captions"]["size_pct"] == 4
+    assert "Logos beside" not in (tmp / "skills" / "edit-like-alice" / "SKILL.md").read_text(encoding="utf-8")
     if old_skills is None:
         os.environ.pop("AI_EDITOR_SKILLS", None)
     else:
@@ -1968,6 +2072,20 @@ def demo():
     srv3.shutdown()
     save(sf / "review.json", keep_d)
     assert making_style(sf) == "your style" and making_style(folder) == "@alice's style"
+    with tempfile.TemporaryDirectory() as pd:   # the approve shows what visual-prep already made on this cut
+        pd = Path(pd)
+        for f in ("decisions.json", "prep-decisions.json", "captions.json", "visuals.json"):
+            (pd / f).write_text("[]", encoding="utf-8")
+        pdd = {"round": 1, "activity": []}
+        assert prepared_steps(pd, pdd) == ["captions", "visuals"] and all(x["done"] for x in pdd["activity"]), pdd
+        (pd / "decisions.json").write_text("[1]", encoding="utf-8")   # re-cut since: nothing is claimed
+        assert prepared_steps(pd, {"round": 1, "activity": []}) == []
+    from ai_editor import styleskill
+    keep_names, styleskill.names = styleskill.names, lambda: {"alice": {"name": "Card edit"}}
+    try:   # a named style shows its name, never the folder id ("@own-card-edit's style")
+        assert making_style(folder) == "the Card edit style", making_style(folder)
+    finally:
+        styleskill.names = keep_names
     with contextlib.redirect_stdout(io.StringIO()):
         cmd_round(ns(video=str(folder / "review" / "v-cut1.mp4"), stage="edit", transcript=None, plan=None, note=None,
                      name=None), sf)

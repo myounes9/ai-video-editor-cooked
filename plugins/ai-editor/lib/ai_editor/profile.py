@@ -6,8 +6,8 @@
     python3 profile.py set <key.path>=<value> ...  several answers in one call, one line out;
                                                   each value parsed as JSON if it can be
     python3 profile.py set <key.path> <value>     one answer (the older form)
-    python3 profile.py defaults                   "use the defaults": every unanswered style question saved as its
-                                                  default, so `missing --style` stops asking them
+    python3 profile.py defaults                   "use the defaults": every unanswered question saved as its
+                                                  first option (audience and names too), so nothing is asked again
     python3 profile.py style <edits/NAME> [--out F] [--from <style.json>]
                                                   blend the profile's creators into edits/NAME/style.json
                                                   (no creators: the default style, DEFAULT_STYLE). --from: that one
@@ -29,6 +29,8 @@ File: ~/.ai-video-editor/profile.json (AI_EDITOR_HOME overrides). Shape:
    "sound": {"sfx": true, "music": false},
    "behind": true,                                     cards sit behind the speaker (style-edit matte.py)
    "cloud_cleanup": true,                              delete uploaded footage from GitHub / S3 after a cloud render
+   "render": "laptop",                                 where every render goes (laptop | modal | github | lambda), asked once
+   "loudness": "leave",                                the take's own level: leave | normalize, asked once
    "past_edit": true}                                  learned from a raw take and their posted cut (taste learn.py); false: declined
 
 Look order (plan.py): the profile's brand kit > the copied creators' measured style.json > the
@@ -57,7 +59,9 @@ DEFAULTS = {"platform": "tiktok", "aspect": "9:16", "creators": [], "liked_video
             "assets_dir": "", "names": [], "avoid": {"emoji": True, "stock": True, "icons": True, "colors": []},
             "captions": {"on": True, "style": "creator"}, "sound": {"sfx": True, "music": False},
             "behind": False,   # unanswered: off, so no plan needs the cutout step until the user says yes
-            "past_edit": False}
+            "past_edit": False,
+            # the video questions' first options: used without asking, said on the review page, changed by a word
+            "audience": "people curious about the topic", "goal": "follow"}
 ASPECT = {"tiktok": "9:16", "reels": "9:16", "shorts": "9:16", "youtube": "16:9"}
 # Fonts every AI tool reaches for, and the default geometric / neo grotesks that read as AI-made as a
 # heading. Swapped for the preset's face unless the user's brand names them.
@@ -91,11 +95,14 @@ def save(prof):
 
 
 def save_defaults():
-    """Every unanswered style question saved as its default: the answer "use the defaults" (or a style step
-    finished on the recommended options) is an answer, so start never asks it again. Video questions stay."""
+    """Every unanswered question saved as its first option: the answer "use the defaults" (or a style step
+    finished on the recommended options) is an answer, so start never asks it again. The video questions too:
+    audience "people curious about the topic" + goal "follow", names [] (found in what they say). A saved answer
+    is kept, so the next video asks nothing."""
     have = json.loads(path().read_text(encoding="utf-8")) if path().exists() else {}
-    new = [q for q in STYLE_QUESTIONS if q not in have]
-    save({**have, **{q: DEFAULTS[q] for q in new}})
+    new = [q for q in QUESTIONS if q not in have]
+    extra = {"goal": DEFAULTS["goal"]} if "audience" in new and "goal" not in have else {}
+    save({**have, **{q: DEFAULTS[q] for q in new}, **extra})
     return new
 
 
@@ -272,7 +279,8 @@ def fill_transitions(style, warn=print):
 # The same keys as creator-teardown editplan.py PARTS: camera goes with pace, face and hook with visuals, and sound
 # is its own part (claimed by nobody in the profile, so it comes from the first creator, as every unclaimed part does).
 PARTS = {"captions": ("captions",), "pace": ("pace", "zoom", "cuts", "motion", "transitions", "camera"),
-         "visuals": ("graphics", "look", "layout", "cats", "events", "face", "hook", "per_min", "first_in_s", "gap_s"),
+         "visuals": ("graphics", "look", "layout", "cats", "events", "face", "hook", "per_min", "first_in_s", "gap_s", "behind",
+                     "cards", "card_kinds"),
          "sound": ("sound", "sfx")}
 HOME_TAKE = {"captions", "pace", "graphics", "sound"}   # the home page's four boxes (home.py TAKE)
 
@@ -298,13 +306,30 @@ def heal(style, path=None):
     return style
 
 
+SAMPLE_KEYS = ("card_kinds", "behind", "graphics", "cats", "format")   # what makes a sample style's cards its own
+
+
+def like_sample(style, handle):
+    """A style the user made themselves (own-<x>, e.g. imported from their own card-edit skill) that names a sample's
+    format (sample-<x>: own-card-edit -> sample-card-edit) but carries no card settings takes the sample's: its card
+    kinds (real pictures only), cards behind the speaker, rate, place and motion. Its own keys always win. A skill style
+    ("skill" set) takes nothing: its skill decides the cards.
+    ponytail: matched by name; a style page "format" pick would be the general way."""
+    base = re.sub(r"-\d+$", "", handle or "")
+    src = Path(__file__).resolve().parents[2] / "presets" / "styles" / ("sample-" + base[4:]) / "style.json"
+    if not base.startswith("own-") or style.get("card_kinds") or style.get("skill") or not src.is_file():
+        return style
+    sample = json.loads(src.read_text(encoding="utf-8"))
+    return {**{k: sample[k] for k in SAMPLE_KEYS if k in sample}, **style}
+
+
 def creator_style(root, handle):
     """(style, path) for one profile creator: the parts the user ticked (<h>-mine, the same file its edit-like skill
     and its corrections use) when there is one, else the whole measured <h>/style.json. (None, path) when neither."""
     d = Path(root) / "creator-teardowns"
     for p in (d / f"{handle}-mine" / "style.json", d / handle / "style.json"):
         if p.is_file():
-            return heal(json.loads(p.read_text(encoding="utf-8")), p), p
+            return like_sample(heal(json.loads(p.read_text(encoding="utf-8")), p), handle), p
     return None, d / handle / "style.json"
 
 
@@ -354,7 +379,8 @@ def write_style(edit_dir, root=Path("."), out=None, src=None):
     if src:
         if not Path(src).is_file():
             sys.exit(f"ERROR: no {src}")
-        style, paths = answers(heal(json.loads(Path(src).read_text(encoding="utf-8")), src), prof), [str(Path(src).resolve())]
+        style, paths = answers(like_sample(heal(json.loads(Path(src).read_text(encoding="utf-8")), src),
+                                           Path(src).resolve().parent.name), prof), [str(Path(src).resolve())]
         style.setdefault("handle", Path(src).resolve().parent.name)
     elif not prof.get("creators"):
         style = default_style(prof)
@@ -397,10 +423,13 @@ def demo():
         assert load()["aspect"] == "16:9" and "creators" not in missing() and "audience" in missing()
         # the real-footage test: setup finished on "use the defaults", which saved nothing, so start's
         # `missing --style` printed all 10 style ids and asked them again. Defaults are saved as answers
-        assert save_defaults() == [q for q in STYLE_QUESTIONS if q not in ("platform", "creators")]
-        assert missing(STYLE_QUESTIONS) == [] and missing(VIDEO_QUESTIONS) == ["audience", "names"]
+        assert save_defaults() == [q for q in QUESTIONS if q not in ("platform", "creators")]
+        # the video questions take their first option too, so no video asks them (the owner: "too many questions")
+        assert missing() == [] and load()["audience"] == "people curious about the topic" and load()["goal"] == "follow"
         assert load()["platform"] == "youtube" and load()["creators"] == [{"handle": "a"}], "answers kept"
-        assert save_defaults() == [] and all(q in DEFAULTS for q in STYLE_QUESTIONS)
+        assert save_defaults() == [] and all(q in DEFAULTS for q in QUESTIONS)
+        save({**json.loads(path().read_text(encoding="utf-8")), "audience": "developers", "goal": "comment"})
+        assert save_defaults() == [] and load()["audience"] == "developers" and load()["goal"] == "comment", "kept"
         # no creators (the recommended answer): the default style is written, never an exit
         save({"creators": [], "captions": {"style": "karaoke"}})
         out, st = write_style(d, out=Path(d) / "style.json")
@@ -499,6 +528,13 @@ def demo():
         b = blend({"h": st}, [{"handle": "h", "take": ["captions", "pace", "visuals"]}], {})
         assert b["camera"]["pan_per_min"] == 4 and b["sound"]["sfx_per_min"] == 2 and b["graphics"]["entrances"], b
         assert creator_style(d, "nobody")[0] is None
+        # a user's own card-edit style with no card settings takes the sample Card edit's; its own keys win
+        own = like_sample({"handle": "own-card-edit", "cards": {"per_min": 15}}, "own-card-edit")
+        assert "text" not in own["card_kinds"] and own["behind"] and own["graphics"]["per_min"] and own["cards"] == {"per_min": 15}, own
+        assert like_sample({"x": 1}, "own-50-50") == {"x": 1} and "card_kinds" not in like_sample({}, "card-edit")
+        assert like_sample({"skill": "my-edit"}, "own-card-edit") == {"skill": "my-edit"}   # a skill style: its skill decides
+        st = blend({"own-card-edit": own}, [{"handle": "own-card-edit", "take": ["captions", "pace", "visuals"]}])
+        assert st["card_kinds"] == own["card_kinds"] and st["cards"] == {"per_min": 15}, st
     print("profile ok")
 
 
@@ -521,7 +557,7 @@ def main():
         print("\n".join(missing(group)) or "(all answered)")
     elif a == ["defaults"]:
         new = save_defaults()
-        print(f"saved the defaults for {', '.join(new)} -> {path()}" if new else "(all style questions answered)")
+        print(f"saved the defaults for {', '.join(new)} -> {path()}" if new else "(all questions answered)")
         my_style()
     elif len(a) >= 2 and a[0] == "set":
         pairs = [(a[1], a[2])] if len(a) == 3 and "=" not in a[1] else [x.split("=", 1) for x in a[1:]]
