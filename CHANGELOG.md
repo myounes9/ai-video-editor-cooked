@@ -4,6 +4,10 @@ What changed for every user, newest first.
 
 ## Unreleased
 
+## ai-editor 2.6.2-cooked.1 (fork, 2026-10-13)
+
+Fork release on upstream ai-editor 2.6.2: the four entries below (spoken numbers, final quality, Lottie cards, same frames in every tab). See FORK.md.
+
 - The check reads spoken numbers the way people say them. `check.py` split "two hundred and fifty" into
   2, 100 and 50, so a card showing 250 FAILed as a number nobody says, and "7.5K" on a card never matched
   a spoken "seven point five k". A new shared parser, `lib/ai_editor/numbers.py` (stdlib only), reads
