@@ -1,6 +1,7 @@
 // Motion tokens: named eases, durations, staggers and four personalities, plus the GSAP bridge.
 // Every GSAP plugin is registered here, once, at module scope. Each one is proven deterministic by
-// test/determinism.mjs (same frame in two processes, and a still against the same frame of a video).
+// test/determinism.mjs (same frame in two processes, a still against the same frame of a video, and every
+// frame of a render across parallel tabs against the same frame rendered in one tab).
 import { gsap } from "gsap";
 import { CustomEase } from "gsap/CustomEase";
 import { CustomWiggle } from "gsap/CustomWiggle";
@@ -13,6 +14,13 @@ import { useGsapTimeline } from "@remotion/gsap";
 import { interpolate } from "remotion";
 
 gsap.registerPlugin(CustomEase, CustomWiggle, DrawSVGPlugin, MorphSVGPlugin, MotionPathPlugin, Physics2DPlugin, SplitText);
+// 2D transforms only. GSAP's default force3D "auto" writes translate3d mid-tween, which puts the element on
+// its own GPU layer; each Chrome tab of a parallel render then draws the same frame from different layers
+// (text moved a pixel, edges off by up to 240/255). config, not defaults: it sets every element's transform
+// cache, so every tween and every useGsapTimeline timeline gets it, while gsap.defaults (or a timeline's
+// defaults) would add a force3D prop to every tween and so a transform to opacity-only elements and SVG.
+// Real 3D (rotationX, transformPerspective) still renders in 3D.
+gsap.config({ force3D: false });
 
 // "ink": a pen stroke. Fast off the mark, a long soft landing.
 CustomEase.create("ink", "M0,0 C0.12,0.62 0.2,0.98 1,1");
@@ -42,6 +50,8 @@ CustomEase.create("antic", "M0,0 C0.14,-0.02 0.22,-0.09 0.32,-0.07 0.44,-0.04 0.
 CustomEase.create("antic.soft", "M0,0 C0.16,-0.01 0.24,-0.04 0.34,-0.03 0.48,0 0.56,0.7 0.7,0.93 0.82,1.01 0.9,1.005 1,1");
 // A three-beat impact shake that dies away (used by slams).
 CustomWiggle.create("impact", { wiggles: 4, type: "easeOut" });
+/** Every ease registered above; test/determinism.mjs drives each one. Add a new one here too. */
+export const EASES = ["ink", "settle", "spring.snappy", "spring.bouncy", "spring.soft", "antic", "antic.soft", "impact"];
 
 export { gsap, SplitText };
 

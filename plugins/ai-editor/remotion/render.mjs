@@ -2,7 +2,7 @@
 //
 //   node render.mjs stills <publicDir> <plan.json> <outDir> name=frame ...
 //   node render.mjs many   <publicDir> <jobs.json>             [{plan: {...}, frame, out: x.jpg}]: one bundle, several plans (style page tiles)
-//   node render.mjs bench  <publicDir> <plan.json>            -> JSON: laptop seconds per frame
+//   node render.mjs bench  <publicDir> <plan.json>            -> JSON: laptop seconds per frame, at the final settings
 //   node render.mjs local  <publicDir> <plan.json> <out.mp4> [--draft] [--concurrency=N]
 //   node render.mjs chunk  <publicDir> <plan.json> <out.mkv> <from> <to> [--draft] [--concurrency=N]   frames from..to inclusive
 //   node render.mjs bundle <publicDir> <outDir>               a bundle folder another machine renders from (Modal)
@@ -33,8 +33,13 @@ const REGION = process.env.REMOTION_AWS_REGION || process.env.AWS_REGION || "us-
 const MEMORY_MB = 2048;
 const DISK_MB = 2048;
 const MAX_LAMBDAS = 9;
-// A guess until a real render is measured: Lambda seconds spent per 1080p frame.
-const LAMBDA_S_PER_FRAME = 0.3;
+// A guess until a real render is measured: Lambda seconds spent per 1080p frame. 0.3 before the final
+// settings (FINAL below), which take about 1.6x as long on a laptop (render.md "Final quality").
+const LAMBDA_S_PER_FRAME = 0.48;
+// Each Lambda must finish its frames inside this: 900 s, Lambda's most, holds about 1,800 frames per Lambda
+// at the guess above (the old 240 s held about 500 at the final settings). A new timeout is a new function
+// name, so deployFunction makes a new function rather than reusing the 240 s one.
+const LAMBDA_TIMEOUT_S = 900;
 const framesPerLambda = (frames) => Math.max(150, Math.ceil(frames / MAX_LAMBDAS));
 
 // Flags after the positional args: --draft, --concurrency=N.
@@ -59,6 +64,23 @@ const hwOpts = (composition, scale) => (flags.draft && process.platform === "dar
   ? { hardwareAcceleration: "if-possible", crf: null,
       videoBitrate: `${Math.round(12 * (composition.width * composition.height * scale * scale) / (1080 * 1920))}M` }
   : {};
+// Every final (laptop, chunk, Lambda, and the bench that times them) at the best quality x264 gives:
+// lossless PNG frames (Remotion's default is JPEG at quality 80, which smeared caption edges), BT.709
+// limited range like the cut (the default wrote full-range BT.601, yuvj420p), preset slow at CRF 16.
+// Chunks share it, so the pieces of a GitHub or Modal render join as one stream. Measured in
+// references/render.md "Final quality".
+const FINAL = { imageFormat: "png", colorSpace: "bt709", x264Preset: "slow", crf: 16 };
+const videoOpts = (composition, scale) => flags.draft ? hwOpts(composition, scale) : FINAL;
+// The sound of every render: AAC at 320 kbit/s through a true-peak limiter. Read at 4x the sample rate,
+// so a peak between two samples counts, with its 5 ms look-ahead compensated so the voice stays on its
+// sample, and no make-up gain (level), so the loudness stays where the cut had it. The look-ahead holds
+// back 959 samples at 192 kHz (5 ms less one): apad feeds them out and atrim drops them from the front,
+// what alimiter's own latency option does, but that option needs FFmpeg 5.1 and setup accepts 4.4. The
+// ceiling sits 0.5 dB under the -1 dBTP target: the AAC encode adds up to that much back. edit.py
+// LIMITER is the same string (its demo checks it against latency=true); render.md "Final quality" has
+// the measurements.
+const LIMITER = "aresample=192000,apad=pad_len=959,alimiter=limit=0.8414:attack=5:release=50:level=false,atrim=start_sample=959,asetpts=PTS-STARTPTS,aresample=48000";
+const AUDIO = ["-af", LIMITER, "-c:a", "aac", "-b:a", "320k"];
 
 // "Rendered N/M" at most once a second while frames come in: edit.py's stall watchdog reads it, and so does
 // the review page's progress bar (review.py --log).
@@ -140,7 +162,7 @@ async function bench(publicDir, planPath) {
   // bench's time is start_s. A 2 s bench timed whole read a fresh laptop as twice as slow as its 45 s render.
   const t0 = Date.now(), q = Math.floor(n / 4);
   let a = 0, b = 0;
-  await renderMedia({ serveUrl, composition, inputProps, codec: "h264", outputLocation: out,
+  await renderMedia({ serveUrl, composition, inputProps, codec: "h264", outputLocation: out, ...FINAL,
     frameRange: [from, from + n - 1], concurrency: concurrency(), timeoutInMilliseconds: TIMEOUT_MS,
     onProgress: ({ renderedFrames }) => {
       if (renderedFrames >= q && !a) a = Date.now();
@@ -161,9 +183,9 @@ async function local(publicDir, planPath, out) {
   // to the video: the same path the GitHub join takes, sample-aligned with the cut.
   const tmp = out.replace(/\.mp4$/i, "") + ".tmp.mkv";
   await renderMedia({ serveUrl, composition, inputProps, codec: "h264-mkv", outputLocation: tmp,
-    enforceAudioTrack: true, concurrency: concurrency(), scale, ...hwOpts(composition, scale), timeoutInMilliseconds: TIMEOUT_MS,
+    enforceAudioTrack: true, concurrency: concurrency(), scale, ...videoOpts(composition, scale), timeoutInMilliseconds: TIMEOUT_MS,
     onProgress: progress(composition.durationInFrames) });
-  const r = spawnSync("ffmpeg", ["-v", "error", "-y", "-i", tmp, "-c:v", "copy", "-c:a", "aac", "-b:a", "192k",
+  const r = spawnSync("ffmpeg", ["-v", "error", "-y", "-i", tmp, "-c:v", "copy", ...AUDIO,
     "-shortest", "-movflags", "+faststart", out], { stdio: "inherit" });
   fs.rmSync(tmp, { force: true });
   if (r.status !== 0) throw new Error(`ffmpeg could not write ${out}`);
@@ -178,7 +200,8 @@ async function chunk(publicDir, planPath, out, from, to) {
   // gap. The join encodes the audio to AAC once.
   await renderMedia({ serveUrl, composition, inputProps, codec: "h264-mkv", outputLocation: out,
     frameRange: [Number(from), Number(to)], enforceAudioTrack: true, concurrency: concurrency(),
-    scale: flags.draft ? 2 / 3 : 1, timeoutInMilliseconds: TIMEOUT_MS, onProgress: progress(Number(to) - Number(from) + 1) });
+    scale: flags.draft ? 2 / 3 : 1, ...(flags.draft ? {} : FINAL), timeoutInMilliseconds: TIMEOUT_MS,
+    onProgress: progress(Number(to) - Number(from) + 1) });
   console.log(`rendered ${out} (frames ${from}-${to}) in ${((Date.now() - t0) / 1000).toFixed(1)} s`);
 }
 
@@ -206,11 +229,19 @@ const cleanupLambda = async (L, o) => {
   await L.deleteSite({ region: o.region, bucketName: o.bucketName, siteName: o.siteName });
 };
 
+// Lambda encodes the sound itself, without the limiter: one more pass over its file, the picture copied.
+const limitAudio = (raw, out) => {
+  const r = spawnSync("ffmpeg", ["-v", "error", "-y", "-i", raw, "-map", "0:v", "-map", "0:a?", "-c:v", "copy",
+    ...AUDIO, "-movflags", "+faststart", out], { stdio: "inherit" });
+  if (r.status !== 0) throw new Error(`ffmpeg could not write ${out} (Lambda's file is kept: ${raw})`);
+  fs.rmSync(raw, { force: true });
+};
+
 async function lambda(publicDir, planPath, out, siteName) {
   const L = await import("@remotion/lambda");
   const inputProps = readPlan(planPath);
   console.log(`region ${REGION}: deploying function (skipped if it exists)`);
-  const { functionName } = await L.deployFunction({ region: REGION, timeoutInSeconds: 240,
+  const { functionName } = await L.deployFunction({ region: REGION, timeoutInSeconds: LAMBDA_TIMEOUT_S,
     memorySizeInMb: MEMORY_MB, diskSizeInMb: DISK_MB, createCloudWatchLogGroup: true });
   const { bucketName } = await L.getOrCreateBucket({ region: REGION });
   console.log(`uploading site ${siteName} (only changed files)`);
@@ -219,14 +250,16 @@ async function lambda(publicDir, planPath, out, siteName) {
   const t0 = Date.now();
   const { renderId } = await L.renderMediaOnLambda({ region: REGION, functionName, serveUrl,
     composition: inputProps.composition || ID, inputProps, codec: "h264", privacy: "private", maxRetries: 2,
-    framesPerLambda: framesPerLambda(inputProps.durationInFrames) });
+    ...FINAL, audioBitrate: "320k", framesPerLambda: framesPerLambda(inputProps.durationInFrames) });
   for (;;) {
     await new Promise((r) => setTimeout(r, 2000));
     const p = await L.getRenderProgress({ renderId, bucketName, functionName, region: REGION });
     if (p.fatalErrorEncountered) throw new Error(p.errors.map((e) => e.message).join("\n"));
     process.stdout.write(`${Math.round(p.overallProgress * 100)}% `);
     if (p.done) {
-      await L.downloadMedia({ region: REGION, bucketName, renderId, outPath: out });
+      const raw = out.replace(/\.mp4$/i, "") + ".lambda.mp4";
+      await L.downloadMedia({ region: REGION, bucketName, renderId, outPath: raw });
+      limitAudio(raw, out);
       console.log(`\nrendered ${out} in ${((Date.now() - t0) / 1000).toFixed(1)} s, ` +
         `AWS cost ${p.costs.displayCost}`);
       if (flags.cleanup) await cleanupLambda(L, { region: REGION, bucketName, renderId, siteName });

@@ -23,6 +23,9 @@ cards and marks), `Anims.tsx` (the card host and the old type names), `StyleEdit
   against it for parallax.
 - Type fits by measurement (`@remotion/layout-utils`), never by a characters-times-em guess.
 - `*word*` inside a text prop sets that word in the look's serif italic in the accent colour.
+- A frame is the same in every tab of a parallel render: no `will-change` and no `translateZ(0)` layer
+  hints; GSAP writes 2D transforms (motion.ts `force3D: false`) unless a move is really 3D.
+  `remotion/test/determinism.mjs` checks every frame.
 
 ## Overlay formats (the default)
 

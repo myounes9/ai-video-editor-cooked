@@ -1,5 +1,6 @@
 // Renders every case in a cases file as stills (4 points) and a short mp4, plus a 1 fps strip per clip.
 //   node test/templates.mjs <publicDir> <cases.json> <outDir> [only-name-substring] [--no-video]
+// test/public (the Lottie fixture) is served beside <publicDir>.
 import fs from "node:fs";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
@@ -12,6 +13,7 @@ const [publicDir, casesPath, outDir, only, flag] = process.argv.slice(2);
 const cases = JSON.parse(fs.readFileSync(casesPath, "utf8")).filter((c) => !only || only === "-" || c.name.includes(only));
 fs.mkdirSync(outDir, { recursive: true });
 const serveUrl = await bundle({ entryPoint: path.join(HERE, "..", "src", "index.ts"), publicDir: path.resolve(publicDir) });
+fs.cpSync(path.join(HERE, "public"), path.join(serveUrl, "public"), { recursive: true });
 for (const c of cases) {
   const inputProps = { width: 1080, height: 1920, dur: 4, ...c, card: { start: 0, end: c.dur ?? 4, entrance: "pop", ...c.card } };
   const composition = await selectComposition({ serveUrl, id: "Preview", inputProps });

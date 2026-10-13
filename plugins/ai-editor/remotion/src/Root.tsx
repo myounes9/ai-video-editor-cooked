@@ -2,7 +2,7 @@ import React from "react";
 import { AbsoluteFill, CalculateMetadataFunction, Composition, Img, staticFile, useCurrentFrame, useVideoConfig } from "remotion";
 import { Card, CardView, Plan, StyleEdit, calculateMetadata } from "./StyleEdit";
 import { resolveLook, useFonts } from "./look";
-import { SplitText, pickMotion, useTl } from "./motion";
+import { EASES, PERSONALITIES, SplitText, pickMotion, useTl } from "./motion";
 import { footageX } from "./Scene";
 import { ProductVideo, ProductPlan, productMeta } from "./product/ProductVideo";
 
@@ -39,7 +39,12 @@ const previewMeta: CalculateMetadataFunction<PreviewProps> = ({ props }) => ({
   width: props.width, height: props.height, fps: 30, durationInFrames: Math.round(props.dur * 30),
 });
 
-// Proof: one GSAP plugin driving one element, for the determinism test (test/determinism.mjs).
+// Every ease a video can use: the registered ones and each personality's (punch's elastic, camera's sine).
+const ALL_EASES = [...new Set([...EASES, ...Object.values(PERSONALITIES).flatMap((m) => [m.enter, m.exit, m.antic, m.move, m.pop, m.draw, m.text]),
+  "elastic.out(1, 0.5)", "power2.out", "sine.inOut"])];
+
+// Proof: one GSAP plugin driving one element, for the determinism test (test/determinism.mjs); "eases": one
+// row per ease, each moving, turning and growing. Tweens run 2 s of the 3 s, so the last second holds.
 const Proof: React.FC<{ plugin: string }> = ({ plugin }) => {
   const look = resolveLook();
   const fonts = useFonts(look);
@@ -59,6 +64,8 @@ const ProofInner: React.FC<{ plugin: string; family: string }> = ({ plugin, fami
       const s = SplitText.create(q(".txt")[0], { type: "lines,chars", mask: "lines" });
       tl.fromTo(s.chars, { yPercent: 110 }, { yPercent: 0, duration: 0.8, ease: "expo.out", stagger: 0.04 }, 0);
     }
+    if (plugin === "eases") q(".ease").forEach((e, i) =>
+      tl.fromTo(e, { x: 0, rotation: 0, scale: 1 }, { x: 760, rotation: 12, scale: 1.2, duration: 1.6, ease: ALL_EASES[i] }, i * 0.02));
   }, [plugin]);
   return (
     <div ref={ref} style={{ position: "absolute", inset: 0 }}>
@@ -68,6 +75,8 @@ const ProofInner: React.FC<{ plugin: string; family: string }> = ({ plugin, fami
       <div className="el" style={{ position: "absolute", left: 100, top: 560, width: 80, height: 80, background: "#E5482C", borderRadius: 16 }} />
       <div className="txt" style={{ position: "absolute", left: 80, top: 120, width: 920, fontFamily: family, fontWeight: 800, fontSize: 120,
         lineHeight: 1, color: "#141414" }}>{plugin === "splittext" ? "Motion that lands on the word" : ""}</div>
+      {plugin === "eases" ? ALL_EASES.map((e, i) => <div key={e} className="ease" style={{ position: "absolute", left: 100, top: 30 + i * (1020 / ALL_EASES.length),
+        width: 120, height: 1020 / ALL_EASES.length - 12, background: "#2C5BE5", borderRadius: 8 }} />) : null}
     </div>
   );
 };
@@ -87,7 +96,7 @@ export const Root: React.FC = () => (
     <Composition id="Preview" component={Preview} calculateMetadata={previewMeta} width={1080} height={1920} fps={30} durationInFrames={90}
       defaultProps={{ width: 1080, height: 1920, dur: 3, card: { anim: { type: "logo_sting", props: { src: "images/logo.svg" } }, start: 0, end: 3, entrance: "pop",
         box: [8, 20, 84, 30] } } as PreviewProps} />
-    <Composition id="Proof" component={Proof} width={1080} height={1080} fps={30} durationInFrames={60} defaultProps={{ plugin: "drawsvg" }} />
+    <Composition id="Proof" component={Proof} width={1080} height={1080} fps={30} durationInFrames={90} defaultProps={{ plugin: "drawsvg" }} />
     {/* product-video skill: a website's real UI as a launch video (plan from skills/product-video/scripts/product.py) */}
     <Composition id="ProductVideo" component={ProductVideo} calculateMetadata={productMeta} width={1920} height={1080} fps={30}
       durationInFrames={90} defaultProps={{ width: 1920, height: 1080, fps: 30, durationInFrames: 90, variant: "apple", url: "",

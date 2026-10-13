@@ -2,6 +2,7 @@ import React from "react";
 import {
   AbsoluteFill,
   CalculateMetadataFunction,
+  cancelRender,
   Easing,
   Img,
   OffthreadVideo,
@@ -18,7 +19,7 @@ import { Lottie, LottieAnimationData } from "@remotion/lottie";
 import { Anim, AnimCard } from "./Anims";
 import { Captions, CaptionStyle, Chunk } from "./Captions";
 import { Capture, Mark } from "./Capture";
-import { Look, Texture, resolveLook, useFonts } from "./look";
+import { Look, Texture, loadFamily, resolveLook, useFonts } from "./look";
 import { Motion, ease, pickMotion, prog, punchAt } from "./motion";
 import { Sfx } from "./Sfx";
 import { SceneCard, SceneView, TR_S, Transition, footageX, phases, sceneGrounds } from "./Scene";
@@ -43,7 +44,7 @@ export type Card = {
   highlight?: { rects: [number, number, number, number][] }; // the sentence's lines, fractions of the image
   marks?: Mark[]; // capture marks, rects in image px (references/motion.md)
   format?: "shot" | "browser" | "sticker" | "plain"; // how an image card is drawn (default shot); plain = the old flat capture
-  props?: Record<string, unknown>; // extra props for the format: url, label, crop, rotate, zoom, cursor
+  props?: Record<string, unknown>; // extra props for the format: url, label, crop, rotate, zoom, cursor; a Lottie: texts (layer name -> words)
   layout?: "scene" | "box"; // scene: a full-frame cut-away on the look's ground (Scene.tsx)
   transition_in?: Transition; // scene only: match | iris | push | block | wipe | fade | cut
   transition_out?: Transition;
@@ -164,16 +165,76 @@ const panAt = (t: number, pans: Pan[] = []) => {
   return { x, k: 1 + (2 * Math.abs(x)) / 100 };
 };
 
-const LottieCard: React.FC<{ src: string }> = ({ src }) => {
+// A designer's Lottie, as After Effects (bodymovin) exports it. Text layers name a font in fonts.list by fName;
+// lottie-web reads the weight from fStyle only for bold, black, medium, regular and light/thin, so ExtraBold or
+// SemiBold with no fWeight draws at 400. These fill fWeight from the style name.
+const LOTTIE_WEIGHTS: Record<string, number> = { thin: 100, hairline: 100, extralight: 200, ultralight: 200, light: 300,
+  regular: 400, normal: 400, book: 400, roman: 400, medium: 500, semibold: 600, demibold: 600, bold: 700, extrabold: 800,
+  ultrabold: 800, black: 900, heavy: 900 };
+type LottieFont = { fName: string; fFamily: string; fStyle?: string; fWeight?: string | number; fOrigin?: string; origin?: number;
+  fPath?: string };
+type LottieLayer = { ty: number; nm?: string; t?: { d?: { k?: { s: { t: string } }[] } } };
+const lottieWeight = (f: LottieFont) =>
+  Number(f.fWeight) || LOTTIE_WEIGHTS[(f.fStyle ?? "").toLowerCase().replace(/italic|oblique|[\s_-]/g, "")] || 400;
+
+/** A copy of the Lottie with `texts` (text layer name -> words) swapped in, also inside precomps, and every font's
+ *  weight filled from its style name. Returns the fonts its text layers draw with. */
+const prepareLottie = (raw: LottieAnimationData, texts: Record<string, string>) => {
+  const d = structuredClone(raw) as LottieAnimationData & { fonts?: { list?: LottieFont[] }; chars?: unknown[];
+    layers?: LottieLayer[]; assets?: { layers?: LottieLayer[] }[] };
+  for (const layers of [d.layers, ...(d.assets ?? []).map((a) => a.layers)]) {
+    for (const l of layers ?? []) {
+      if (l.ty === 5 && l.nm && l.nm in texts) for (const k of l.t?.d?.k ?? []) k.s.t = texts[l.nm];
+    }
+  }
+  // glyphs exported as shapes (chars) need no font
+  const fonts = d.chars?.length ? [] : d.fonts?.list ?? [];
+  for (const f of fonts) f.fWeight = String(lottieWeight(f));
+  return { data: d as LottieAnimationData, fonts };
+};
+
+/** A Lottie card. It plays at its own frame rate (a 60 fps Lottie in a 30 fps edit moves 2 of its frames per
+ *  frame: @remotion/lottie shows Lottie frame = card frame x playbackRate). Its fonts load through look.tsx before
+ *  lottie-web lays out a letter; a family Google Fonts does not have draws in Inter, like the rest of the edit
+ *  (check.py lottie_findings warns), and lottie-web's own font loading (a Google CSS link, a URL) is switched off. */
+const LottieCard: React.FC<{ src: string; texts?: Record<string, string> }> = ({ src, texts }) => {
+  const { fps } = useVideoConfig();
   const [data, setData] = useState<LottieAnimationData | null>(null);
   const [handle] = useState(() => delayRender(`lottie ${src}`));
+  const key = JSON.stringify(texts ?? {});
   useEffect(() => {
+    let live = true;
     fetch(staticFile(src))
       .then((r) => r.json())
-      .then(setData)
-      .finally(() => continueRender(handle));
-  }, [src, handle]);
-  return data ? <Lottie animationData={data} style={{ width: "100%", height: "100%" }} /> : null;
+      .then(async (raw: LottieAnimationData) => {
+        const { data: d, fonts } = prepareLottie(raw, JSON.parse(key));
+        const families = await Promise.all(fonts.map((f) => loadFamily(f.fFamily, [Number(f.fWeight)])));
+        fonts.forEach((f, i) => {
+          f.fFamily = families[i];
+          f.fOrigin = "n";
+          f.origin = 0;
+          delete f.fPath;
+        });
+        await document.fonts.ready;
+        if (live) setData(d);
+      })
+      .catch((e) => {
+        cancelRender(new Error(`Lottie ${src} did not load: ${e?.message ?? e}`));
+        continueRender(handle);
+      });
+    return () => {
+      live = false;
+      continueRender(handle);
+    };
+  }, [src, key, handle]);
+  // Released only once the data is on the page: <Lottie> takes its own handle while it renders, so the frame is
+  // never ready with the card still empty.
+  useEffect(() => {
+    if (data) continueRender(handle);
+  }, [data, handle]);
+  if (!data) return null;
+  const rate = Number.isFinite(data.fr) && data.fr > 0 ? data.fr / fps : 1;
+  return <Lottie animationData={data} playbackRate={rate} style={{ width: "100%", height: "100%" }} />;
 };
 
 const clamp = { extrapolateLeft: "clamp", extrapolateRight: "clamp" } as const;
@@ -224,6 +285,10 @@ export const CardView: React.FC<{ card: Card; t: number; prev?: Card; next?: Car
     transform += ` scale(${1 - 0.06 * q})`;
     opacity *= 1 - q;
   }
+  // A Lottie lays its text out under the transform its box has when it mounts and keeps that layout, and each tab
+  // of a parallel render mounts the card at its own first frame: a box scaled or moved by its entrance or exit
+  // would draw the letters differently in each tab. So a Lottie card only fades and wipes (it moves on its own).
+  if (!card.anim && card.src?.endsWith(".json")) transform = "none";
   return (
     <div style={{ position: "absolute", left: `${x}%`, top: `${y}%`, width: `${w}%`, height: `${h}%`, display: "flex", alignItems: "center",
       justifyContent: "center", transform, opacity, clipPath }}>
@@ -231,7 +296,7 @@ export const CardView: React.FC<{ card: Card; t: number; prev?: Card; next?: Car
         {card.anim ? (
           <AnimCard anim={card.anim} w={bw} h={bh} look={look} m={m} fonts={fonts} dur={dur} light={light} id={`${card.start}`} />
         ) : card.src!.endsWith(".json") ? (
-          <LottieCard src={card.src!} />
+          <LottieCard src={card.src!} texts={card.props?.texts as Record<string, string> | undefined} />
         ) : (
           <Capture src={card.src!} size={card.size} marks={card.marks} highlight={card.highlight} bw={bw} bh={bh} dur={dur} look={look} m={m}
             font={fonts.body} light={light} />

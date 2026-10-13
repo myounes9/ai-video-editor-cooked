@@ -243,7 +243,9 @@ Every overlay drops in just before its word, punches on its hit words and leaves
 
 ### anim
 
-One idea per card, only words and numbers the speaker said. `type` is any template in motion.md;
+One idea per card, only words and numbers the speaker said (`check.py` FAILs any other number; it reads
+"two hundred and fifty" as 250 and "7.5k" as "€7.5K", and a K/M/B or % the speaker did not say is a WARN,
+a different one a FAIL). `type` is any template in motion.md;
 the eight original names still work. Parts land on their own words (`"word"`, `"off_word"`), and a
 part's picture is `{"logo": ...}` or `{"src": "images/..."}`. `*word*` sets the stressed word in the
 serif italic accent. A prop that takes a file (`avatar`, `logo_src`, `src`, `a_src`, `b_src`) may be

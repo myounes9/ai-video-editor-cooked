@@ -20,8 +20,8 @@ footage Modal does not hold yet: `modal_render.py held` asks Modal by each file'
 Remotion opens one Chrome tab per CPU thread (`os.availableParallelism()`), not its default of
 half. `--draft` renders at 2/3 size (1080x1920 becomes 720x1280) to `render-draft.mp4`, and on a Mac
 encodes with the hardware H.264 encoder (VideoToolbox, 12 Mbit/s at 1080p scaled by pixel count).
-Finals stay on x264 at Remotion's default quality: the encoder Modal and GitHub use, so a final
-looks the same wherever it renders. A draft is never the video to post.
+Finals stay on x264 at the settings in "Final quality" below: the encoder Modal and GitHub use, so a
+final looks the same wherever it renders. A draft is never the video to post.
 
 Measured 2026-10-06 on an M4 Pro (14 threads), the sample take (44.2 s, 1326 frames, 1080x1920), with
 other renders running on the same machine (load average 13-24), so each figure is a range:
@@ -51,6 +51,54 @@ pieces, each its own Chrome, joined like the GitHub render. Nothing to do: it sa
 | `the laptop render failed (exit N). The renderer's log: <path>` | read its last line; render again once; then offer `--draft` or `--modal` |
 | `render.mjs <cmd> failed (exit N)` (stills, bundle, Lambda) | run the same command again once; the same error twice: say so with that line |
 | `the render stalled: ... rendering again in 200-frame pieces` | wait; it finishes on its own |
+
+## Final quality
+
+Every final, wherever it renders (laptop, the 200-frame fallback, patch, Modal, GitHub, Lambda), and the
+benchmark that times the laptop, uses one recipe (`render.mjs` `FINAL` and `LIMITER`, `edit.py` `LIMITER`
+and `FINAL_X264`; `edit.py demo` checks they match). Drafts keep their picture settings and get the
+same sound, so a draft sounds like the final; stills are as they were.
+
+| | Before | Now |
+|---|---|---|
+| Frames from Chrome | JPEG, quality 80 | PNG (lossless) |
+| Colour | full range BT.601 (`yuvj420p`, `bt470bg`), unlike the cut | limited range BT.709 (`yuv420p`, `bt709`), like the cut |
+| Encoder | x264 medium, CRF 18 | x264 slow, CRF 16 |
+| Sound | AAC 192k on the laptop (320k joined), no limiter | AAC 320k everywhere, true-peak limiter at -1 dBTP |
+| The cut at output size | x264 veryfast, CRF 18 | x264 medium, CRF 18 |
+
+The limiter reads the sound at 192 kHz, so a peak between two samples counts, with its 5 ms look-ahead
+compensated (no sample moves: a click comes out on its own sample) and no make-up gain, so the loudness
+stays the cut's. The compensation is apad and atrim round it, 959 samples (5 ms at 192 kHz, less one), not
+alimiter's `latency` option: that came in FFmpeg 5.1, and setup accepts 4.4 (Ubuntu 22.04). On FFmpeg 9 the
+two give the same samples, bit for bit (`edit.py demo` checks it wherever the option exists). Its ceiling is -1.5 dBFS because AAC adds up to 0.4 dB back (a 12 kHz test tone went
+from -1.5 to -1.45 dBTP; at a -1.0 ceiling it ended at -0.65). Lambda encodes the sound itself, so
+`render.mjs lambda` runs the limiter once more on the downloaded file, the picture copied.
+`edit.py patch` on a render from before these settings says to render in full: its full-range frames
+would not match the new pieces.
+
+Measured 2026-10-13 on an M4 (10 cores) with other jobs running (load average 9-29), on 12 s (360
+frames) of a real 1080x1920 edit with a card, two zooms and captions, through `edit.py render`:
+
+| | Before | Now |
+|---|---|---|
+| Render time, 3 runs each, interleaved | 17.3-22.5 s (0.048-0.063 s a frame) | 27.3-31.3 s (0.076-0.087 s a frame), about 1.6x |
+| File | 16.6 MB | 15.4 MB |
+| PSNR / SSIM against a near-lossless render (PNG, CRF 1) | 45.6 dB / 0.9903 | 48.6 dB / 0.9936 |
+| True peak, loudness | -0.34 dBTP, -15.54 LUFS | -1.47 dBTP, -15.56 LUFS |
+| Sound against the cut | 0 samples late | 0 samples late |
+
+The time goes on PNG: Chrome encodes each frame losslessly (+40-55% with 5 tabs), then x264 slow at
+CRF 16 (+15-25%). JPEG at quality 95 was not reliably faster than PNG (19-33 s against 27-33 s) and
+scored 47.6 dB, so finals take PNG. CRF 17 saved 13% of the file for 0.5 dB less; CRF 16 stays. On the
+whole 55 s take the limiter took the true peak from 0.0 to -1.49 dBTP and the loudness from -13.62 to
+-13.66 LUFS. The same 12 s rendered as two chunks and joined matched the straight render: the same
+tags, the sound identical to the sample, the picture 51.3 dB on average and 45.1 dB at the join. The
+cut at output size (55 s, 1440x2560 to 1080x1920): veryfast 10-16 s and 45.7 dB, medium 22 s and
+46.3 dB, slow 42 s and 46.4 dB. The benchmark reads about 2x the old seconds per frame, and a laptop
+speed saved before these settings (`laptop.json` without `"final"`) is benchmarked again, so estimates
+stay right. Modal's and GitHub's guesses (`MODAL_MEASURED`, `GH_S_PER_FRAME`) were measured before and
+are not re-measured yet; Modal's corrects itself after the first render.
 
 ## Modal
 

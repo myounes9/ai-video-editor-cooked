@@ -255,6 +255,12 @@ A card has `src` (image or Lottie) or `anim` (a visuals.json anim), never both. 
   from style.json `transitions`; `cut` when that list is empty, a creator who only cuts; `match` in, `iris` out when
   there is no list). Each takes about 0.62 s x the personality's k; `cut` takes none.
 - `focus`: `[x, y]` % of the frame a scene opens from and closes to (default the head centre from face.json).
+- A Lottie card (`src` ending `.json`) plays at its own `fr`, whatever the edit's fps. Its text layers' fonts load from
+  Google Fonts by `fFamily` (Inter when it is not there), at `fWeight` or the weight `fStyle` names ("ExtraBold").
+  `props.texts`: `{"<text layer name>": "words"}` replaces that layer's words, inside precomps too; its numbers are
+  checked like any card's (said, or a FAIL). Its `entrance` and exit only fade or wipe: a scaled or moved box would
+  lay its text out differently in each tab of a parallel render. edit.py warns on a frame rate outside 8-120 fps
+  and on a font it can't load (check.py `lottie_findings`).
 - `marks`: `[{"kind": "box|ring|underline|bracket|pill|dim|highlight", "rect": [x, y, w, h], "at": 0.8}]` on a
   capture card. `rect` is in the capture's own pixels, `at` is seconds after the card lands (from `at_word`,
   `at_s`, else 0.8), plus `label` and `side` for `bracket` and `pill`. See references/motion.md "Capture marks".

@@ -4,6 +4,88 @@ What changed for every user, newest first.
 
 ## Unreleased
 
+- The check reads spoken numbers the way people say them. `check.py` split "two hundred and fifty" into
+  2, 100 and 50, so a card showing 250 FAILed as a number nobody says, and "7.5K" on a card never matched
+  a spoken "seven point five k". A new shared parser, `lib/ai_editor/numbers.py` (stdlib only), reads
+  "two hundred and fifty" as 250, "seven hundred twenty-six" as 726, "a hundred and twenty-seven" as 127
+  ("a" only before hundred, thousand, million), "7.5k", "seven point five k" and "7.5 thousand" as 7500,
+  "two and a half" as 2.5 and "fifty percent" as 50, and gives each number's words (start and end) and
+  kind (count, percent, money, duration), so later steps can land a graphic on them. On the card side
+  "7.5K", "EUR 7.5K", "€7.5K", "100K" and "50%" read as 7500, 7500, 7500, 100000 and 50, and a number
+  after a dot is still a number ("No.1", "...37"). A number of the same or a bigger scale starts a new
+  one ("between one hundred and two hundred" is 100 and 200, "one million two million" two numbers), and
+  "5 hundred" is 500. The speaker's numbers are read from the cut's punctuated transcript and from the
+  caption chunks with each chunk's end ending a number, so "a thousand" | "and three people replied" is
+  never 1003 while "four hundred" | "and eighty-one" (the transcript says "four hundred and eighty-one")
+  is 481. A card's scale is the speaker's: "€7.5M" when "7.5k" was said FAILs (it passed before); a K, M,
+  B or % nobody said on a bare spoken number ("$2M" for "two", "50%" for "fifty users", "7.5" for "7.5k")
+  WARNs, where it passed; every other number that counted as said before still does. A Lottie card's
+  `props.texts` are checked like any card's words. A card's motion props (`enter`, `exit`, `ease`,
+  `ambient`, `word_at`, an accent colour ...) no longer count as on-screen numbers, so "power2.out" or
+  "back.out(2.5)" never FAILs, unless one holds words ("37 clients" under `size`). Test: `numbers.py demo`
+  (a made-up sample take's numbers and their words, the scale rule) and `check.py demo` ("250" and "€7.5K" pass,
+  an invented "37" still fails, also after a dot, in a Lottie's texts and under `size`; the four joins
+  above fail; the scale and % cases).
+
+- Finals render at the best quality the renderer gives, on every target (laptop, the 200-frame fallback,
+  patch, Modal, GitHub and Lambda). Chrome hands over each frame as PNG instead of JPEG at quality 80,
+  so caption and card edges no longer smear; the colour is BT.709 limited range like the cut, where it
+  was full-range BT.601 (`yuvj420p`); x264 runs at preset slow, CRF 16 (was medium, CRF 18). The sound
+  is AAC at 320 kbit/s everywhere (laptop renders were 192k) through a true-peak limiter at -1 dBTP that
+  reads the sound at 4x its rate, moves no sample and leaves the loudness where the cut had it (on a
+  real 55 s take: true peak 0.0 to -1.49 dBTP, loudness -13.62 to -13.66 LUFS). Its 5 ms look-ahead is
+  compensated with apad and atrim, which FFmpeg 4.4 has, not alimiter's `latency` option (FFmpeg 5.1+,
+  so Ubuntu 22.04's 4.4.2 would have failed every render); on FFmpeg 9 the two give the same samples, bit
+  for bit. Lambda's file gets the limiter in one more pass, the picture copied. The cut at output size is made with preset medium (was
+  veryfast). On 12 s of a real edit: 48.6 dB against a near-lossless render (was 45.6), 7% smaller,
+  about 1.6x the render time. Drafts keep their picture (2/3 size, the Mac's hardware encoder) and get
+  the same sound; stills are unchanged. A laptop speed saved before this is benchmarked again, with the
+  final settings, so the estimate stays right; the cloud speeds (Modal, GitHub, the Lambda guess), measured
+  before, are scaled by the same 1.6 until a render there measures its own, and a Modal speed saved before
+  keeps only its upload speed. Lambda's function times out after 900 s (was 240 s, about 500 frames a
+  Lambda at the final settings; a new function is deployed beside the old one). `edit.py patch` on an older
+  render says to render in full. Test: `edit.py demo` (the settings match across render.mjs and the
+  join and every target uses them, the limiter holds -1 dBTP on a tone whose peaks fall between samples
+  and keeps a click on its sample and matches `latency=true` where ffmpeg has it, a stale laptop or Modal
+  speed is not used). Measurements: style-edit `references/render.md`
+  "Final quality".
+
+- Designer-made Lottie cards play as they were made. A Lottie exported at 60 fps played at half speed in a 30 fps
+  edit; now each plays at its own frame rate (`fr`), whatever the edit's. Text in a Lottie was drawn in the browser's
+  serif at weight 400: its fonts now load from Google Fonts before the first frame (through `look.tsx`, Inter when the
+  family is not there, like the rest of the edit), with the weight from `fWeight` or the style name After Effects
+  writes ("ExtraBold", "SemiBold"), and lottie-web no longer fetches fonts on its own. A card's `props.texts`
+  (`{"<text layer name>": "words"}`) replaces a text layer's words, inside precomps too. A Lottie that can't load
+  stops the render with its name instead of leaving an empty card, and the frame waits until the card is on the page.
+  A Lottie card only fades and wipes in and out: lottie-web lays text out under the transform its box has when it
+  mounts, so a pop or scale entrance drew the letters differently in each tab of a parallel render (57 of 90 frames
+  in `test/determinism.mjs`, which now has a Lottie case). Before stills and renders, edit.py warns on a
+  Lottie whose frame rate can't be right (outside 8-120 fps, or none), that has no frames, or whose font Google Fonts
+  does not have or whose style names no weight (check.py `lottie_findings`). Test: `node test/lottie.mjs <out>` in the
+  renderer, on a new 60 fps fixture (`test/public/lottie/title-60fps.json`: a moving bar, a Montserrat ExtraBold text
+  layer): the bar sits where 60 fps puts it on 30 fps frames, ExtraBold carries 2.3x the ink of the same file set
+  Regular, an unknown family draws in Inter, and the same frame rendered in two processes has the same md5. The old
+  card fails all of it. `test/cases.json` has a `lottie-v` case; `check.py demo` and `edit.py demo` cover the warnings.
+
+- A render split across Chrome tabs now gives the same frames as one tab. Each tab of a parallel render
+  drew some frames differently: in the test below, 141 to 145 of 1038 frames differed (a social post's
+  text a pixel off, up to 240/255 at its edges; a chat card up to 107/255), and 73 of 90 frames of a
+  product page zoom (up to 111/255). Two causes. GSAP's default `force3D: "auto"` wrote `translate3d`
+  mid-tween, which puts the element on its own GPU layer; `motion.ts` now sets `gsap.config({ force3D:
+  false })`, which reaches every tween and every `useGsapTimeline` timeline (`gsap.defaults` would also
+  add a transform to opacity-only elements and SVG paths). Moves that are really 3D (the drop-in's tilt)
+  still render in 3D. And `will-change: transform` on the product video's page made Chrome reuse an
+  earlier raster as the zoom moved, so a video frame differed from its still by up to 107/255; it is
+  gone; its stills are unchanged (at most 1/255). Frames rendered in one tab move only at edges: text
+  and shape antialiasing (mean 1 to 16/255 on the pixels that changed), and the golden stills keep the
+  same worst tiles. Test: `remotion/test/determinism.mjs` renders every frame of each GSAP
+  plugin, every ease (a new Proof row per ease), a chat card, a social post, a Lottie card with text and a
+  product page zoom in 6 tabs (`--tabs`) and in one, compares them pixel by pixel and prints each differing
+  frame with its largest channel difference: 0 of 1218 frames differ at 6 tabs. The Lottie's moving bar is
+  let off 4 pixels at 8/255 a frame: Chrome repaints only what moved, and on 3 frames one edge pixel lands
+  7/255 off a frame painted whole. A frame that does not decode, or a render with fewer frames, stops the
+  test instead of comparing as the same.
+
 - Scrolling holds on the home window and the review page. The home window redraws every 1.5 s, and each
   redraw put every inner list (Your videos, My styles, a style's page, Settings) back at the top. Now a
   redraw with nothing new leaves the page alone, and one with something new keeps every list where it

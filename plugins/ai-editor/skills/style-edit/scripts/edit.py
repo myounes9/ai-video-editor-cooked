@@ -95,6 +95,12 @@ def footage_filter(plan, sw, sh):
     return f"scale={w}:{bh},setsar=1,pad={w}:{h}:0:{y}:black"
 
 
+# The cut at output size is made once per cut and every final is drawn over it. Preset medium: on the
+# 55 s real-footage cut (1440x2560 to 1080x1920, CRF 18) 46.3 dB PSNR against the scaled cut, veryfast
+# 45.7 dB in half the time, slow 46.4 dB in twice the time (render.md "Final quality").
+PROXY_X264 = ["-c:v", "libx264", "-crf", "18", "-preset", "medium"]
+
+
 def prepare_public(edit, plan, tag):
     """A folder with only what the render reads: the cut at output size (keyframe every
     15 frames, which keeps frame seeking fast) and the card images."""
@@ -111,7 +117,7 @@ def prepare_public(edit, plan, tag):
     if not proxy.exists() or proxy.stat().st_mtime < cut.stat().st_mtime or not made.exists() or made.read_text(encoding="utf-8") != vf:
         print(f"preparing {plan['width']}x{plan['height']} copy of {cut.name}", flush=True)
         subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", str(cut), "-filter_complex", vf,
-                        "-c:v", "libx264", "-crf", "18", "-preset", "veryfast", "-g", "15",
+                        *PROXY_X264, "-g", "15",
                         "-keyint_min", "15", "-sc_threshold", "0", "-pix_fmt", "yuv420p",
                         "-c:a", "copy", str(proxy)], check=True)
         made.write_text(vf, encoding="utf-8")
@@ -133,7 +139,28 @@ def prepare_public(edit, plan, tag):
             sys.exit(f"ERROR: {src} missing" + (" (run sfx.py build, then plan.py)" if rel.startswith(".sfx/") else ""))
         (pub / rel).parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(src, pub / rel)
+    lottie_warnings(edit, [c["src"] for c in plan["cards"] if str(c.get("src", "")).endswith(".json")])
     return pub
+
+
+def lottie_warnings(edit, rels):
+    """Prints what each Lottie card would get wrong (check.py lottie_findings): an odd frame rate, a font the render
+    can't load. Warnings only: the render goes on."""
+    if not rels:
+        return []
+    from check import google_fonts, lottie_findings
+    fonts, found = google_fonts(REMOTION), []
+    for rel in dict.fromkeys(rels):
+        try:
+            data = json.loads((edit / rel).read_text(encoding="utf-8"))
+        except ValueError as e:
+            data = None
+            print(f"WARN Lottie {rel} is not valid JSON ({e}): the render will stop on it", flush=True)
+        if data is not None:
+            found += lottie_findings(data, rel, fonts)
+    for f in found:
+        print(f"WARN {f['what']}\n     -> {f['fix']}", flush=True)
+    return found
 
 
 def still_frames(plan):
@@ -248,17 +275,28 @@ def render_failed(code, log, edit):
 
 
 # Laptop speed: benchmarked once (2 s of the first video), then replaced by every full laptop render.
+# FINAL_TAG names the final settings it was measured with: a speed from before them (JPEG frames, preset
+# medium; finals now take about 1.6x as long) is benchmarked again.
 LAPTOP_JSON = HOME / "laptop.json"
+FINAL_TAG = "png bt709 x264-slow crf16"
+# How much longer a final takes at FINAL_TAG's settings than before them, measured on a laptop (render.md
+# "Final quality": 0.048-0.063 to 0.076-0.087 s a frame). The cloud speeds below were measured before them
+# and are scaled by it until a render there measures its own.
+FINAL_SLOWER = 1.6
 
 
-def laptop_speed(plan_path, pub):
+def laptop_speed(plan_path, pub, bench=None):
     try:
-        return json.loads(LAPTOP_JSON.read_text(encoding="utf-8"))
+        m = json.loads(LAPTOP_JSON.read_text(encoding="utf-8"))
+        if m.get("final") == FINAL_TAG:
+            return m
     except (OSError, ValueError):
-        b = json.loads(node("bench", pub, plan_path).stdout.strip().splitlines()[-1])
-        m = {"s_per_frame": b["s_per_frame"], "bundle_s": b["bundle_s"], "start_s": b.get("start_s", 0), "source": "benchmark"}
-        LAPTOP_JSON.write_text(json.dumps(m), encoding="utf-8")
-        return m
+        pass
+    b = json.loads((bench or (lambda: node("bench", pub, plan_path).stdout))().strip().splitlines()[-1])
+    m = {"s_per_frame": b["s_per_frame"], "bundle_s": b["bundle_s"], "start_s": b.get("start_s", 0), "source": "benchmark",
+         "final": FINAL_TAG}
+    LAPTOP_JSON.write_text(json.dumps(m), encoding="utf-8")
+    return m
 
 
 def laptop_s(lap, frames):
@@ -300,8 +338,9 @@ MODAL_JSON = HOME / "modal.json"   # the last Modal render's measured speed
 #   straggle     the render phase past start_s over the ideal, container seconds / containers
 #   tail_s       the last piece done to the joined file: the rest of the download and the join
 #   up_bytes_s   upload speed, which is the uplink of the computer that measured it
-# Each Modal render saves its own to MODAL_JSON and the next estimate uses those.
-MODAL_MEASURED = {"s_per_frame": 0.331, "start_s": 7, "straggle": 1.26, "tail_s": 12, "up_bytes_s": 9.3e6}
+# Each Modal render saves its own to MODAL_JSON and the next estimate uses those. s_per_frame is 0.331 at the
+# settings before FINAL_TAG's, scaled by FINAL_SLOWER; a saved speed from before them keeps only its uplink.
+MODAL_MEASURED = {"s_per_frame": round(0.331 * FINAL_SLOWER, 3), "start_s": 7, "straggle": 1.26, "tail_s": 12, "up_bytes_s": 9.3e6}
 
 
 def modal_plan(frames, s_per_frame):
@@ -325,6 +364,8 @@ def modal_speed():
     """(speeds, measured?): the last Modal render's measurements over the sample take's."""
     try:
         m = json.loads(MODAL_JSON.read_text(encoding="utf-8"))
+        if m.get("final") != FINAL_TAG:   # rendered before the final settings: its uplink still holds
+            m = {k: m[k] for k in ("up_bytes_s",) if k in m}
         return {**MODAL_MEASURED, **{k: m[k] for k in MODAL_MEASURED if k in m}}, "straggle" in m
     except (OSError, ValueError):
         return dict(MODAL_MEASURED), False
@@ -393,7 +434,7 @@ def render_modal(edit, plan_path, pub, out):
     if r.returncode:
         sys.exit("ERROR: the Modal render failed (above). Nothing was written to " + str(out))
     m = json.loads(r.stdout.strip().splitlines()[-1])
-    save_json(MODAL_JSON, {**modal_speed()[0], **m})    # an upload Modal skipped keeps the last uplink speed
+    save_json(MODAL_JSON, {**modal_speed()[0], **m, "final": FINAL_TAG})    # an upload Modal skipped keeps the last uplink speed
 
 
 def render_chunks(edit, plan_path, pub, out, draft, log, stall, run=None, bundle_to=None):
@@ -454,12 +495,13 @@ def render_laptop(edit, plan_path, pub, out, draft, run=None, chunks=None):
         except (OSError, ValueError, KeyError):
             bundle_s = 3.0
         save_json(LAPTOP_JSON, {"s_per_frame": max(0.001, (time.time() - t0 - bundle_s) / frames),
-                                "bundle_s": bundle_s, "source": f"render of {edit.name}"})
+                                "bundle_s": bundle_s, "source": f"render of {edit.name}", "final": FINAL_TAG})
 
 
 # GitHub Actions, measured 2026-09-30 (a private test repo): ubuntu-latest rendered
 # the sample take, 44.2 s of 1080x1920 (1326 frames), in 409 s, plus about 25 s of npm ci, browser and media download.
-GH_S_PER_FRAME = 0.31
+# That was 0.31 s a frame before the final settings: scaled by FINAL_SLOWER until a run there is measured.
+GH_S_PER_FRAME = round(0.31 * FINAL_SLOWER, 3)
 GH_INSTALL_S = 25
 GH_CHUNK_S = 120          # about 2 min of video per runner
 GH_MAX_CHUNKS = 20        # free accounts run 20 jobs at once
@@ -599,9 +641,21 @@ __JOIN__
         env:
           GH_TOKEN: ${{ github.token }}
 """
+# Every final's sound, the same as render.mjs AUDIO (demo checks the two match): AAC at 320 kbit/s through
+# a true-peak limiter read at 4x the sample rate, its look-ahead compensated so no sample moves (apad and
+# atrim do what alimiter's latency option does, which needs FFmpeg 5.1; setup accepts 4.4), no make-up
+# gain. The ceiling is -1.5 dBFS: AAC puts up to 0.4 dB back, so the file lands at or under -1 dBTP.
+# Measured on the real-footage take: true peak 0.0 to -1.5 dBTP, loudness down 0.04 LU at most.
+LIMITER = "aresample=192000,apad=pad_len=959,alimiter=limit=0.8414:attack=5:release=50:level=false,atrim=start_sample=959,asetpts=PTS-STARTPTS,aresample=48000"
+AUDIO = ["-af", LIMITER, "-c:a", "aac", "-b:a", "320k"]
+# The final picture when ffmpeg encodes it (the patch splice): render.mjs FINAL's x264 settings, tagged
+# BT.709 limited range like the frames Remotion writes.
+FINAL_X264 = ["-c:v", "libx264", "-crf", "16", "-preset", "slow", "-pix_fmt", "yuv420p", "-colorspace", "bt709",
+              "-color_primaries", "bt709", "-color_trc", "bt709", "-color_range", "tv"]
+
 # Chunks carry PCM audio that runs a few samples past the last frame (16 at 30 fps). Each chunk's audio
-# is cut to exactly its frames, the pieces laid end to end and encoded to AAC once; the video is copied.
-# Measured on the sample take (3 chunks): no gap or step at the joins, sync held to the sample.
+# is cut to exactly its frames, the pieces laid end to end and encoded to AAC once (AUDIO); the video is
+# copied. Measured on the sample take (3 chunks): no gap or step at the joins, sync held to the sample.
 JOIN = """import json, os, subprocess
 fps, sr = float(os.environ["FPS"]), 48000
 chunks = json.loads(os.environ["CHUNKS"])
@@ -616,8 +670,9 @@ with open("list.txt", "w") as lst, open("audio.raw", "wb") as pcm:
         pcm.write(a[:n].ljust(n, b"\\0"))
 subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "concat", "-safe", "0", "-i", "list.txt",
                 "-f", "s16le", "-ar", str(sr), "-ac", "2", "-i", "audio.raw", "-map", "0:v", "-map", "1:a",
-                "-c:v", "copy", "-c:a", "aac", "-b:a", "320k", "-movflags", "+faststart", "out/render.mp4"], check=True)
-"""
+                "-c:v", "copy", "-af", "__LIMITER__", "-c:a", "aac", "-b:a", "320k", "-movflags", "+faststart",
+                "out/render.mp4"], check=True)
+""".replace("__LIMITER__", LIMITER)
 
 
 def workflow(zip_name):
@@ -926,16 +981,17 @@ def splice(old, pieces, out, fps, frames):
     fl.append("".join(f"[v{n}]" for n in range(len(segs))) + f"concat=n={len(segs)}:v=1:a=0[v]")
     subprocess.run(["ffmpeg", "-v", "error", "-y", *inputs, "-f", "s16le", "-ar", str(sr), "-ac", "2", "-i", str(pcm),
                     "-filter_complex", ";".join(fl), "-map", "[v]", "-map", f"{len(pieces) + 1}:a", "-r", str(rate),
-                    "-c:v", "libx264", "-crf", "16", "-preset", "fast", "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "192k",
+                    *FINAL_X264, *AUDIO,
                     "-video_track_timescale", "1000", "-movflags", "+faststart", str(out)], check=True)
     pcm.unlink()
 
 
 def probe_render(path):
-    r = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries", "stream=width,height,nb_frames",
-                        "-of", "json", str(path)], capture_output=True, text=True, check=True)
+    """(width, height, frames, colour range): "pc" is a render from before finals were BT.709 limited range."""
+    r = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries",
+                        "stream=width,height,nb_frames,color_range", "-of", "json", str(path)], capture_output=True, text=True, check=True)
     s = json.loads(r.stdout)["streams"][0]
-    return s["width"], s["height"], int(s.get("nb_frames") or 0)
+    return s["width"], s["height"], int(s.get("nb_frames") or 0), s.get("color_range", "unknown")
 
 
 def patch(edit, plan_path, plan, pub, tag, ranges=None, run=None, bundle_to=None):
@@ -955,10 +1011,12 @@ def patch(edit, plan_path, plan, pub, tag, ranges=None, run=None, bundle_to=None
             return
     else:
         sys.exit(f"ERROR: no {snap.name} (the plan {out.name} was made from): pass --range A-B or render in full")
-    w, h, n = probe_render(out)
+    w, h, n, rng = probe_render(out)
     fps, frames = plan["fps"], plan["durationInFrames"]
     if (w, h) != (plan["width"], plan["height"]) or abs(n - frames) > 1:
         sys.exit(f"the plan is {plan['width']}x{plan['height']}, {frames} frames; {out.name} is {w}x{h}, {n}: render in full")
+    if rng == "pc":    # full-range BT.601 pieces of an older render would not match the new BT.709 ones
+        sys.exit(f"{out.name} was rendered before finals were BT.709: render in full (edit.py render {edit})")
     pieces = [(max(0, math.floor(a * fps)), min(frames - 1, math.ceil(b * fps))) for a, b in spans]
     todo = sum(b - a + 1 for a, b in pieces)
     print("patching " + ", ".join(f"{a / fps:.2f}-{(b + 1) / fps:.2f} s" for a, b in pieces)
@@ -1053,18 +1111,98 @@ def demo_patch():
         assert len(asked) == 1
 
 
+def true_peak(path):
+    """(integrated LUFS, true peak dBTP) of a file's sound, ffmpeg's ebur128."""
+    err = subprocess.run(["ffmpeg", "-nostats", "-v", "info", "-i", str(path), "-map", "0:a", "-af", "ebur128=peak=true",
+                          "-f", "null", "-"], capture_output=True, text=True).stderr
+    summ = err[err.rfind("Summary:"):]
+    return tuple(float(re.search(rf"{k}:\s+(-?[\d.]+)", summ).group(1)) for k in ("I", "Peak"))
+
+
+def demo_final():
+    """The final settings: one recipe in render.mjs and here, and the limiter holds -1 dBTP without moving a sample."""
+    import array
+    import tempfile
+    mjs = (SRC / "render.mjs").read_text(encoding="utf-8")
+    assert f'const LIMITER = "{LIMITER}";' in mjs, "render.mjs LIMITER differs from edit.py LIMITER"
+    assert '"-c:a", "aac", "-b:a", "320k"' in mjs and LIMITER in JOIN and "320k" in JOIN
+    assert 'x264Preset: "slow", crf: 16' in mjs and FINAL_X264[1:6] == ["libx264", "-crf", "16", "-preset", "slow"]
+    assert 'colorSpace: "bt709"' in mjs and 'imageFormat: "png"' in mjs
+    # and every target uses them: the bench, the laptop (through videoOpts), a chunk and Lambda take FINAL; the
+    # laptop's mux and Lambda's sound pass take AUDIO
+    fn = {f.split("(")[0]: f for f in mjs.split("\nasync function ")[1:]}
+    assert all("FINAL" in fn[f] for f in ("bench", "chunk", "lambda")) and "...videoOpts(" in fn["local"] and ": FINAL;" in mjs
+    assert "...AUDIO" in fn["local"] and "limitAudio(" in fn["lambda"] and mjs.count("...AUDIO") == 2, mjs.count("...AUDIO")
+    # nothing newer than setup's FFmpeg 4.4: alimiter's latency option came in 5.1
+    assert "latency" not in LIMITER
+    with tempfile.TemporaryDirectory() as t:
+        # a 12 kHz tone whose peaks fall between samples (true peak 3 dB over the sample peak) under a low hum
+        loud, hot, kept = Path(t) / "loud.wav", Path(t) / "hot.m4a", Path(t) / "kept.m4a"
+        subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", "aevalsrc='0.99*sin(2*PI*12000*t+PI/4)*lt(mod(t,1),0.2)"
+                        "+0.3*sin(2*PI*200*t)':s=48000:d=3", "-ac", "2", "-c:a", "pcm_f32le", str(loud)], check=True)
+        subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", str(loud), "-c:a", "aac", "-b:a", "320k", str(hot)], check=True)
+        subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", str(loud), *AUDIO, str(kept)], check=True)
+        assert true_peak(hot)[1] > -1.0 and true_peak(kept)[1] <= -1.0, (true_peak(hot), true_peak(kept))
+        # a click under the ceiling comes out on the same sample: the look-ahead is compensated
+        click = subprocess.run(["ffmpeg", "-v", "error", "-f", "lavfi", "-i", "aevalsrc='if(eq(n,24000),0.5,0)':s=48000:d=1",
+                                "-af", LIMITER, "-f", "s16le", "-ac", "1", "-"], capture_output=True, check=True).stdout
+        x = array.array("h", click)
+        assert len(x) == 48000 and max(range(len(x)), key=lambda i: abs(x[i])) == 24000, (len(x), max(x))
+        # apad/atrim compensate exactly what alimiter's own latency option does, where this ffmpeg has it (5.1+)
+        has = "latency" in subprocess.run(["ffmpeg", "-hide_banner", "-h", "filter=alimiter"], capture_output=True, text=True).stdout
+        if has:
+            own = LIMITER.replace("apad=pad_len=959,", "").replace(",atrim=start_sample=959,asetpts=PTS-STARTPTS", "")
+            same = [subprocess.run(["ffmpeg", "-v", "error", "-i", str(loud), "-af", f, "-f", "f32le", "-"], capture_output=True,
+                                   check=True).stdout for f in (LIMITER, own.replace("level=false", "level=false:latency=true"))]
+            assert same[0] == same[1] and len(same[0]) == 3 * 48000 * 2 * 4, [len(x) for x in same]
+
+
 def demo():
     import tempfile
+    demo_final()
     demo_patch()
     # the laptop estimate: Chrome's start-up once, then every frame; every cloud line says when it is not set up
     assert laptop_s({"s_per_frame": 0.05, "bundle_s": 3.0, "start_s": 2.0}, 1000) == 55.0
     assert laptop_s({"s_per_frame": 0.05, "bundle_s": 3.0}, 1000) == 53.0
+    # a speed measured before the final settings is benchmarked again; one measured with them is kept
+    global LAPTOP_JSON
+    keep, benched = LAPTOP_JSON, []
+    with tempfile.TemporaryDirectory() as d:
+        LAPTOP_JSON = Path(d) / "laptop.json"
+        try:
+            bench = lambda: benched.append(1) or '{"s_per_frame": 0.08, "bundle_s": 2, "start_s": 1}\n'
+            LAPTOP_JSON.write_text('{"s_per_frame": 0.047, "bundle_s": 3, "source": "render of x"}', encoding="utf-8")
+            assert laptop_speed(None, None, bench)["s_per_frame"] == 0.08 and benched == [1]
+            assert laptop_speed(None, None, bench)["final"] == FINAL_TAG and benched == [1]
+        finally:
+            LAPTOP_JSON = keep
+    # a Modal speed from before the final settings is not used, but its uplink is; one measured with them is
+    global MODAL_JSON
+    keep = MODAL_JSON
+    with tempfile.TemporaryDirectory() as d:
+        MODAL_JSON = Path(d) / "modal.json"
+        try:
+            MODAL_JSON.write_text('{"s_per_frame": 0.2, "straggle": 1.1, "up_bytes_s": 5e6}', encoding="utf-8")
+            m, measured = modal_speed()
+            assert (m["s_per_frame"], m["straggle"], m["up_bytes_s"], measured) == (MODAL_MEASURED["s_per_frame"], 1.26, 5e6, False)
+            MODAL_JSON.write_text(json.dumps({"s_per_frame": 0.6, "straggle": 1.1, "final": FINAL_TAG}), encoding="utf-8")
+            assert modal_speed() == ({**MODAL_MEASURED, "s_per_frame": 0.6, "straggle": 1.1}, True)
+        finally:
+            MODAL_JSON = keep
+    assert MODAL_MEASURED["s_per_frame"] == 0.53 and GH_S_PER_FRAME == 0.496
     with tempfile.TemporaryDirectory() as d:
         assert not aws_ready({}, d) and aws_ready({"AWS_PROFILE": "x"}, d)
         (Path(d) / ".aws").mkdir()
         (Path(d) / ".aws" / "credentials").write_text("", encoding="utf-8")
         assert aws_ready({}, d)
     assert not_set_up(True, "x") == "" and "Lambda section" in not_set_up(False, "Lambda section")
+    with tempfile.TemporaryDirectory() as d:   # a Lottie card's odd frame rate and unknown font are named before the render
+        (Path(d) / "a.json").write_text(json.dumps({"fr": 0, "ip": 0, "op": 60, "fonts": {"list": [{"fFamily": "No Such Sans"}]}}),
+                                        encoding="utf-8")
+        (Path(d) / "b.json").write_text("{", encoding="utf-8")
+        got = [f["what"] for f in lottie_warnings(Path(d), ["a.json", "b.json", "a.json"])]
+        assert len(got) == (2 if (REMOTION / "node_modules").exists() else 1) and "frame rate 0" in got[0], got
+        assert lottie_warnings(Path(d), []) == []
     plan = {"fps": 30, "durationInFrames": 900,
             "captions": {"chunks": [{"start": 1, "end": 2}, {"start": 5, "end": 6}]},
             "zooms": [{"start": 0.5, "end": 3}], "cards": [{"start": 20, "end": 23}, {"start": 25, "end": 26}]}

@@ -8,7 +8,8 @@
 plan: every card inside the app's safe zones, vertical cards centred, no card on the head while
 it is up (face.json, moved by the zooms or the split window), captions inside the safe zone and
 never held long past their words, no stretch with nothing changing on screen, not more text cards
-than picture cards, text cards' text at least 34 px.
+than picture cards, text cards' text at least 34 px, no number on a built card the speaker does not say
+(read as people say them: "two hundred and fifty" is 250, "7.5k" is "€7.5K"; lib/ai_editor/numbers.py).
 render: on the rendered mp4 (4 samples a second), where the card's drawn pixels are: on the face
 (YuNet, face.py), off centre, or not moving. On cut.mp4's audio: silences inside the speech, and
 kept spans too short to read as anything but a glitch. Caption words that differ from what the
@@ -33,6 +34,8 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 sys.dont_write_bytecode = True
 sys.path.insert(0, str(HERE))
+sys.path.insert(1, str(HERE.parents[2] / "lib"))
+from ai_editor import numbers  # noqa: E402
 from plan import GAP_S, QUIET_HOLD_S, card_gaps, INK_MIN_W, OVERLAY_EDGE, OVERLAY_TOP, RAIL_TOP, READ_XH, SAFE, capture_xh, explain_ink, clean, cut_lines, cut_points, head_during, overlay_led, small_lines, sticker_crop  # noqa: E402
 
 CENTRE_PLAN = 1.5      # % of the width a vertical card's box centre may sit off 50
@@ -171,9 +174,11 @@ def text_sizes(anim, w, h):
     return out
 
 
-def check_plan(plan, face=None, cuts=(), static_s=STATIC_S, visuals=None, brand=None, named=(), edit="edits/<name>", beats=None):
+def check_plan(plan, face=None, cuts=(), static_s=STATIC_S, visuals=None, brand=None, named=(), edit="edits/<name>", beats=None,
+               heard=None):
     """named: [(t, name)] the profile's things said (route.py beats.json). beats: visuals.json + images.json, to
-    tell a full-frame scene the user asked for ("layout": "scene" on its beat) from one nobody did."""
+    tell a full-frame scene the user asked for ("layout": "scene" on its beat) from one nobody did. heard:
+    cut.transcript.json's words, punctuated, so a card's numbers are read as the speaker said them."""
     out = []
     aspect = aspect_of(plan)
     l, top, r, bottom = SAFE[aspect]
@@ -319,9 +324,14 @@ def check_plan(plan, face=None, cuts=(), static_s=STATIC_S, visuals=None, brand=
             out.append(finding("WARN", first, ("no graphic at all" if first is None else f"first graphic lands at {first:.1f} s")
                                + f"; the creator's winners show one by {want:.1f} s" + (f" (her other videos: {ctl:.1f} s)" if ctl is not None else ""),
                                "anchor a visual to a word in the first sentence (visuals.json)"))
-    for c, n in unsaid_numbers(plan):
-        out.append(finding("FAIL", c["start"], f"'{c['trigger_word']}' {c['anim']['type']} shows {n}, a number nobody says",
-                           "show the page that published it (a capture), or only the words the speaker says"))
+    for c, n, near in unsaid_numbers(plan, heard):
+        name = f"'{c['trigger_word']}' {c.get('src') or c['anim']['type']}"
+        if near is None:
+            out.append(finding("FAIL", c["start"], f"{name} shows {n}, a number nobody says",
+                               "show the page that published it (a capture), or only the words the speaker says"))
+        else:
+            out.append(finding("WARN", c["start"], f"{name} shows {n}; the speaker says {near}",
+                               "show the number as it is said (its K/M, its %), or show the page that published it"))
     # the AI-made look (references/ai-tells.md): BAN -> FAIL, WARN -> WARN
     from ai_tells import check_plan as ai_tells, for_brand
     for f in for_brand(ai_tells(plan, visuals), brand):
@@ -329,45 +339,106 @@ def check_plan(plan, face=None, cuts=(), static_s=STATIC_S, visuals=None, brand=
     return out
 
 
-UNITS = "zero one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen seventeen eighteen nineteen".split()
-TENS = dict(zip("twenty thirty forty fifty sixty seventy eighty ninety".split(), range(20, 100, 10)))
-BIG = {"hundred": 100, "thousand": 1000, "million": 10 ** 6, "billion": 10 ** 9}
 REAL_ANIMS = ("social_post", "video_card", "terminal")   # a real post or clip (fetched), a command line: not a statistic
+# Props that say how a card moves or looks, never what it shows: a measured entrance or exit ({"ease":
+# "back.out(2.5)", "dur": 0.3, ...}, plan.py fit_of), an ease name ("power2.out"), the ambient move, the
+# word's time, a colour (Diagrams accent), a side, a seed, a capture's crop, zoom and size (motion.ts,
+# Templates.tsx, Overlays.tsx, Diagrams.tsx). Their digits are not on screen, unless a key holds words.
+MOTION_KEYS = {"enter", "exit", "ambient", "ease", "stagger", "duration", "dur", "dir", "dist", "word_at", "at", "start_s",
+               "accent", "side", "seed", "point", "size", "crop", "zoom", "rotate", "rate", "cursor"}
+# What a motion key holds when it is not words: an ease ("power2.out", "back.out(1.7)", "steps(12)"), a colour
+# ("#ff3300", "rgba(0,0,0,.5)"), a length, an angle or a time ("48px", "-3deg", "0.3s", "1.2").
+MOTION_TEXT = re.compile(r"(?i)\s*(#[0-9a-f]{3,8}|rgba?\([^)]*\)|[a-z]+\d?(\.(in|out|inout))?(\([^)]*\))?"
+                         r"|-?\d*\.?\d+(px|%|deg|s|ms|em|rem|vh|vw|x)?)\s*")
 
 
-def nums(text):
-    """The numbers written in a text, normalised ("1,200" -> "1200", "40%" -> "40")."""
-    return {str(float(n.replace(",", ""))).removesuffix(".0") for n in re.findall(r"\d[\d,]*(?:\.\d+)?", text)}
+def shown_texts(props):
+    """The words a card's props put on screen: every string but ids, urls and quoted real content (ai_tells
+    SKIP_KEYS) and what a motion key holds (MOTION_KEYS), at any depth, unless that is words: "37 clients"
+    under "size" is shown, "back.out(2.5)" under "ease" and "#ff3300" under "accent" are not."""
+    from ai_tells import SKIP_KEYS
+    out = []
 
-
-def said_numbers(text):
-    """The numbers spoken in a transcript, written as digits or words ("forty two" -> 42, "ten" -> 10)."""
-    out, ws = nums(text), re.findall(r"[a-z]+", text.lower())
-    for i, w in enumerate(ws):
-        v = UNITS.index(w) if w in UNITS else TENS.get(w, BIG.get(w))
-        if v is None:
-            continue
-        if w in TENS and i + 1 < len(ws) and ws[i + 1] in UNITS[1:10]:
-            out.add(str(v + UNITS.index(ws[i + 1])))
-        out.add(str(v))
+    def walk(node, motion):
+        if isinstance(node, dict):
+            for k, v in node.items():
+                if k not in SKIP_KEYS:
+                    walk(v, motion or k in MOTION_KEYS)
+        elif isinstance(node, list):
+            for v in node:
+                walk(v, motion)
+        elif isinstance(node, str) and not (motion and MOTION_TEXT.fullmatch(node)):
+            out.append(node)
+    walk(props or {}, False)
     return out
 
 
-def unsaid_numbers(plan):
-    """[(card, number)]: a number on a built card that the speaker never says. A capture or a real post is the
-    source itself and is exempt. Without captions there is nothing to check against."""
-    from ai_tells import strings
-    spoken = " ".join(ch.get("text", "") for ch in (plan.get("captions") or {}).get("chunks", []))
-    if not spoken.strip():
+def said_numbers(text):
+    """The numbers spoken in a transcript, as people say them (numbers.py spans(): "two hundred and fifty" ->
+    250, "7.5k" and "seven point five k" -> 7500, "two and a half" -> 2.5), plus each number word alone and a
+    tens word with its unit ("two hundred and fifty" also gives 2, 100, 50; "forty two" 40, 2, 42), so nothing
+    that passed before fails now. (said, percent, bare): percent the ones said as a percent, bare the digits
+    of a scaled one ("7.5" of "7.5k"), which stand for nothing on their own."""
+    said, pct, bare = set(), set(), set()
+    for w in numbers.written(text):
+        said.add(numbers.norm(w["value"]))
+        if w["raw"] != w["value"]:
+            bare.add(numbers.norm(w["raw"]))
+        if w["kind"] == "percent":
+            pct.add(numbers.norm(w["value"]))
+    ws = re.findall(r"[a-z]+", text.lower())
+    for i, w in enumerate(ws):
+        v = numbers.UNITS.get(w, numbers.TENS.get(w, numbers.BIG.get(w)))
+        if v is None:
+            continue
+        if w in numbers.TENS and i + 1 < len(ws) and 0 < numbers.UNITS.get(ws[i + 1], 0) < 10:
+            said.add(str(v + numbers.UNITS[ws[i + 1]]))
+        said.add(str(v))
+    for s in numbers.spans(text):
+        said.add(numbers.norm(s["value"]))
+        if s["kind"] == "percent":
+            pct.add(numbers.norm(s["value"]))
+    return said, pct, bare - said
+
+
+def unsaid_numbers(plan, heard=None):
+    """[(card, number as shown, what was said instead)]: a number on a built card that the speaker never says
+    as shown. Instead is None when nobody says it at all (a FAIL); else the card adds a scale or a % the
+    speaker did not say ("$2M" when "two" was said, "50%" for "fifty users", "7.5" for "7.5k": a WARN). A
+    card's K/M/B must be the spoken one: "€7.5M" when "7.5k" was said is a FAIL. A capture or a real post is
+    the source itself and is exempt; a Lottie card's words are its props.texts. The speaker's numbers come
+    from heard (cut.transcript.json, punctuated) and the caption chunks, each chunk's end ending a number
+    (a chunk has no punctuation: "a thousand" | "and three people" is 1000 and 3, never 1003). Without
+    captions there is nothing to check against."""
+    chunks = [ch.get("text", "").strip() for ch in (plan.get("captions") or {}).get("chunks", [])]
+    if not any(chunks):
         return []
-    said = said_numbers(spoken)
+    spoken = ", ".join(t for t in chunks if t)
+    if heard:
+        spoken += ". " + " ".join(w["text"] for w in heard if w.get("type", "word") == "word")
+    said, pct, bare = said_numbers(spoken)
     out = []
     for c in plan["cards"]:
         a = c.get("anim") or {}
         if a.get("type") in REAL_ANIMS:
             continue
-        for n in sorted({n for _, t in strings(a.get("props") or {}) for n in nums(t)} - said):
-            out.append((c, n))
+        texts = (shown_texts((c.get("props") or {}).get("texts")) if str(c.get("src", "")).endswith(".json")
+                 else shown_texts(a.get("props")))
+        seen = set()
+        for w in (w for t in texts for w in numbers.written(t)):
+            v, raw, n = numbers.norm(w["value"]), numbers.norm(w["raw"]), w["text"]
+            if n in seen:
+                continue
+            seen.add(n)
+            if v in said:
+                if w["kind"] == "percent" and v not in pct:
+                    out.append((c, n, f"{v}, never {v}%"))
+            elif raw != v and raw in said:
+                out.append((c, n, f"{raw}, never {n}"))
+            elif raw == v and v in bare:
+                out.append((c, n, f"{v} only with a K, M or B after it"))
+            else:
+                out.append((c, n, None))
     return out
 
 
@@ -628,6 +699,35 @@ def font_findings(plan, fonts):
             for f, where in named.items() if f and f not in fonts]
 
 
+# The weight names StyleEdit.tsx LottieCard reads from a Lottie font's fStyle (lottie-web alone knows only 5 of them).
+LOTTIE_WEIGHTS = {"thin", "hairline", "extralight", "ultralight", "light", "regular", "normal", "book", "roman", "medium",
+                  "semibold", "demibold", "bold", "extrabold", "ultrabold", "black", "heavy"}
+
+
+def lottie_findings(data, src, fonts):
+    """What a Lottie card would get wrong: a frame rate that can't be right (the card plays at fr / the edit's fps, so
+    a missing or odd fr plays it at the wrong speed), no frames, or a font the render can't load (look.tsx draws Inter)."""
+    out = []
+    fr = data.get("fr") if isinstance(data, dict) else None
+    if not isinstance(fr, (int, float)) or not 8 <= fr <= 120:
+        out.append(finding("WARN", None, f"Lottie {src}: frame rate {fr!r} can't be right (8 to 120 fps): it will play at the wrong speed",
+                           "re-export it from After Effects (Bodymovin) or LottieFiles at its real frame rate"))
+    if isinstance(data, dict) and not (isinstance(data.get("op"), (int, float)) and data["op"] > (data.get("ip") or 0)):
+        out.append(finding("WARN", None, f"Lottie {src}: no frames (op {data.get('op')!r} after ip {data.get('ip')!r})",
+                           "re-export it: the file has no animation to play"))
+    if not isinstance(data, dict) or data.get("chars"):   # glyphs exported as shapes need no font
+        return out
+    for f in (data.get("fonts") or {}).get("list") or []:
+        fam, style = f.get("fFamily") or "", f.get("fStyle") or ""
+        if fonts is not None and fam not in fonts:
+            out.append(finding("WARN", None, f"Lottie {src}: font '{fam}' is not on Google Fonts: its text draws in Inter",
+                               "set the text layer in a Google Fonts family (fonts.google.com) and re-export, or export the text as shapes (glyphs)"))
+        if not str(f.get("fWeight") or "").strip() and re.sub(r"italic|oblique|[\s_-]", "", style.lower()) not in LOTTIE_WEIGHTS | {""}:
+            out.append(finding("WARN", None, f"Lottie {src}: font style '{style}' of '{fam}' names no weight: its text draws at 400",
+                               "name the weight in the style (Regular, Medium, SemiBold, Bold, ExtraBold, Black) and re-export"))
+    return out
+
+
 def report(found, mode):
     order = {"FAIL": 0, "WARN": 1, "LOOK": 2}
     found.sort(key=lambda f: (order[f["level"]], f["t"] if f["t"] is not None else -1))
@@ -664,6 +764,18 @@ def demo():
     assert len(font_findings(fp, {"Inter"})) == 2 and font_findings(fp, None) == []
     gf = google_fonts()
     assert gf is None or {"TikTok Sans", "Inter", "IBM Plex Sans", "Newsreader"} <= gf, "the default fonts load"
+    # a Lottie card: the renderer's fixture is clean; an odd frame rate, an unknown family or weight is named
+    fixture = json.loads((Path(__file__).resolve().parents[3] / "remotion/test/public/lottie/title-60fps.json").read_text(encoding="utf-8"))
+    assert lottie_findings(fixture, "t.json", {"Montserrat"}) == [], lottie_findings(fixture, "t.json", {"Montserrat"})
+    assert gf is None or lottie_findings(fixture, "t.json", gf) == [], "Montserrat loads"
+    odd = {**fixture, "fr": 6000, "op": 0, "fonts": {"list": [{"fFamily": "Proxima Nova", "fStyle": "Fett"}]}}
+    got = [f["what"] for f in lottie_findings(odd, "t.json", {"Montserrat"})]
+    assert len(got) == 4 and "6000 can't be right" in got[0] and "no frames" in got[1] and "'Proxima Nova' is not on" in got[2] \
+        and "'Fett'" in got[3], got
+    assert "None can't be right" in lottie_findings({k: v for k, v in fixture.items() if k != "fr"}, "t.json", None)[0]["what"]
+    assert lottie_findings({**odd, "fr": 30, "op": 60, "chars": [{}]}, "t.json", {"Montserrat"}) == []   # glyphs: no font
+    assert lottie_findings({**fixture, "fonts": {"list": [{"fFamily": "Montserrat", "fStyle": "Fett", "fWeight": "800"}]}},
+                           "t.json", {"Montserrat"}) == []
     assert "no --style" in style_note(None, None) and style_note("s.json", {"pace": {}}) is None
     assert "no --style" not in style_note("edits/x/style.json", {}), style_note("edits/x/style.json", {})
     face = {"step_s": 0.5, "heads": [{"t": t / 2, "box": [30, 32, 40, 24]} for t in range(20)]}
@@ -785,7 +897,65 @@ def demo():
             "cards": [{"anim": {"type": "arrow_callout", "props": {"text": "42% in 10 days"}}, "trigger_word": "grew", "start": 0},
                       {"anim": {"type": "chat", "props": {"messages": [{"text": "3x faster"}]}}, "trigger_word": "it", "start": 1},
                       {"anim": {"type": "social_post", "props": {"text": "99 likes"}}, "trigger_word": "days", "start": 2}]}
-    assert [(c["trigger_word"], n) for c, n in unsaid_numbers(talk)] == [("it", "3")], unsaid_numbers(talk)
+    assert [(c["trigger_word"], n, near) for c, n, near in unsaid_numbers(talk)] == [("it", "3", None)], unsaid_numbers(talk)
+    # numbers as people say them: "two hundred and fifty" is 250 on a card, "7.5k" is "€7.5K", "100k" is "100K";
+    # an ease's digits ("power3.out", "back.out(1.7)") are not on screen; an invented "37" still fails
+    lines = ["we printed three hundred and forty flyers, raised 4.5k dollars", "and we are at forty percent of our 20k goal"]
+    said = {"style": {"y_pct": 68}, "chunks": [{"text": t, "start": i * 1.5, "end": i * 1.5 + 1.4, "words": [
+        {"text": w, "start": i * 1.5 + j * 0.14, "end": i * 1.5 + j * 0.14 + 0.12} for j, w in enumerate(t.split())]}
+        for i, t in enumerate(lines)]}
+    fit = {"kind": "slide", "ease": "back.out(1.7)", "dur": 0.325, "dir": "top", "dist": 6.2}
+    cards = [{"anim": {"type": "arrow_callout", "props": {"text": "340 flyers, $4.5K", "enter": fit, "ease": "power3.out"}},
+              "trigger_word": "forty", "start": 0, "end": 1, "box": [14, 14, 72, 16]},
+             {"anim": {"type": "arrow_callout", "props": {"text": "USD 4.5K, 40% of 20K", "exit": {**fit, "ease": "power4.in"}}},
+              "trigger_word": "goal", "start": 1, "end": 2, "box": [14, 14, 72, 16]}]
+    grounded = {**plan, "captions": said, "cards": cards}
+    assert unsaid_numbers(grounded) == [], unsaid_numbers(grounded)
+    assert not any("nobody says" in f["what"] for f in check_plan(grounded, face))
+    grounded["cards"] = cards + [{"anim": {"type": "arrow_callout", "props": {"text": "37 clients", "enter": fit}},
+                                  "trigger_word": "flyers", "start": 2, "end": 3, "box": [14, 14, 72, 16]}]
+    assert [(c["trigger_word"], n, near) for c, n, near in unsaid_numbers(grounded)] == [("flyers", "37", None)], unsaid_numbers(grounded)
+    assert any("shows 37, a number nobody says" in f["what"] and f["level"] == "FAIL" for f in check_plan(grounded, face))
+    spoken, pct, bare = said_numbers(" ".join(ch["text"] for ch in said["chunks"]))
+    assert {"3", "100", "40", "340", "4500", "20000"} <= spoken and "40" in pct and bare == {"4.5", "20"}, (spoken, pct, bare)
+    # an unsaid number anywhere a card shows words: after a dot ("No.1", "...37"), a Lottie's texts, words under a
+    # motion key ("size"); never an ease or a colour
+    def check(chunks, *texts, heard=None):
+        p = {**plan, "captions": {"chunks": [{"text": t} for t in chunks]},
+             "cards": [{"anim": {"type": "arrow_callout", "props": {"text": t}}, "trigger_word": "w", "start": 0} for t in texts]}
+        return [(n, near) for _, n, near in unsaid_numbers(p, heard)]
+    assert check(["we signed new clients", "the best tool"], "...37 clients", "No.1 tool") == [("37", None), ("1", None)]
+    caps = lambda ts: {"style": {"y_pct": 68}, "chunks": [   # noqa: E731
+        {"text": t, "start": i, "end": i + 0.9, "words": [{"text": t, "start": i, "end": i + 0.9}]} for i, t in enumerate(ts)]}
+    lot = {**plan, "captions": caps(["lottie title"]),
+           "cards": [{"src": "lottie/title.json", "props": {"texts": {"TITLE": "37 clients"}}, "trigger_word": "title", "start": 0,
+                      "end": 1, "box": [14, 14, 72, 16]}]}
+    assert [n for _, n, _ in unsaid_numbers(lot)] == ["37"] and any(
+        "'title' lottie/title.json shows 37, a number nobody says" in f["what"] for f in check_plan(lot, face)), check_plan(lot, face)
+    motion = {**plan, "captions": {"chunks": [{"text": "we have users"}]}, "cards": [{"anim": {"type": "arrow_callout", "props": {
+        "text": "users", "size": "37 clients", "accent": "#ff3300", "enter": {"ease": "back.out(2.5)", "dur": "0.3s"}}},
+        "trigger_word": "w", "start": 0}]}
+    assert [n for _, n, _ in unsaid_numbers(motion)] == ["37"], unsaid_numbers(motion)
+    # caption chunks have no punctuation: a chunk's end ends a number, so no number is made of two; the
+    # transcript's punctuated words join the ones said as one ("four hundred" | "and eighty-one" is 481)
+    for chunks, text in [(["I sent a thousand", "And three people replied"], "1,003 replies"),
+                         (["between one hundred", "and two hundred clients"], "102 clients"),
+                         (["we went from one million", "two million users"], "1,000,002 users"),
+                         (["it is two point five", "three times faster"], "2.53x faster")]:
+        assert check(chunks, text) == [(text.split()[0].rstrip("x"), None)], (chunks, check(chunks, text))
+    assert check(["between one hundred", "and two hundred clients"], "100-200 clients") == []
+    chunks = ["right now we're at", "four hundred", "and eighty-one", "dollars"]
+    heard = [{"text": w, "type": "word"} for w in "right now we're at four hundred and eighty-one dollars, and".split()]
+    assert check(chunks, "481 dollars") == [("481", None)] and check(chunks, "481 dollars", heard=heard) == []
+    # the scale and the % are the speaker's: a K said is no M (FAIL); a scale or a % added to a bare number warns
+    assert check(["we raised 4.5k dollars"], "$4.5M") == [("$4.5M", None)] and check(["we raised 4.5k dollars"], "$4.5K") == []
+    assert check(["I have two clients"], "$2M ARR") == [("$2M", "2, never $2M")]
+    assert check(["we grew fifty users"], "50%") == [("50%", "50, never 50%")]
+    assert check(["we raised 4.5k dollars"], "4.5 a week") == [("4.5", "4.5 only with a K, M or B after it")]
+    assert any(f["level"] == "WARN" and "shows $2M; the speaker says 2" in f["what"] for f in check_plan(
+        {**plan, "captions": caps(["I have two clients"]), "cards": [
+            {"anim": {"type": "arrow_callout", "props": {"text": "$2M ARR"}}, "trigger_word": "two", "start": 0, "end": 1,
+             "box": [14, 14, 72, 16]}]}, face))
     # a sticker's crop never cuts a line of text: the default trim into a tight capture fails, plan.py's fix passes
     import plan as pl
     lines = [[12, 14, 2430, 100], [12, 150, 1500, 100]]
@@ -878,7 +1048,7 @@ def main():
         named = [(x["start"], n) for x in rd("beats.json") or [] for n in x.get("names") or []]
         found = check_plan(plan, face, cut_points(edit), static_s, rd("visuals.json"), brand(), named,
                            f"{edit}" + (f" --plan {a.plan}" if a.plan != "plan.json" else ""),
-                           (rd("visuals.json") or []) + (rd("images.json") or []))
+                           (rd("visuals.json") or []) + (rd("images.json") or []), rd("cut.transcript.json"))
         extra = {"static_s": static_s}
         found += font_findings(plan, google_fonts())
     else:

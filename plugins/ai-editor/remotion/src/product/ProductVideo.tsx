@@ -120,8 +120,10 @@ const ShotView: React.FC<{ plan: ProductPlan; shot: Shot; t: number; fams: Fams 
     const lift = shot.lift;
     const lp = lift ? prog(t, lift.at, above ? 0.9 : 1.0, above ? "power3.inOut" : "power2.inOut") : 0;
     const drift = phone ? 0 : (t / Math.max(1, dur) - 0.5) * W * st.drift;
+    // no will-change: Chrome then keeps the page on its own layer and reuses an earlier raster of it as the zoom
+    // moves, so a video frame differed from the still of it (up to 107/255) and between the tabs of a parallel render
     const worldStyle: React.CSSProperties = { position: "absolute", left: 0, top: 0, width: winW, height: winH, transformOrigin: "0 0",
-      transform: `translate(${tx + drift}px, ${ty}px) scale(${z})`, willChange: "transform", borderRadius: radius, overflow: "hidden",
+      transform: `translate(${tx + drift}px, ${ty}px) scale(${z})`, borderRadius: radius, overflow: "hidden",
       boxShadow: st.shadow ? `0 ${24 / z}px ${80 / z}px rgba(0,0,0,${(plan.brand.dark ? 0.55 : 0.18) * st.shadow}), 0 0 0 ${1 / z}px rgba(${plan.brand.dark ? "255,255,255,0.08" : "0,0,0,0.06"})`
         : `0 0 0 ${1 / z}px rgba(${plan.brand.dark ? "255,255,255,0.10" : "0,0,0,0.08"})`,
       filter: lp > 0 ? `blur(${lp * 10}px) brightness(${plan.brand.dark ? 1 - lp * 0.45 : 1 + lp * 0.04})` : undefined,
