@@ -348,14 +348,18 @@ def clear_entrances(zooms, cards):
     starts as the scene leaves instead (the footage comes back punched in), so the scene does not eat it."""
     orig = {id(z): (z["start"], z["end"]) for z in zooms}
     holds = [h for h in map(kinetic_hold, cards) if h]
+    under = set()
     for c in cards:
         a, b = c["start"] - ENTER_S[0] - PUNCH_S, c["start"] + ENTER_S[1]
         to = round((c["start"] + c["end"]) / 2, 3) if c.get("layout") == "scene" else round(max(0.0, a), 3)
         sc = kinetic_hold(c) and next((x for x in cards if x.get("layout") == "scene" and 0 <= a - x["end"] < KINETIC_GAP_S), None)
         for z in zooms:
             for k in ("start", "end"):
-                if a < z[k] < b:
-                    z[k] = round((sc["start"] + sc["end"]) / 2, 3) if sc and orig[id(z)][k == "end"] > sc["start"] else to
+                if sc and sc["end"] <= z[k] < b and orig[id(z)][k == "end"] > sc["start"]:
+                    z[k] = round((sc["start"] + sc["end"]) / 2, 3)   # under the scene: the footage comes back at it
+                    under.add(id(z))   # all of it under the scene now: it goes (never moved into that gap again)
+                elif a < z[k] < b:
+                    z[k] = to
     for z in zooms:
         if any(a < z[k] < b for a, b in holds for k in ("start", "end")):
             z.update(kind="push", ease_s=max(z.get("ease_s") or 0, KINETIC_PUSH_S))
@@ -365,6 +369,8 @@ def clear_entrances(zooms, cards):
         c["start"] <= b["start"] <= c["end"] for c in cards)
     for z in sorted(zooms, key=lambda z: z["start"]):
         if z["end"] - z["start"] < 0.5:
+            if id(z) in under:
+                continue
             a0, b0 = orig[id(z)]
             sc = next((c for c in cards if c.get("layout") == "scene" and c["start"] - ENTER_S[0] - PUNCH_S < a0 < c["end"]), None)
             if not sc:
@@ -439,7 +445,7 @@ def bridge_kinetic(cards):
     for c in cards:
         if (c.get("anim") or {}).get("type") in KINETIC:
             later = [o for o in nxt if o is not c and o["start"] >= c["end"] - 1e-6]
-            if later and later[0]["start"] - c["end"] < KINETIC_BRIDGE_S:
+            if later and later[0]["start"] - c["end"] < KINETIC_BRIDGE_S - 1e-6:   # a gap of exactly 1 s is footage
                 c["end"] = later[0]["start"]
                 if (later[0].get("anim") or {}).get("type") in KINETIC:   # the top scrim stays up across the hand-over
                     c["anim"]["props"]["bridge_out"] = True
@@ -2178,7 +2184,7 @@ def key_words(words):
     """Fork: indices of the take's key words, from its punctuated words: a name (capitalised inside a sentence,
     not "I"; with the word after it when that is capitalised too or ends the clause: "Planner Pro", "AI studio,") and
     a content word held clearly longest for its length (people stretch the word they stress); one a sentence, none in
-    a sentence that says a number (its number is marked), KEY_GAP_S apart, the name first."""
+    a clause that says a number (its number is marked), KEY_GAP_S apart, the name first."""
     sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "lib"))
     from ai_editor import numbers
     said = {i for sp in numbers.spans([w["text"] for w in words]) if not (sp["start"] == sp["end"] and sp["kind"] == "count"
@@ -2189,13 +2195,23 @@ def key_words(words):
     med = rates[len(rates) // 2] if rates else 0
     out, sent, last = [], [], -1e9
 
+    def clause_of(i, sent):
+        """The indices of word i's clause in its sentence (a comma, colon or semicolon ends one)."""
+        a = i
+        while a - 1 in sent and not ends_clause(words[a - 1]["text"]):
+            a -= 1
+        b = i
+        while b + 1 in sent and not ends_clause(words[b]["text"]):
+            b += 1
+        return set(range(a, b + 1))
+
     def close():
         nonlocal last
         names = [i for i in sent if i and not ends_sentence(words[i - 1]["text"]) and clean(words[i]["text"])[:1].isupper()
                  and clean(words[i]["text"]).lower() not in STOP | {"i'm", "i'll", "i've", "i'd"} and len(clean(words[i]["text"])) > 1]
         held = [i for i in sent if content(words[i]) and med and rate(words[i]) >= KEY_STRESS * med and words[i]["end"] - words[i]["start"] >= 0.3]
         pick = names[:1] or sorted(held, key=lambda i: -rate(words[i]))[:1]
-        if pick and words[pick[0]]["start"] - last >= KEY_GAP_S and not said & set(sent):
+        if pick and words[pick[0]]["start"] - last >= KEY_GAP_S and not said & clause_of(pick[0], sent):
             out.append(pick[0])
             last = words[pick[0]]["start"]
             k = pick[0] + 1
@@ -3493,6 +3509,7 @@ def demo():
                          "box": list(SCENE_BOX)}, sb(7.5, 9.0, id="v")])
     assert [c["end"] for c in br] == [2.6, 4.7, 6.0, 9.0], br
     assert br[0]["anim"]["props"].get("bridge_out") and br[1]["anim"]["props"].get("bridge_in") and not br[1]["anim"]["props"].get("bridge_out")
+    assert bridge_kinetic([sb(0.42, 3.64), sb(4.64, 6.0, id="u")])[0]["end"] == 3.64, "a gap of 1 s (in floats) is footage"
     # no zoom cuts under a kinetic card's hold: a zoom with an edge there eases instead; one clear of it keeps its punch
     zz = clear_entrances([{"start": 2.0, "end": 6.0, "scale": 1.2, "kind": "punch", "ease_s": 0},
                           {"start": 7.0, "end": 8.0, "scale": 1.2, "kind": "punch", "ease_s": 0}], [sb(1.0, 4.0)])
@@ -3610,7 +3627,7 @@ def demo():
     # a stressed word; a lone "one" is no figure; off (no emphasis_scale) a 2-word page keeps upstream's rule
     said = ("We baked two hundred and forty croissants. One of them burned. Then Sourdough sold out. "
             "Honestly, it was really just wonderful. It took three and a half weeks. We sold twelve enormous cakes. "
-            "Later we moved into Market Hall, and that was it.").split()
+            "Later we moved into Market Hall, and we sold eleven pies there.").split()
     tk, te = [], 0.0
     for x in said:
         d = 0.9 if x in ("wonderful.", "enormous") else 0.3
@@ -3618,9 +3635,10 @@ def demo():
         te += d + 0.05
     on = lambda c: [w["text"] for p in c for w in p["words"] if w.get("emph")]
     em2 = mark_emph(chunk_captions(tk, 2, "sentence"), {"emphasis_scale": 1.1}, tk)
-    # only a number's own words ("and a" of "three and a half" stay plain); a held word in a sentence that says a
-    # number is not marked (its number is); a two-word name is marked whole
-    assert on(em2) == ["two", "hundred", "forty", "Sourdough", "wonderful", "three", "half", "twelve", "Market", "Hall"], on(em2)
+    # only a number's own words ("and a" of "three and a half" stay plain); a held word in a clause that says a
+    # number is not marked (its number is); a two-word name is marked whole, its number in the next clause too
+    assert on(em2) == ["two", "hundred", "forty", "Sourdough", "wonderful", "three", "half", "twelve", "Market", "Hall",
+                       "eleven"], on(em2)
     assert [w["text"] for w in em2[1]["words"]] == ["two", "hundred"] and em2[2]["words"][0]["text"] == "and"
     assert not on(mark_emph(chunk_captions(tk, 2, "sentence"), {"emphasis_color": "#FFD400"}, tk))
     assert emph_on({"emphasis_scale": 1}) and not emph_on({}) and not emph_on(None)
@@ -3743,6 +3761,9 @@ def demo():
     gk = [{"start": 25.3, "end": 28.2, "layout": "scene"}, {"start": 29.2, "end": 33.0, "anim": {"type": "number_chain", "props": {}}}]
     gz = clear_entrances([zp(23.3, 29.3)], gk)
     assert [(z["start"], z["end"]) for z in gz] == [(23.3, 26.75)], gz
+    # ... a punch already cut back to end just before the card (punch_between), in that gap, too
+    assert [(z["start"], z["end"]) for z in clear_entrances([zp(23.3, 28.89)], gk)] == [(23.3, 26.75)]
+    assert clear_entrances([zp(27.86, 28.87)], gk) == [], "one that starts under the scene and ends in the gap goes"
     # a punch that a scene would swallow lands as the scene leaves
     assert [(z["start"], z["end"]) for z in clear_entrances([zp(10.0, 11.4)], [{"start": 10.1, "end": 12.8, "layout": "scene"}])] == [(13.55, 14.95)]
     with tempfile.TemporaryDirectory() as td:   # an audio clip: its cover moves on sentence starts, no zooms

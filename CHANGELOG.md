@@ -20,9 +20,9 @@ Fork base: upstream ai-editor 2.7.8 (the manifests read 2.7.8-cooked.1). The ent
   removed, a hold changed) survives the beats being found again; turning the automatic beats off takes them out of
   visuals.json. Rules in words: "do not add motion graphics", "never use kinetic titles", "I hate kinetic text" and
   the like now turn graphics off (they turned them on), an unclear note sets nothing, "no more than 3 a minute" is a
-  rate. Emphasis captions mark only a number's own words (not "and a"), a two-word name whole, and no key word beside a
-  marked number. A number chain is centred on what it draws, its outer labels 60 px from the edge (the safe zone's
-  side; they reached 36 px), and check.py render WARNs a kinetic card off centre or
+  rate. Emphasis captions mark only a number's own words (not "and a"), a two-word name whole, and no key word in a
+  clause that says a number. A number chain is centred on what it draws, its outer labels 60 px from the edge (the
+  safe zone's side; they reached 36 px), and check.py render WARNs a kinetic card off centre or
   past the side margin (its scrim no longer counts as its ink). With no kinetic card in the plan, punch zooms join as
   upstream's do again. The made-up fixtures replace the ones that echoed a real take. Tests: kinetic_beats.py (a
   28-sentence table of shapes that are no count, a bridge, whole numbers, review edits), numbers.py, check.py, plan.py,

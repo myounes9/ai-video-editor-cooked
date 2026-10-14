@@ -168,7 +168,7 @@ not flag a kinetic kind the copied creator hardly uses, or a soft push under a k
   and its line breaks (the fit leaves the room), and a stressed word keeps its colour while it is said. "Key words in
   yellow, slightly bigger" sets #FFD400 and 1.1; "never highlight key words in the captions" sets `emphasis_scale`
   null (off). Only a number's own words are marked ("three and a half": THREE, HALF), a two-word name whole ("Market
-  Hall,"), and no key word in a sentence that says a number (its number is marked). An older style.json that still
+  Hall,"), and no key word in a clause that says a number (its number is marked). An older style.json that still
   holds upstream's retired `emphasis_scale` turns these on: remove it to keep upstream's emphasis.
 - When a learned rule changes one of these, `review.py learn` and `taste.py add` print `REPLAN:`: run what it names
   (plan.py, whose beat finder places the kinetic beats again, and which marks the emphasis), then the stills and the

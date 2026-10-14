@@ -221,8 +221,9 @@ cards of clock times, years, dates, prices and ranges.
 - `skills/style-edit/scripts/plan.py`: `space_kinetic`, `whole_numbers` and `split_numbers` (check.py plan FAILs a card
   that hides the start of a number whose rest shows); `clear_entrances` joins punches on plain footage (and splits
   them past 5 s) only with kinetic cards in the plan, so upstream styles zoom as upstream's do, and moves an edge in the
-  gap between a scene and the kinetic card after it under the scene; emphasis marks a number's own words only (not
-  "and a"), a two-word name whole, and no key word in a sentence that says a number.
+  gap between a scene and the kinetic card after it under the scene (a zoom then wholly under it goes);
+  `bridge_kinetic` no longer bridges a gap of exactly 1 s (a float made it 0.999...); emphasis marks a number's own words only (not
+  "and a"), a two-word name whole, and no key word in a clause that says a number.
 - `skills/style-edit/scripts/check.py` render: a kinetic card's type is measured as what is brighter than the footage
   (its scrim is not its ink) and WARNs off centre (3%) or past the side margin. `remotion/src/kinetic/NumberChain.tsx`
   centres the row on its ink (a long last label pulled it right) and `tokens.ts` `LABEL.over` (36 -> 12 px) keeps an

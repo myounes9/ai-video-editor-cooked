@@ -41,7 +41,8 @@ from plan import BROW_SHARE, EYES_SHARE, GAP_S, KIN_BAND, KINETIC, QUIET_HOLD_S,
 
 CENTRE_PLAN = 1.5      # % of the width a vertical card's box centre may sit off 50
 CENTRE_INK = 2.0       # % of the width a card's drawn content may sit off centre
-KIN_CENTRE = 3.0       # % of the width a kinetic card's type may sit off centre (a stat_stack beside a capture excepted)
+KIN_CENTRE = 3.0       # % of the width a kinetic card's type may sit off centre
+KIN_CENTRED = ("number_chain", "kinetic_number", "goal_bar")   # the kinetic formats set centred on the grid
 KIN_LIFT = 24          # a kinetic card's type is brighter than the footage under it by this (grey levels); its scrim darkens
 OVERLAY_FILL = 0.7     # share of its own box an overlay diagram must draw across
 WORD_S = 1.2           # a caption up longer than this per word is a misheard word held on screen
@@ -884,10 +885,11 @@ def check_render(edit, plan, video):
                                    PLAN_FIX + "; then render again" if explain else
                                    "plan again: drop the beat's \"box\" in visuals.json/images.json so plan.py centres it, "
                                    "or give a capture a \"crop\" round the evidence; then render again"))
-            kin = (c.get("anim") or {}).get("type") in KINETIC
+            # type set on the grid's centre (a step_build keeps a column for a slot still to come, its wells are dark
+            # glass; a stat_stack sits beside its capture): off centre or past the side margin is a long label
+            kin = (c.get("anim") or {}).get("type") in KIN_CENTRED
             side = SAFE[aspect_of(plan)][0]
-            if kin and not (c["anim"]["type"] == "stat_stack" and c["anim"].get("props", {}).get("beside")) \
-                    and (x0 < side or x1 > 100 - side or abs(cx - 50) > KIN_CENTRE):
+            if kin and (x0 < side or x1 > 100 - side or abs(cx - 50) > KIN_CENTRE):
                 out.append(finding("WARN", st["mid"][0], f"{name} type spans {x0:.0f}-{x1:.0f}% of the width: "
                                    + (f"{cx - 50:+.1f}% off centre" if abs(cx - 50) > KIN_CENTRE else
                                       f"past the {side:g}% side margin"),
