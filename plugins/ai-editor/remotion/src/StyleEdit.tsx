@@ -463,9 +463,10 @@ export const StyleEdit: React.FC<Plan> = ({ video, captions, zooms, cards, layou
   const capStyle = capAt(t);
   // captions a scene hides fade out and back in (ground.ts captionFade), never gone in one frame
   const sceneFade = cards.some((c) => c.layout === "scene") ? captionFade((tt) => capAt(tt).present === false, t) : 1;
-  // a kinetic title says the beat in its own type: the word captions fade out while it is up and come back after it
-  // (card props.hide_captions, on by default for the kinetic family: kinetic/index.ts); cards under QUIET_BRIDGE_S apart
-  // hide them as one span, so they never blink up and straight back down between two cards (plan.py quiet_spans)
+  // a number card says the beat in its own type: the word captions fade out while it is up and come back after it
+  // (card props.hide_captions, on by default for every kinetic format but kinetic_title: kinetic/index.ts); cards
+  // under QUIET_BRIDGE_S apart hide them as one span, so they never blink up and straight back down between two cards
+  // (plan.py quiet_spans)
   const quiet = quietSpans(cards);
   const capFade = Math.min(sceneFade, quiet.length ? captionFade((tt) => quiet.some(([a, b]) => tt >= a && tt < b), t) : 1);
   const up = fonts.ready ? slots(cards, split).filter((s) => t >= s.from && t < s.to) : [];

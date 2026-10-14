@@ -22,6 +22,20 @@ Fork base: upstream ai-editor 2.7.8 (the manifests read 2.7.8-cooked.1). The ent
   takes: every kind, the ranking, the budget, the gaps, grounding, plan.py reading the beats, the keep-or-redo rule),
   route.py and style_check.py demo asserts.
 
+- Kinetic titles: placement and timing (fork, opt-in). Each kinetic card's band now comes from face.json over the
+  card's own time (plan.py `face_band`): under the Reels header, down to just above the highest brow line while it is
+  up, the head as the zooms draw it, with the take's median head or the renderer's band when no head is found; a card
+  with no room above the brows is dropped instead of set on the eyes, and check.py plan FAILs a band that reaches the
+  eyes (WARN past the brows). The word captions hide only under number cards: a `kinetic_title` keeps them (plan.py
+  and the renderer's `hidesCaptions`). Punches stay between cards: one with an edge under a card is cut back to the
+  plain footage around it when 0.8 s is left there (`punch_between`), a punch never joins a soft push under a card,
+  and a punch no longer starts under a card's exit sweep. One graphics budget for the whole video, kinetic and
+  real-source cards together: `graphics.kinetic_per_min` (default 8) in `lib/ai_editor/budget.py`, shared with the
+  beat finder; plan.py keeps the hook and the strongest beats (`strength`, `hook` on a beat), spread out, and writes
+  `graphics_budget` to the plan, which style_check.py and quality.py compare with. style_check.py no longer flags a
+  kinetic kind the copied creator hardly uses, or a soft push under a kinetic card. Tests: plan.py, check.py,
+  style_check.py, quality.py and budget.py demo asserts.
+
 - Kinetic titles with upstream 2.7.8 (fork, opt-in). A style whose creator is off screen half the time turns her
   picture cards into full-frame scenes: a kinetic card is no longer one of them, it stays over the footage. The board
   layout drops kinetic cards with a warning, as the split layout does (it made each one a side overlay). A card

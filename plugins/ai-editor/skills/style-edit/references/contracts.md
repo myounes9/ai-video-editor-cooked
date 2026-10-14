@@ -224,6 +224,9 @@ Written by Claude from captions.json. One beat per visual, anchored to a word as
 - `"auto": "kinetic"`: a number beat `kinetic_beats.py` wrote (kinetic.md "Automatic beats"). plan.py keeps those
   while `kinetic.auto.json` (the fingerprint of the words, the real cards and the rate) matches, else writes them
   again; a beat without the mark is never touched.
+- With kinetic titles on (style.json `graphics.kinetic`), any beat (and any images.json item) may carry `strength`
+  (0-1, the beat finder's score) and `hook` (true for the opening figure): plan.py keeps the strongest within the
+  graphics budget, the hook always (`lib/ai_editor/budget.py`, references/kinetic.md "How many").
 
 ## plan.json (style-edit -> Remotion)
 
@@ -343,7 +346,10 @@ A zoom may carry `ease` (the creator's fitted `zoom.ease`, pushes only) and `ori
 
 `kinetic` (optional, true when style.json `graphics.kinetic` is true): the style draws the kinetic family
 (references/kinetic.md); check.py plan, ai_tells.py and quality.py then treat those cards as the style's own titles,
-not text cards (without it a kinetic card FAILs as one). A kinetic card's box is the whole frame, its lane `kinetic`.
+not text cards (without it a kinetic card FAILs as one). A kinetic card's box is the whole frame, its lane `kinetic`,
+its `props.band` set from face.json over its own time (kinetic.md "Every kinetic beat"). With it, `graphics_budget`:
+`{"per_min", "max"}`, the graphics a minute and in all the video was planned to (budget.py); quality.py and
+style_check.py compare the cards with it.
 
 `card_kinds` (optional, a card edit: style.json `card_kinds` without `"text"`): the kinds allowed; check.py plan
 FAILs a sentence set alone on white and only WARNs a screenshot whose text reads small. `texts` (optional, from
