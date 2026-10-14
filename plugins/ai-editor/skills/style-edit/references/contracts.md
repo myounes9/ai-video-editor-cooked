@@ -221,6 +221,9 @@ Written by Claude from captions.json. One beat per visual, anchored to a word as
 - Optional on any beat, copied onto its card: `layout`, `transition_in`, `transition_out`, `focus`, `marks`
   (see plan.json below).
 - All: `nth`, `box`, `hold_s`, `entrance`, as in images.json.
+- `"auto": "kinetic"`: a number beat `kinetic_beats.py` wrote (kinetic.md "Automatic beats"). plan.py keeps those
+  while `kinetic.auto.json` (the fingerprint of the words, the real cards and the rate) matches, else writes them
+  again; a beat without the mark is never touched.
 
 ## plan.json (style-edit -> Remotion)
 

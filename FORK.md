@@ -129,6 +129,23 @@ chain of figures) have no page to capture. The kinetic family sets them over the
 Fork-only: a look this fork chose (words over the footage, a house key colour), against upstream's rule that a
 number is shown inside the page that published it. Off unless a style opts in.
 
+### 6. Automatic number beats (Phase 3: `p3-beats`)
+
+Why: the kinetic beats of Phase 2 were written by hand for each video; the goal is graphics placed with no one
+writing them, at a set density, only where a number is said.
+
+- `plugins/ai-editor/skills/style-edit/scripts/kinetic_beats.py` (new, standard library only): candidates from
+  numbers.py spans by sentence and clause (hook, chain, goal, stat run, counter with stamp, tally, money, lone figure,
+  step tracker), labels from the transcript's own words, ranked and kept to `graphics.kinetic_per_min` (default 8)
+  graphics a minute with the edit's real cards counted first, 1 s of footage between cards, written into visuals.json
+  as `"auto": "kinetic"` beats with a fingerprint in `kinetic.auto.json` (`refresh()`). CLI: `find`, `write`,
+  `words`, `demo`.
+- `plan.py` main: calls `kinetic_beats.refresh()` when `kinetic_on(style)`, before it reads visuals.json.
+- `route.py`: `mark_kinetic()` marks the sentences that get a number beat (`"kinetic"` in beats.json, `[kinetic]`).
+- `style_check.py`: a style's own kinetic cards are no alien kind, and sit at the top of the frame.
+- `agents/visual-prep.md`, `agents/template-filler.md`: write no kinetic beat; `references/kinetic.md` "Automatic
+  beats", `references/contracts.md` (the `auto` mark); `tests/demos.sh` runs its demo.
+
 ## What to offer upstream, and what stays here
 
 Neutral fixes, worth a pull request to upstream (each a real bug any user hits):
