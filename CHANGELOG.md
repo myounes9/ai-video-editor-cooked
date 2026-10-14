@@ -4,6 +4,10 @@ What changed for every user, newest first.
 
 ## Unreleased
 
+## ai-editor 2.7.8-cooked.2 (fork, 2026-10-14)
+
+Kinetic number titles and upstream's motion clips split the work: numbers belong to the titles, clips take lists, flows and before-and-afters, and both share one graphics budget (your own cards first, then the numbers with the hook always kept, then clips). See FORK.md.
+
 - Kinetic titles and motion clips split the work (fork, opt-in). With kinetic titles on (`graphics.kinetic`), every
   number beat is theirs: a line the beat finder says a number on (a count, money, a percent or goal, a chain, a stat
   run, a tracker; kept or left out over the budget), or a kinetic beat written by hand, gets no motion hint in
