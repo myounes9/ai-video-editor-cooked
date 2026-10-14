@@ -31,6 +31,18 @@ What changed for every user, newest first.
   `remotion/test/kinetic/number_chain.json` (`test/templates.mjs` now takes a folder of case files), a KineticKit
   composition with every primitive, both in `test/determinism.mjs` (0 of 255 frames differ across 6 tabs), and the
   plan.py, check.py and ai_tells.py demos.
+- Kinetic titles: `goal_bar` is built (fork, opt-in). Where the speaker is on the way to a goal ("40% of a 20K
+  goal"), set without a panel: the % on the left as the key figure on its marker, counting from 40% of its value to
+  land on its count word (`count_at`, or `count_word` in visuals.json), its % at 0.56x and cap-aligned; the target
+  in foil on the same baseline at the grid's right edge under a small label (`label`, default GOAL); under both a
+  pill track with its remainder always showing (a 0.14 white well with a 1 px edge), a fill that runs with the count,
+  a gradient glow band (never a box-shadow) and a 6-frame flare on the first frame the count reads final; a target
+  marker on the track's end that pops on the target's word and sends two rings out on "goal". The label lands no
+  earlier than the target + 0.15 s and the lockup holds 1.2 s after its last landing. On a wide frame the module
+  keeps the vertical grid's width, centred. quality.py no longer reads a panel edge on a kinetic card: one floats
+  over the whole frame, and under a punch zoom the whole frame read as a "panel" whose edges the card ran into
+  (a false WARN). Tests: made-up cases in `remotion/test/kinetic/goal_bar.json` (one in `test/determinism.mjs`:
+  0 of 120 frames differ across 6 tabs).
 
 ## ai-editor 2.6.2-cooked.1 (fork, 2026-10-13)
 
