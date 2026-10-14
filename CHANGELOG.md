@@ -37,6 +37,15 @@ What changed for every user, newest first.
   `references/kinetic.md` "Density", "How many" and "Motion clips". Tests: budget.py, kinetic_beats.py, plan.py and
   motion.py demos (the 5.6 s take: the hook kept, no clip; the same with a real screenshot: both kept, the overflow
   said; a normal-length take unchanged; kinetic titles off unchanged).
+- Kinetic titles: the same order for every template made for the edit, and none of the budget for a kinetic card a
+  layout drops (fork, opt-in). A `likes` counter, an `icon_burst`, an `arrow_callout` or a `caption_page` visual-prep
+  put near the hook still counted as the user's own card, so it kept the hook's figure out, in a 5.6 s take and in a
+  12.7 s one at 8 a minute alike; now these rank with the moving templates, after the number beats
+  (`budget.MADE_TEMPLATES`). In a split or board layout (style.json `layout.mode`), which drops the kinetic cards,
+  those took slots of the graphics budget, so the clips the motion skill built there were left out for numbers never
+  drawn (at 4 a minute a 15 s take kept no card at all), and they cut the cards before them short (plan.py
+  `space_kinetic`); now they take no slot and cut nothing there. Edits' number beats are found again once
+  (kinetic_beats VERSION 4). Tests: budget.py, plan.py and motion.py demos.
 
 ## ai-editor 2.7.8-cooked.1 (fork, 2026-10-14)
 

@@ -1130,6 +1130,14 @@ def demo_order():
     assert [c.cls for c in found] == ["hook"] and "kept over the budget" in found[0].note, found
     assert clips == [] and cards == [("kinetic_number", "300"), ("shot", "labels.")], (clips, cards)
     assert "over the budget of 1" in err and "always kept" in err, err
+    # ... nor any other template made for the edit, one no clip replaces (an icon burst or an arrow callout on the next
+    # line, a likes counter on the hook's own figure): the hook keeps its title, with room or without (budget.later)
+    for t, w in (("icon_burst", "need"), ("arrow_callout", "You"), ("likes", "300")):
+        made = [{"word": w, "nth": 1, "kind": "anim", "type": t, "hold_s": 2.5, "props": {}}]
+        for pm in (8, 30):
+            found, clips, cards, err = run(short, made, {**on, "graphics": {"kinetic": True, "kinetic_per_min": pm}}, duration=9.0)
+            assert [c.cls for c in found] == ["hook"] and clips == [] and cards == [("kinetic_number", "300")], (t, pm, found, cards)
+            assert f"{t} card on '{w}' dropped" in err if pm == 30 else f"{w}@" in err, (t, pm, err)
     # a take of normal length with room for all: the same number beats, clips and plan as before the order was set
     take = ("Our bakery sold 340 loaves in one week. It was a long and happy week for every one of us at the shop. You "
             "need flour, water, salt and time. Before we kneaded every loaf by hand, now the mixer does it. We sold 900 "

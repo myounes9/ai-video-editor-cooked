@@ -310,6 +310,14 @@ The paths, and how each holds it:
   hook over full own cards), plan.py demo (a template up with a kept kinetic card goes; a clip of a capture ranks as
   the capture), motion.py `demo_order` (the 5.6 s take: the hook, no clip; with a screenshot: both, the overflow said;
   a normal-length take and kinetic titles off unchanged).
+- Review fixes (fourth pass): `budget.MADE_TEMPLATES` (`CLIP_TEMPLATES` and a `likes`, `icon_burst`, `arrow_callout`
+  or `caption_page`, made templates no clip replaces) is what `later()` and `kinetic_beats.own_cards` read, so no
+  template made for the edit keeps the hook's figure out. plan.py `budget_cards` with `titles` False (a split or board
+  layout) counts no kinetic card (they pass on for `lay_out` to drop), and `build` runs no `space_kinetic` there.
+  kinetic_beats VERSION 4.
+  Tests: budget.py demo (the made templates), motion.py `demo_order` (an icon burst, an arrow callout, a likes
+  counter: the hook kept at 8 and 30 a minute), plan.py demo (a split layout at 4 a minute keeps the clip; a clip
+  before an undrawn count keeps its length).
 
 Fork-only: upstream has no kinetic titles. Off unless a style opts in.
 

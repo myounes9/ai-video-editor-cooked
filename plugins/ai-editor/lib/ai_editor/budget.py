@@ -17,9 +17,10 @@ in the opening HOOK_S) is always kept, even over n when the user's own cards fil
 "strength" (0-1, the beat finder's score), else REAL_STRENGTH for a real source (a capture, post, logo) and
 KINETIC_STRENGTH for a kinetic beat. One that would leave under MIN_PLAIN_S of plain footage beside one already kept
 counts TOUCH_PENALTY less, so the picks spread out and the speaker's own zooms happen between them; a much stronger
-beat still wins. A moving template the motion skill may build as a clip (CLIP_TEMPLATES), and a clip of one, comes
-after: it takes only the slots the rest leave (later()).
-settle(items, n, kinetic): pick, and a moving template or a motion clip up with a kept kinetic graphic goes, its slot
+beat still wins. A template made for the edit (MADE_TEMPLATES: the moving ones the motion skill may build as a clip,
+CLIP_TEMPLATES, and the other made ones), and a clip of one, comes after: it takes only the slots the rest leave
+(later()).
+settle(items, n, kinetic): pick, and a made template or a motion clip up with a kept kinetic graphic goes, its slot
 to the next (the number is the kinetic title's): what plan.py budget_cards keeps, and motion.py split_beats with it.
 """
 import math
@@ -36,6 +37,10 @@ KINETIC_TYPES = ("kinetic_number", "number_chain", "goal_bar", "step_build", "st
 # MOTION_KINDS: a list, a flow, a before and after, a mechanism, a curve). They count after the number beats: the
 # user's real cards first, then the numbers (the kinetic titles'), then these (references/kinetic.md "Motion clips").
 CLIP_TEMPLATES = ("notes", "flow", "side_by_side", "progress", "terminal", "chat", "toasts", "curve")
+# Every template made for the edit that shows no real source: those, and a likes counter, an icon burst, an arrow
+# callout or a caption page (no clip replaces them). Never the user's own card, so they too count after the number
+# beats and never keep the hook's figure out (later(), kinetic_beats.own_cards).
+MADE_TEMPLATES = CLIP_TEMPLATES + ("likes", "icon_burst", "arrow_callout", "caption_page")
 # The user's real cards: what kind() reads for a picture or screenshot ("src"), and the types a capture, post or logo
 # takes in visuals.json, kinetic_beats.real_cards and a plan.
 REAL_SOURCES = ("src", "image", "capture", "post", "logo", "social_post", "logo_cluster")
@@ -92,11 +97,12 @@ def is_hook(item):
 
 
 def later(item):
-    """True for a moving template the motion skill may build as a clip (CLIP_TEMPLATES), or a clip that replaced one:
-    it is ranked as its template ("_template": the beat it replaced, plan.py and motion.py set it), after the number
-    beats. A clip of a real source (a capture on a list line) is ranked as that capture: not later."""
+    """True for a template made for the edit (MADE_TEMPLATES: a moving one the motion skill may build as a clip, a
+    likes counter, an icon burst ...), or a clip that replaced one: it is ranked as its template ("_template": the beat
+    it replaced, plan.py and motion.py set it), after the number beats. A clip of a real source (a capture on a list
+    line) is ranked as that capture: not later."""
     t = item.get("_template", item.get("template"))
-    return (t if t is not None else kind(item)) in CLIP_TEMPLATES
+    return (t if t is not None else kind(item)) in MADE_TEMPLATES
 
 
 def is_clip(item):
@@ -162,7 +168,7 @@ def up_with(c, k, start=lambda i: i["start"], end=lambda i: i.get("end", i["star
 
 
 def settle(items, n, kinetic=lambda i: kind(i) in KINETIC_TYPES, start=lambda i: i["start"], end=lambda i: i.get("end", i["start"])):
-    """(kept, gone): pick(items, n), then a moving template or a motion clip (later, is_clip) up with a kept kinetic
+    """(kept, gone): pick(items, n), then a made template or a motion clip (later, is_clip) up with a kept kinetic
     graphic (kinetic: which items are) leaves the pool and the rest is picked again, its slot to the next strongest.
     gone: those, in the order they went, each with the kinetic item it was up with."""
     pool, gone = list(items), []
@@ -214,7 +220,10 @@ def demo():
     clip = lambda s, e, t, **x: {"start": s, "end": e, "anim": {"type": "video_card", "props": {"motion": "m"}}, "_template": t, **x}  # noqa: E731
     assert later(tpl(0, 1)) and later(clip(0, 1, "side_by_side")) and not later(clip(0, 1, "src")) and not later(c(0, 1))
     assert own({"src": "images/a.png"}) and own(clip(0, 1, "src")) and not own(tpl(0, 1)) and not own(c(0, 1, "kinetic_title"))
-    assert not later({"type": "likes"}) and not own({"kind": "title", "word": "x"})   # neither: ranked with the numbers
+    assert not own({"kind": "title", "word": "x"}) and not later({"kind": "title", "word": "x"})   # neither: ranked with the numbers
+    # a template made for the edit that no clip replaces (a likes counter, an icon burst) is never the user's card either
+    assert all(later({"type": t}) and not own({"type": t}) for t in ("likes", "icon_burst", "arrow_callout", "caption_page"))
+    assert not later({"type": "social_post"}) and not later({"type": "logo_sting"}) and not later({"src": "images/a.png", "type": "shot"})
     od = [c(0.4, 2.0, hook=True), tpl(2.6, 5.0, strength=0.95), c(8.0, 10.0, strength=0.3)]
     assert pick(od, 2) == [od[0], od[2]] and pick(od, 3) == od   # a weak number beat before a strong template
     assert pick([tpl(0.2, 2.0), c(5.0, 7.0)], 1) == [c(5.0, 7.0)]   # an opening template is no hook

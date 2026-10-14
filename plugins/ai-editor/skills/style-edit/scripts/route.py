@@ -368,7 +368,7 @@ def main():
             dur = vdur or (words[-1]["end"] if words else 0)
             real = kinetic_beats.real_cards(kinetic_beats.Take(words), [v for v in vis if v.get("auto") != kinetic_beats.AUTO],
                                             imgs, style, dur)
-            mine = len(kinetic_beats.own_cards(real))   # a moving template counts after the numbers, in what they leave
+            mine = len(kinetic_beats.own_cards(real))   # a made template counts after the numbers, in what they leave
             tpl = len(real) - mine
             room = budget.remaining(style, dur, nk + mine + tpl)
             print(f"kinetic titles: plan.py places the number beats itself (kinetic_beats.py): {nk} here, marked "
@@ -376,7 +376,7 @@ def main():
                   "the beat's place); never write kinetic beats by hand")
             print(f"the graphics budget: {budget.per_min(style):g} a minute in all (graphics.kinetic_per_min), "
                   f"{budget.allowance(style, dur)} here: {nk} number graphics and {mine} of the edit's own cards"
-                  + (f", then {tpl} moving template(s) in what they leave" if tpl else "") +
+                  + (f", then {tpl} template(s) in what they leave" if tpl else "") +
                   f", so room for {room} more" + (" (\"want\" marks them)" if room else ": add no other card"))
         split = None
         if kinetic_on(style):   # the numbers are the titles': motion hints only on the lines they leave (motion_hint)

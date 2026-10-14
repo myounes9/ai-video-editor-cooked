@@ -39,9 +39,10 @@ before it reads visuals.json, so every new video gets its number beats with nobo
    fill before the count's empty wells, kept only with a fill), adjusted for clarity (labels, a stamp, more items).
    The strongest are kept, at most round(per_min x minutes) graphics in all (a tracker's beats are one graphic), the
    real cards already placed (images.json, visuals.json captures, posts, logos, titles, hand-written kinetic beats)
-   counted first. The hook is always kept, over the budget when those fill it. A moving template the motion skill may
-   build as a clip (budget.CLIP_TEMPLATES: a list, a flow, a before and after, a mechanism; or its placed clip) counts
-   after the number beats: it neither takes their room nor keeps them away (own_cards); plan.py fits it round them.
+   counted first. The hook is always kept, over the budget when those fill it. A template made for the edit
+   (budget.MADE_TEMPLATES: a list, a flow, a before and after, a mechanism, or its placed clip; a likes counter, an icon
+   burst ...) counts after the number beats: it neither takes their room nor keeps them away (own_cards); plan.py fits
+   it round them.
    Between any two cards GAP_S of plain footage: a hold is cut to HOLD_TIGHT_S for it, a real card before a beat ends
    sooner (plan.py space_kinetic), and a strong beat blocked only by the hold of the one before bridges from it
    (BRIDGE_*); the next beat of the same tracker joins instead. Never over a real card, except a stat_stack beside a
@@ -70,7 +71,7 @@ sys.path.insert(0, str(HERE))
 sys.path.insert(1, str(HERE.parents[2] / "lib"))
 from ai_editor import budget, numbers  # noqa: E402
 
-VERSION = 3            # bump when the rules change: the fingerprint changes and every edit's beats are found again
+VERSION = 4            # bump when the rules change: the fingerprint changes and every edit's beats are found again
 KINETIC_PER_MIN = budget.DEFAULT_PER_MIN   # graphics a minute in all (real ones included), graphics.kinetic_per_min
 GAP_S = 1.0            # plain footage kept between two cards, kinetic or real (plan.py bridges kinetic ones closer than 1 s)
 REAL_MIN_S = 2.0       # a real card before a kinetic one ends GAP_S before it when it still holds this (plan.py space_kinetic)
@@ -776,11 +777,11 @@ def real_cards(take, visuals, images, style, duration):
 
 
 def own_cards(real):
-    """The real_cards counted before the number beats: all but a moving template the motion skill may build as a clip
-    (budget.CLIP_TEMPLATES, or the clip that replaced one: real_cards reads it as its template). Those come after the
-    numbers (references/kinetic.md "Motion clips"): plan.py budget_cards keeps them only in the room the number beats
-    leave, and drops one up with a kept number beat."""
-    return [r for r in real if r[2] not in budget.CLIP_TEMPLATES]
+    """The real_cards counted before the number beats: all but a template made for the edit (budget.MADE_TEMPLATES: a
+    moving one the motion skill may build as a clip, or the clip that replaced one, as real_cards reads it; a likes
+    counter, an icon burst ...). Those come after the numbers (references/kinetic.md "Motion clips"): plan.py
+    budget_cards keeps them only in the room the number beats leave, and drops one up with a kept number beat."""
+    return [r for r in real if r[2] not in budget.MADE_TEMPLATES]
 
 
 def rate(style):

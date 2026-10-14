@@ -1043,24 +1043,29 @@ def budget_cards(cards, duration, style, titles=True):
     real-source cards together: graphics.kinetic_per_min a minute (default 8; lib/ai_editor/budget.py, which the beat
     finder reads too). The strongest are kept (budget.pick: the hook always, then each beat's "strength", spread out
     so plain footage stays between them); each card left out is named on stderr. The user's own cards come first: when
-    they fill the budget the hook's figure is kept on top of it, and that is said on stderr. A moving template the
-    motion skill may build as a clip (budget.CLIP_TEMPLATES), and a clip of one (ranked as the template it replaced,
+    they fill the budget the hook's figure is kept on top of it, and that is said on stderr. A template made for
+    the edit (budget.MADE_TEMPLATES: a moving one the motion skill may build as a clip, a likes counter, an icon burst
+    ...), and a clip of one (ranked as the template it replaced,
     references/kinetic.md "Motion clips": motion.py split_beats picks them the same way), comes after the number beats:
     it takes only the slots they leave, and one up while a kept kinetic card is goes, its slot to the next strongest
-    (budget.settle: the number is the title's; titles False: the layout drops kinetic cards, so it may be up with one).
-    Kinetic off: thin_cards' rules."""
+    (budget.settle: the number is the title's). titles False (a split or board layout, which drops the kinetic cards):
+    they take no slot and are passed on for the layout to drop, and a card may be up with one. Kinetic off: thin_cards'
+    rules."""
     sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "lib"))
     from ai_editor import budget
     n = budget.allowance(style, duration)
     if n is None:
         return thin_cards(cards, duration, style.get("cards"))
-    keep, up = budget.settle(cards, n, (lambda c: kind_of(c) in KINETIC) if titles else (lambda c: False))
+    # a split or board layout drops the kinetic cards (they float over the full-frame speaker): they take no slot there,
+    # passed on as they are for the layout to drop, and the rest is counted without them
+    shown = cards if titles else [c for c in cards if kind_of(c) not in KINETIC]
+    keep, up = budget.settle(shown, n, (lambda c: kind_of(c) in KINETIC) if titles else (lambda c: False))
     for c, k in up:
         what = f"motion clip {motion_clip(c)}" if motion_clip(c) else f"{kind_of(c)} card"
         print(f"warning: {what} on '{c['trigger_word']}' dropped: it is up with the {kind_of(k)} on '{k['trigger_word']}' "
               f"({k['start']:.1f}-{k['end']:.1f} s), and the numbers are the kinetic titles' (references/kinetic.md \"Motion clips\")",
               file=sys.stderr)
-    pool = [c for c in cards if not any(c is x for x, _ in up)]
+    pool = [c for c in shown if not any(c is x for x, _ in up)]
     gone = [c for c in pool if not any(c is k for k in keep)]
     if gone:
         print(f"note: {len(gone)} card{'s' if len(gone) != 1 else ''} left out (at most {n} graphics in "
@@ -1077,7 +1082,7 @@ def budget_cards(cards, duration, style, titles=True):
         print(f"warning: {len(clips)} motion clip{'s' if len(clips) != 1 else ''} left out by the graphics budget ({n}): " +
               ", ".join(f"{motion_clip(c)}@{c['start']:.1f}s" for c in clips) + " (motion.py pick again after a change)",
               file=sys.stderr)
-    return [c for c in cards if any(c is k for k in keep)]
+    return [c for c in cards if any(c is k for k in keep) or not titles and kind_of(c) in KINETIC]
 
 
 def budget_kind(v):
@@ -2871,7 +2876,8 @@ def build(style, words, meta, images=(), aspect="auto", cuts=(), visuals=(), edi
     cards = scene_grounds(cards, style)
     if off_screen(style):
         cards = hold_scenes(cards, words, duration, 1 - style["face"]["present_pct"] / 100)
-    cards = bridge_kinetic(whole_numbers(space_kinetic(cards), chunks, words) if kinetic_on(style) else cards)
+    # a split or board layout drops the kinetic cards below: no real card or clip is cut short for one there
+    cards = bridge_kinetic(whole_numbers(cards if split_now or board else space_kinetic(cards), chunks, words) if kinetic_on(style) else cards)
     gap = card_gap_s(style)
     quiet = [g for g in card_gaps(cards, duration) if g[1] - g[0] > gap]
     cover = audio_cover(edit_dir, words)
@@ -3627,6 +3633,17 @@ def demo():
     # ... a 50/50 layout drops kinetic cards, so nothing there is the titles': both clips stay
     sl = build({**ks, "layout": {"mode": "split"}}, kw, kmeta, visuals=kvis)
     assert [motion_clip(c) for c in sl["cards"] if motion_clip(c)] == ["01-loaves", "02-need"], sl["cards"]
+    # ... and a kinetic card the layout drops takes no slot there: at 4 a minute (1 here) the list's clip has it, not
+    # the hook's figure that is never drawn; nor does one cut a clip short there (space_kinetic)
+    assert [c["trigger_word"] for c in budget_cards(cb, 30.0, {"graphics": {"kinetic": True, "kinetic_per_min": 4}}, titles=False)] == \
+        ["hook", "01-on", "stats", "menu", "goal", "title", "money"]   # the kinetic cards passed on, 2 others counted
+    lv = [{**vc("need", "02-need"), "fallback": {"word": "need", "nth": 1, "kind": "anim", "type": "notes", "hold_s": 2.5}}]
+    k4 = {**ks, "graphics": {"kinetic": True, "kinetic_per_min": 4}, "layout": {"mode": "split"}}
+    sl4 = build(k4, kw, kmeta, visuals=kinetic_beats.beats(kw, k4, lv) + lv)
+    assert [(motion_clip(c), c["end"]) for c in sl4["cards"]] == [("02-need", 10.88)], sl4["cards"]
+    nw = kinetic_beats.timed("Our bakery sold 340 loaves in one week. You need flour, water, salt and time. We sold 900 rolls last month.")
+    sn = build({**ks, "layout": {"mode": "split"}}, nw, {**kmeta, "duration": nw[-1]["end"] + 0.5}, visuals=kinetic_beats.beats(nw, ks, lv) + lv)
+    assert [(motion_clip(c), c["end"]) for c in sn["cards"]] == [("02-need", 5.68)], sn["cards"]   # not 5.44: the 900 is not drawn
     # ... a clip's template's own strength is the clip's: a weak one loses its slot as the template would
     assert anim_items([{**vc("need", "02-need"), "fallback": {"word": "need", "type": "notes", "strength": 0.3}}],
                       None, ks)[0]["strength"] == 0.3
