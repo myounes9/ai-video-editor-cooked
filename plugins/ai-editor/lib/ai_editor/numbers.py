@@ -1,25 +1,26 @@
 #!/usr/bin/env python3
 """Numbers as people say and write them. Stdlib only, deterministic.
 
-    python3 numbers.py read "I sent two hundred and fifty messages"   the spans, one JSON line each
+    python3 numbers.py read "I sent three hundred and forty messages"   the spans, one JSON line each
     python3 numbers.py demo                                             self-check
 
-spans(words): every number spoken in a transcript, with the words that say it. "two hundred and fifty"
--> 250, "seven hundred twenty-six" -> 726, "a hundred and twenty-seven" -> 127 ("a" counts only before
-hundred, thousand, million, billion), "7.5k" / "seven point five k" / "7.5 thousand" -> 7500, "two and a
-half" -> 2.5, "fifty percent" -> 50 (kind percent). Each span is {"start", "end", "value", "kind",
-"text"}: start and end are indices into the words (end included, so words[end] is the last word that
+spans(words): every number spoken in a transcript, with the words that say it. "three hundred and forty"
+-> 340, "seven hundred twenty-six" -> 726, "a hundred and twenty-seven" -> 127 ("a" counts only before
+hundred, thousand, million, billion), "4.5k" / "four point five k" / "4.5 thousand" -> 4500, "two and a
+half" -> 2.5, "half a million" -> 500000, "minus five" -> -5 (its "minus" is the span's first word), "fifty
+percent" -> 50 (kind percent). Each span is {"start", "end", "value", "kind", "text"}: start and end are indices into the words (end included, so words[end] is the last word that
 says it, scale and "percent" included), kind is count, percent, money (a currency sign or word, or
 MRR/ARR, after it) or duration (seconds ... years after it). Words are the caption or transcript words
-as given; a string is split on spaces. Punctuation ends a number ("convert one, two" is 1 and 2), and so
+as given; a string is split on spaces. Punctuation ends a number ("sign one, two" is 1 and 2), and so
 does a number of the same or a bigger scale ("one hundred and two hundred" is 100 and 200). Without
 punctuation neighbouring number words join ("a thousand and three" is 1003), so read the transcript's
 punctuated words, not caption chunks.
 
-written(text): the numbers written on a card, scaled: "7.5K", "EUR 7.5K", "€7.5K" -> 7500, "100K" ->
-100000, "1,200" -> 1200, "50%" -> 50 (percent). Each keeps `raw`, the bare digits (7.5).
+written(text): the numbers written on a card, scaled: "4.5K", "EUR 4.5K", "€4.5K" -> 4500, "20K" ->
+20000, "1,200" -> 1200, "50%" -> 50 (percent), "-5" -> -5 (a minus sign straight before the digits, not after a
+letter or digit: "GPT-4" and "5-10" stay positive). Each keeps `raw`, the bare digits (4.5).
 
-norm(value): the one string form both sides compare ("7500", "2.5").
+norm(value): the one string form both sides compare ("4500", "2.5").
 
 check.py grounds a card's numbers in what was said with it; route.py and plan.py time graphics to a
 span's words.
@@ -46,7 +47,7 @@ UNITS = {w: i for i, w in enumerate("zero one two three four five six seven eigh
                                     "fourteen fifteen sixteen seventeen eighteen nineteen".split())}
 TENS = dict(zip("twenty thirty forty fifty sixty seventy eighty ninety".split(), range(20, 100, 10)))
 BIG = {"hundred": 100, "thousand": 1000, "million": 10 ** 6, "billion": 10 ** 9}
-# After a number only: "seven point five k", "five grand", "2 bn".
+# After a number only: "four point five k", "five grand", "2 bn".
 SCALE = {"thousand": 1000, "k": 1000, "grand": 1000, "million": 10 ** 6, "billion": 10 ** 9, "bn": 10 ** 9}
 SUFFIX = {"k": 1000, "m": 10 ** 6, "b": 10 ** 9, "bn": 10 ** 9}
 MONEY = {"euro", "euros", "dollar", "dollars", "buck", "bucks", "pound", "pounds", "quid", "eur", "usd", "gbp", "mrr", "arr",
@@ -55,12 +56,13 @@ DURATION = {"second", "seconds", "sec", "secs", "minute", "minutes", "min", "min
             "days", "week", "weeks", "month", "months", "year", "years"}
 FILLERS = {"uh", "um", "er", "erm", "ah", "uhm", "hmm"}
 FRACTION = {"half": 0.5, "quarter": 0.25}
+SIGN = {"minus", "negative"}   # before a number: "minus five degrees" is -5, never 5
 STOP = ",.;:!?"
-# One spoken word that is digits: "7.5k", "€7.5k", "1,200", "50%", "3x".
+# One spoken word that is digits: "4.5k", "€4.5k", "1,200", "50%", "3x".
 DIGITS = re.compile(r"([$€£])?(\d[\d,]*(?:\.\d+)?)(k|m|bn|b|%|x)?")
 ASCII_DIGITS = re.compile(r"[0-9]+")   # "seven point 25"
-# Digits on a card: "7.5K", "EUR 7.5K", "€ 7.5k", "100K", "50%", "2 million"; after any dot too ("No.1", "...37").
-WRITTEN = re.compile(r"(?i)(?:([$€£])\s?|\b(eur|usd|gbp)\s?)?(\d[\d,]*(?:\.\d+)?)"
+# Digits on a card: "4.5K", "EUR 4.5K", "€ 4.5k", "20K", "50%", "2 million"; after any dot too ("No.1", "...37").
+WRITTEN = re.compile(r"(?i)(?:([$€£])\s?|\b(eur|usd|gbp)\s?)?((?<![\w.])[-−])?(\d[\d,]*(?:\.\d+)?)"
                      r"(?:\s?(%)|(k|m|bn|b)\b|\s(thousand|million|billion|percent)\b)?")
 
 
@@ -127,6 +129,8 @@ def _read(toks, i):
                 cur, last, pct = v, "digits", suf == "%"
         elif t in ("a", "an") and last is None and nxt in BIG:
             cur, last = 1, "a"
+        elif t in FRACTION and last is None and nxt in ("a", "an") and tok(n + 2) in BIG and not toks[n][2]:
+            cur, last, took = FRACTION[t], "a", 2   # "half a million" is 500000, never "a million"
         elif (t in UNITS or t in TENS) and last in ("hundred", "scale") and (_ahead(toks, n) == 100 if last == "hundred"
                                                                          else _ahead(toks, n) >= big):
             break   # "one hundred two hundred", "one million two million": two numbers
@@ -180,6 +184,9 @@ def spans(words):
         start, end = toks[i][0], toks[n - 1][0]
         after = next((_clean(w) for w in words[end + 1:] if _clean(w) not in FILLERS), "")
         before = _clean(words[start - 1]) if start else ""
+        if before in SIGN and words[start - 1].rstrip()[-1:] not in STOP:
+            start, value = start - 1, -value   # "minus five": the sign is said, so the span starts on it
+            before = _clean(words[start - 1]) if start else ""
         kind = ("percent" if pct else "money" if money or after in MONEY or before in MONEY
                 else "duration" if after in DURATION else "count")
         out.append({"start": start, "end": end, "value": _num(value), "kind": kind, "text": " ".join(words[start:end + 1])})
@@ -192,9 +199,9 @@ def written(text):
     thousand/million, raw the bare digits."""
     out = []
     for m in WRITTEN.finditer(text):
-        raw = float(m[3].rstrip(",").replace(",", ""))
-        scale = SUFFIX.get((m[5] or "").lower()) or SCALE.get((m[6] or "").lower()) or 1
-        pct = bool(m[4]) or (m[6] or "").lower() == "percent"
+        raw = float(m[4].rstrip(",").replace(",", "")) * (-1 if m[3] else 1)
+        scale = SUFFIX.get((m[6] or "").lower()) or SCALE.get((m[7] or "").lower()) or 1
+        pct = bool(m[5]) or (m[7] or "").lower() == "percent"
         out.append({"value": _num(raw * scale), "raw": _num(raw), "kind": "percent" if pct else "money" if m[1] or m[2] else "count",
                     "text": m[0].strip()})
     return out
@@ -204,23 +211,19 @@ def written(text):
 # It has the shapes a real talking-head take has. A line ends where the transcript broke it: "seven hundred
 # twenty-six," is money only once the next line's "uh, dollars" follows (the whole take, below).
 SAMPLE_TAKE = [
-    ("We raised 4.5k dollars in three and a half weeks, and here's everything we did to get there.",
-     [(4500, "money", 2, 2), (3.5, "duration", 5, 8)]),
-    ("So we bake two main kinds of bread.", [(2, "count", 3, 3)]),
-    ("One is a sourdough that we launched three and a half weeks ago, and right now we're at, uh, sixty-three regular buyers, "
-     "four hundred and eighty-one dollars, and seven hundred twenty-six,",
-     [(1, "count", 0, 0), (3.5, "duration", 7, 10), (63, "count", 19, 19), (481, "money", 22, 25), (726, "count", 28, 30)]),
-    ("uh, dollars in tips.", []),
-    ("And to get there, we had to test eighteen different recipes to find the best.", [(18, "count", 8, 8)]),
-    ("And our other line of business is our catering side, and we just booked a 3.5k dollars order.", [(3500, "money", 15, 15)]),
-    ("So to get there, we had to print three hundred and forty flyers.", [(340, "count", 8, 11)]),
-    ("We got in six cafe tastings, and we were able to sign one.", [(6, "count", 3, 3), (1, "count", 12, 12)]),
-    ("And we also did, uh, about a hundred and twenty-seven, uh, door knocks and got turned away every single time.",
-     [(127, "count", 6, 9)]),
-    ("So right now, we are at forty percent of where we want to be if we want to reach our 20k goal,",
-     [(40, "percent", 6, 7), (20000, "count", 20, 20)]),
-    ("and realistically, we need to find another way to sell if we want to reach that goal.", []),
-    ("So give us a follow if you want to see what we try next.", []),
+    ("Our ice cream van has nine flavours, and we added two this summer.", [(9, "count", 5, 5), (2, "count", 10, 10)]),
+    ("Last month it took, uh, four hundred and eighty-one dollars on one Saturday.", [(481, "money", 5, 8), (1, "count", 11, 11)]),
+    ("The best seller is mango, and about, uh, a hundred and twenty-seven, uh, people asked for it by name.",
+     [(127, "count", 8, 11)]),
+    ("We tested eighteen recipes before that one worked.", [(18, "count", 2, 2), (1, "count", 6, 6)]),
+    ("Then a school booked us for a 3.5k dollars party in two and a half weeks.", [(3500, "money", 7, 7), (2.5, "duration", 11, 14)]),
+    ("We handed out three hundred and forty leaflets in six towns.", [(340, "count", 3, 6), (6, "count", 9, 9)]),
+    ("Sixty-three regulars now pay seven hundred twenty-six,", [(63, "count", 0, 0), (726, "count", 4, 6)]),
+    ("uh, dollars a year for a pass.", []),
+    ("That puts us at forty percent of our 20k target for the season.", [(40, "percent", 4, 5), (20000, "count", 8, 8)]),
+    ("Next summer we want 4.5k dollars a week in three and a half months.", [(4500, "money", 4, 4), (3.5, "duration", 9, 12)]),
+    ("We sold half a million scoops, even at minus two degrees.", [(500000, "count", 2, 4), (-2, "count", 8, 9)]),
+    ("See you at the beach.", []),
 ]
 
 
@@ -230,9 +233,9 @@ def demo():
         assert got == want, (line, got)
     # the whole take as one run of words: every number in it, in order, and what it counts
     every = [(s["value"], s["kind"]) for s in spans(" ".join(line for line, _ in SAMPLE_TAKE))]
-    assert every == [(4500, "money"), (3.5, "duration"), (2, "count"), (1, "count"), (3.5, "duration"), (63, "count"),
-                     (481, "money"), (726, "money"), (18, "count"), (3500, "money"), (340, "count"), (6, "count"),
-                     (1, "count"), (127, "count"), (40, "percent"), (20000, "count")], every
+    assert every == [(9, "count"), (2, "count"), (481, "money"), (1, "count"), (127, "count"), (18, "count"), (1, "count"),
+                     (3500, "money"), (2.5, "duration"), (340, "count"), (6, "count"), (63, "count"), (726, "money"),
+                     (40, "percent"), (20000, "count"), (4500, "money"), (3.5, "duration"), (500000, "count"), (-2, "count")], every
     s = spans("about a hundred and twenty-seven, uh, door knocks".split())[0]
     assert (s["start"], s["end"], s["text"]) == (1, 4, "a hundred and twenty-seven,"), s
     one = lambda t: [(x["value"], x["kind"]) for x in spans(t)]   # noqa: E731
@@ -261,7 +264,12 @@ def demo():
     assert w("50%") == [(50, 50, "percent")] and w("1,200 users, 3x") == [(1200, 1200, "count"), (3, 3, "count")]
     assert w("2 million") == [(2000000, 2, "count")] and w("5 min") == [(5, 5, "count")] and w("power2.out") == [(2, 2, "count")]
     assert w("No.1") == [(1, 1, "count")] and w("...37 clients") == w("Ep.37") == [(37, 37, "count")]   # a dot before is no decimal
-    assert norm(7500.0) == "7500" and norm(2.5) == "2.5" and norm(0.1 * 3) == "0.3"
+    # "half a <scale>" is half of it; a said minus is the number's sign (both drawn wrong before: 1M, 5)
+    assert one("half a million") == [(500000, "count")] and one("half a thousand dollars") == [(500, "money")]
+    assert one("minus five degrees") == [(-5, "count")] and one("negative 3 percent") == [(-3, "percent")]
+    assert one("half of them") == [] and one("minus, five") == [(5, "count")]
+    assert w("-5") == [(-5, -5, "count")] and w("GPT-4") == [(4, 4, "count")] and w("5-10 days") == [(5, 5, "count"), (10, 10, "count")]
+    assert norm(4500.0) == "4500" and norm(2.5) == "2.5" and norm(0.1 * 3) == "0.3"
     # run from this folder (sys.path[0] here), the standard library still gets its own numbers module
     import subprocess
     from pathlib import Path

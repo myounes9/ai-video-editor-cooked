@@ -249,14 +249,14 @@ def demo():
 def mark_kinetic(beats, words, style, visuals=(), images=()):
     """With kinetic titles on (and graphics.kinetic_auto not false): each sentence kinetic_beats.py gives a number beat
     gets "kinetic": its type (plan.py places them itself, around the edit's own cards: visuals, images). Returns how
-    many, or None when off."""
+    many graphics they are (a tracker's beats are one), or None when off."""
     import kinetic_beats
     if not kinetic_beats.auto_on(style or {}):
         return None
     kept = kinetic_beats.find(words, style, [v for v in visuals if v.get("auto") != kinetic_beats.AUTO], images)[0]
     for b in beats:
         b["kinetic"] = next((c.type for c in kept if b["start"] <= c.s + kinetic_beats.LEAD_S <= b["end"] + 0.05), None)
-    return len(kept)
+    return len({kinetic_beats.unit(c) for c in kept})
 
 
 def style_hints(style):
@@ -331,7 +331,7 @@ def main():
                   "[kinetic] below. Give those lines no card of your own unless a real page shows the figure (it then takes "
                   "the beat's place); never write kinetic beats by hand")
             print(f"the graphics budget: {budget.per_min(style):g} a minute in all (graphics.kinetic_per_min), "
-                  f"{budget.allowance(style, dur)} here: {nk} number beats and {mine} of the edit's own cards, so room for "
+                  f"{budget.allowance(style, dur)} here: {nk} number graphics and {mine} of the edit's own cards, so room for "
                   f"{room} more" + (" (\"want\" marks them)" if room else ": add no other card"))
         n, pm = want(beats, style, room)
         if n and room is None:

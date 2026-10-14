@@ -3,8 +3,9 @@
 // lockup, paint). references/kinetic.md has the props; tokens.ts every size, colour and time.
 //   - fixed columns solved once for the whole chain and centred on the grid: nothing moves when a figure lands;
 //     every connector has the same length, never shorter than its minimum; a label may overhang its column, never
-//     closer than 40 px to the next; labels stay at a phone-readable size (they wrap before they shrink). A chain that
-//     cannot fit so at the smallest figure size throws (check.py plan flags it first: use a stat_stack);
+//     closer than 40 px to the next; labels stay at a phone-readable size (they wrap before they shrink); the row is
+//     centred on its ink, figures and labels. A chain that cannot fit so at the smallest figure size throws (check.py
+//     plan flags it first: use a stat_stack);
 //   - each figure is pulled on as ink on a highlighter marker on its word (1.06 -> 1 settle); the connector to the
 //     next draws just before the next lands; when the next is coming the marker is pulled off its figure and hands it
 //     to the foil (a stacked layer, never a colour blend), so every figure stays key-coloured; the last keeps its marker;
@@ -104,6 +105,14 @@ const solve = (F: Faces, items: Item[], w: number, h: number, band: unknown, bes
   const total = fit.ext[0] + d.reduce((a, b) => a + b, 0) + fit.ext[n - 1];
   const centres = [box.left + (box.width - total) / 2 + fit.ext[0]];
   d.forEach((dj) => centres.push(centres[centres.length - 1] + dj));
+  // centred on what it draws: a long outer label on one side only ("1 ... WHOLESALER") pulled the row off centre and past
+  // the side margin; the row slides to centre its ink, a figure never past the grid and a label never past LABEL.over
+  const half = items.map((_, i) => Math.max(fit.mW[i] / 2, fit.labW[i] / 2));
+  const inkL = Math.min(...centres.map((c, i) => c - half[i])), inkR = Math.max(...centres.map((c, i) => c + half[i]));
+  const lo = Math.max(box.left - centres[0] + fit.mW[0] / 2, box.left - over - inkL);
+  const hi = Math.min(box.left + box.width - centres[n - 1] - fit.mW[n - 1] / 2, box.left + box.width + over - inkR);
+  const shift = Math.min(hi, Math.max(lo, box.left + box.width / 2 - (inkL + inkR) / 2));
+  if (lo <= hi) centres.forEach((_, i) => { centres[i] += shift; });
   const mTop = box.top, capTop = mTop + fit.padY, base = capTop + D.cap * S, mBot = base + fit.padY;
   const lBase = mBot + fit.gapL + O.cap * fit.Ls;
   return { ...fit, S, box, k, figs, labels, clear, centres, mTop, capTop, base, mBot, lBase,

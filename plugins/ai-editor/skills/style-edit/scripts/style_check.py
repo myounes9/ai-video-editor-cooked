@@ -111,12 +111,13 @@ def check(plan, style):
         rate = budget.per_min(style)
     elif rate and off_screen(style) and not (style.get("cards") or {}).get("per_min"):   # route.py want: her cut-aways
         rate = max(rate, round(60 * (1 - style["face"]["present_pct"] / 100) / OFF_SCENE_S, 1))
-    if rate and off(len(cards), rate, dur):
-        out.append((f"{len(cards)} cards ({per_min(len(cards), dur)} a minute), " +
+    n = len({budget.group(c) or i for i, c in enumerate(cards)}) if kin else len(cards)   # a tracker's beats are one graphic
+    if rate and off(n, rate, dur):
+        out.append((f"{n} cards ({per_min(n, dur)} a minute), " +
                     (f"the graphics budget {rate:g} a minute (graphics.kinetic_per_min)" if kin else f"{h} {rate:g} a minute") +
                     f" (about {round(rate * dur / 60)} here)",
                     ("give the strongest number beats a kinetic card, or a real source" if kin else
-                     "give a card to each beats.json sentence marked want (route.py), from real sources") if len(cards) <
+                     "give a card to each beats.json sentence marked want (route.py), from real sources") if n <
                     rate * dur / 60 else "drop the weakest cards"))
     kinds = {k: v for k, v in (g.get("kinds") or {}).items() if v}
     if kinds and cards:

@@ -6,6 +6,28 @@ What changed for every user, newest first.
 
 Fork base: upstream ai-editor 2.7.8 (the manifests read 2.7.8-cooked.1). The entries below are the fork's own, not released yet.
 
+- Kinetic titles, review fixes (fork, opt-in). A number card's end never hides the start of a number said after it:
+  a chain held into "a hundred and sixty-four" showed "sixty-four" once it left, a number nobody said; the card now
+  ends as that number's caption page starts, or holds over all of it (plan.py `whole_numbers`), and check.py plan FAILs
+  a plan that still splits one. The beat finder keeps the strongest beats, not the first come: holds are cut to 1.3 s
+  for the gap, a strong beat blocked only by the card before it bridges from it, a step tracker is one graphic in the
+  budget (and a tracker of sources, steps or ways ranks with a stat run), and real cards get the same 1 s of footage
+  (a picture before a beat ends sooner, when it still holds 2 s). It no longer makes cards of what is no count of
+  things: clock times, ages, addresses, phone numbers, years, dates, prices, ranges, ratios, measures, "a hundred
+  percent sure", a pronoun "one"; the hook needs money or a count of things; a list said over sentences is no chain; a
+  chain's last "1" is drawn bare, not with a bare verb. "half a million" reads 500K (was drawn "1M") and "minus five"
+  -5, and the check no longer passes a "1M" or "5" card for them. A review note's change to an automatic beat (a beat
+  removed, a hold changed) survives the beats being found again; turning the automatic beats off takes them out of
+  visuals.json. Rules in words: "do not add motion graphics", "never use kinetic titles", "I hate kinetic text" and
+  the like now turn graphics off (they turned them on), an unclear note sets nothing, "no more than 3 a minute" is a
+  rate. Emphasis captions mark only a number's own words (not "and a"), a two-word name whole, and no key word beside a
+  marked number. A number chain is centred on what it draws, its outer labels 60 px from the edge (the safe zone's
+  side; they reached 36 px), and check.py render WARNs a kinetic card off centre or
+  past the side margin (its scrim no longer counts as its ink). With no kinetic card in the plan, punch zooms join as
+  upstream's do again. The made-up fixtures replace the ones that echoed a real take. Tests: kinetic_beats.py (a
+  28-sentence table of shapes that are no count, a bridge, whole numbers, review edits), numbers.py, check.py, plan.py,
+  taste.py (a negation table), budget.py demos, and a chain-centring probe in `test/templates.mjs`.
+
 - Kinetic titles, automatic end to end (fork, opt-in). The beat finder, plan.py and the visuals step now count the
   graphics one way: `kinetic_beats.py` takes its rate and count from `budget.py` (the style page's `cards.per_min` no
   longer caps it) and marks each beat's `strength` and the hook, so plan.py keeps the same beats, a tracker's beats
@@ -460,26 +482,26 @@ Fork base: upstream ai-editor 2.7.8 (the manifests read 2.7.8-cooked.1). The ent
 
 Fork release on upstream ai-editor 2.6.2: the four entries below (spoken numbers, final quality, Lottie cards, same frames in every tab). See FORK.md.
 
-- The check reads spoken numbers the way people say them. `check.py` split "two hundred and fifty" into
-  2, 100 and 50, so a card showing 250 FAILed as a number nobody says, and "7.5K" on a card never matched
-  a spoken "seven point five k". A new shared parser, `lib/ai_editor/numbers.py` (stdlib only), reads
-  "two hundred and fifty" as 250, "seven hundred twenty-six" as 726, "a hundred and twenty-seven" as 127
-  ("a" only before hundred, thousand, million), "7.5k", "seven point five k" and "7.5 thousand" as 7500,
+- The check reads spoken numbers the way people say them. `check.py` split "three hundred and forty" into
+  3, 100 and 40, so a card showing 340 FAILed as a number nobody says, and "4.5K" on a card never matched
+  a spoken "four point five k". A new shared parser, `lib/ai_editor/numbers.py` (stdlib only), reads
+  "three hundred and forty" as 340, "seven hundred twenty-six" as 726, "a hundred and twenty-seven" as 127
+  ("a" only before hundred, thousand, million), "4.5k", "four point five k" and "4.5 thousand" as 4500,
   "two and a half" as 2.5 and "fifty percent" as 50, and gives each number's words (start and end) and
   kind (count, percent, money, duration), so later steps can land a graphic on them. On the card side
-  "7.5K", "EUR 7.5K", "€7.5K", "100K" and "50%" read as 7500, 7500, 7500, 100000 and 50, and a number
+  "4.5K", "EUR 4.5K", "€4.5K", "20K" and "50%" read as 4500, 4500, 4500, 20000 and 50, and a number
   after a dot is still a number ("No.1", "...37"). A number of the same or a bigger scale starts a new
   one ("between one hundred and two hundred" is 100 and 200, "one million two million" two numbers), and
   "5 hundred" is 500. The speaker's numbers are read from the cut's punctuated transcript and from the
   caption chunks with each chunk's end ending a number, so "a thousand" | "and three people replied" is
   never 1003 while "four hundred" | "and eighty-one" (the transcript says "four hundred and eighty-one")
-  is 481. A card's scale is the speaker's: "€7.5M" when "7.5k" was said FAILs (it passed before); a K, M,
-  B or % nobody said on a bare spoken number ("$2M" for "two", "50%" for "fifty users", "7.5" for "7.5k")
+  is 481. A card's scale is the speaker's: "€4.5M" when "4.5k" was said FAILs (it passed before); a K, M,
+  B or % nobody said on a bare spoken number ("$2M" for "two", "50%" for "fifty users", "4.5" for "4.5k")
   WARNs, where it passed; every other number that counted as said before still does. A Lottie card's
   `props.texts` are checked like any card's words. A card's motion props (`enter`, `exit`, `ease`,
   `ambient`, `word_at`, an accent colour ...) no longer count as on-screen numbers, so "power2.out" or
   "back.out(2.5)" never FAILs, unless one holds words ("37 clients" under `size`). Test: `numbers.py demo`
-  (a made-up sample take's numbers and their words, the scale rule) and `check.py demo` ("250" and "€7.5K" pass,
+  (a made-up sample take's numbers and their words, the scale rule) and `check.py demo` ("340" and "€4.5K" pass,
   an invented "37" still fails, also after a dot, in a Lottie's texts and under `size`; the four joins
   above fail; the scale and % cases).
 

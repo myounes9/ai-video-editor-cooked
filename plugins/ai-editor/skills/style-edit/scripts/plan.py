@@ -107,6 +107,9 @@ LEGACY = ("logo", "flow")
 KINETIC = ("kinetic_number", "number_chain", "goal_bar", "step_build", "stat_stack", "kinetic_title", "cta_follow")
 KINETIC_JOIN_S = 1.0   # two beats of one step tracker closer than this are joined: it carries on, never leaves and comes back
 KINETIC_BRIDGE_S = 1.0  # a kinetic card this close to the next one (or a scene) holds until it: captions never flash back
+KINETIC_GAP_S = 1.0     # plain footage between a real card and the kinetic card after it (kinetic_beats.GAP_S): the real one ends sooner
+REAL_MIN_S = 2.0        # ... but holds this long at the least (kinetic_beats.REAL_MIN_S)
+NUMBER_HOLD_S = 1.3     # a kinetic card ended before a number it would cut in half still holds this long after its last part
 # The word captions fade out only under a number card: every kinetic type but kinetic_title and cta_follow (no number;
 # the captions keep running under them). kinetic/index.ts hidesCaptions reads the same; a card's props.hide_captions wins.
 HIDES_CAPTIONS = tuple(t for t in KINETIC if t not in ("kinetic_title", "cta_follow"))
@@ -335,27 +338,31 @@ def clear_entrances(zooms, cards):
     punch_between has already cut a punch back to the plain footage between cards where enough of it was left there;
     moving every edge out would gather the zooms of a video carried by kinetic cards onto the few card changes and
     join them into one long hold.
-    Two zooms closer than a punch's travel join into one (the out move would be cut short: a one-frame snap); two
-    punches on plain footage closer than that plus MOVE_REST_S join too, up to PUNCH_JOIN_MAX_S (past it the first goes
-    back out MOVE_REST_S before the next);
+    Two zooms closer than a punch's travel join into one (the out move would be cut short: a one-frame snap); with
+    kinetic cards in the plan (fork), two punches on plain footage closer than that plus MOVE_REST_S join too, up to
+    PUNCH_JOIN_MAX_S (past it the first goes back out MOVE_REST_S before the next), and an edge that would move into
+    the plain footage between a scene and the kinetic card right after it moves under the scene instead (one move in
+    that gap, not two); without them upstream's rule stands;
     a zoom that gets shorter than 0.5 s is dropped. Two moves at once compete for the eye, and the render check
     cannot time a card's landing while the footage under it jumps. A punch that would start and end under a scene
     starts as the scene leaves instead (the footage comes back punched in), so the scene does not eat it."""
     orig = {id(z): (z["start"], z["end"]) for z in zooms}
+    holds = [h for h in map(kinetic_hold, cards) if h]
     for c in cards:
         a, b = c["start"] - ENTER_S[0] - PUNCH_S, c["start"] + ENTER_S[1]
         to = round((c["start"] + c["end"]) / 2, 3) if c.get("layout") == "scene" else round(max(0.0, a), 3)
+        sc = kinetic_hold(c) and next((x for x in cards if x.get("layout") == "scene" and 0 <= a - x["end"] < KINETIC_GAP_S), None)
         for z in zooms:
             for k in ("start", "end"):
                 if a < z[k] < b:
-                    z[k] = to
-    holds = [h for h in map(kinetic_hold, cards) if h]
+                    z[k] = round((sc["start"] + sc["end"]) / 2, 3) if sc and orig[id(z)][k == "end"] > sc["start"] else to
     for z in zooms:
         if any(a < z[k] < b for a, b in holds for k in ("start", "end")):
             z.update(kind="push", ease_s=max(z.get("ease_s") or 0, KINETIC_PUSH_S))
     out = []
     # two punches on plain footage (no card up where the second starts)
-    punches = lambda a, b: a.get("kind") == b.get("kind") == "punch" and not any(c["start"] <= b["start"] <= c["end"] for c in cards)  # noqa: E731
+    punches = lambda a, b: bool(holds) and a.get("kind") == b.get("kind") == "punch" and not any(  # noqa: E731
+        c["start"] <= b["start"] <= c["end"] for c in cards)
     for z in sorted(zooms, key=lambda z: z["start"]):
         if z["end"] - z["start"] < 0.5:
             a0, b0 = orig[id(z)]
@@ -438,6 +445,85 @@ def bridge_kinetic(cards):
                     c["anim"]["props"]["bridge_out"] = True
                     later[0]["anim"]["props"]["bridge_in"] = True
     return cards
+
+
+def space_kinetic(cards):
+    """Fork: a real card (a capture, picture or scene) that ends under KINETIC_GAP_S before a kinetic card ends that much
+    before it, when it still holds REAL_MIN_S: the plain footage between them is where the punch zooms land, and the
+    beat finder counted on it (kinetic_beats.py). A stat_stack beside the capture of its figures is left as it is."""
+    kin = [c for c in cards if (c.get("anim") or {}).get("type") in KINETIC]
+    for r in cards:
+        if (r.get("anim") or {}).get("type") in KINETIC:
+            continue
+        for k in kin:
+            if k["anim"]["type"] == "stat_stack" and r["start"] < k["end"] and k["start"] < r["end"] and r["start"] >= k["start"] - 0.5:
+                continue
+            want = round(k["start"] - KINETIC_GAP_S, 3)
+            if r["start"] < k["start"] and want < r["end"] and want - r["start"] >= REAL_MIN_S:
+                r["end"] = want
+    return cards
+
+
+def number_pages(chunks, words):
+    """[(first page, last page, span)] for each spoken number (numbers.py, on the take's punctuated words) said over
+    caption pages: the indices of the pages that hold its first and last word."""
+    sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "lib"))
+    from ai_editor import numbers
+    words = [w for w in words if w.get("type", "word") == "word" and str(w.get("text", "")).strip()]
+    page = {}
+    for i, c in enumerate(chunks):
+        for w in c.get("words") or []:
+            page.setdefault(round(w["start"], 3), i)
+    out = []
+    for sp in numbers.spans([w["text"] for w in words]):
+        a, b = page.get(round(words[sp["start"]]["start"], 3)), page.get(round(words[sp["end"]]["start"], 3))
+        if a is not None and b is not None:
+            out.append((a, b, sp))
+    return out
+
+
+def split_numbers(cards, chunks, words):
+    """[(card, span text, page start of the number's shown part)]: a card hiding the captions (hides_captions) whose end
+    hides the first words of a spoken number while a later page of it shows ("a hundred and" hidden, "sixty-four" shown
+    reads 64). check.py plan FAILs each; whole_numbers fixes them."""
+    out = []
+    for a, b, sp in number_pages(chunks, words):
+        for c in cards:
+            if hides_captions(c) and chunks[a]["end"] <= c["end"] + 1e-6 and chunks[a]["start"] >= c["start"] - 1e-6 \
+                    and any(chunks[k]["end"] > c["end"] + 1e-6 for k in range(a, b + 1)):
+                if not any(o is not c and hides_captions(o) and o["start"] <= c["end"] + QUIET_BRIDGE_S and o["end"] >= chunks[b]["end"]
+                           for o in cards):
+                    out.append((c, sp["text"], chunks[a]["start"]))
+    return out
+
+
+def whole_numbers(cards, chunks, words):
+    """Fork: never hide part of a spoken number. A card that would hide its first page while a later one shows ends
+    as that first page starts, when it still holds NUMBER_HOLD_S after its last part (its props' latest time); else it
+    holds over the whole number, to the end of its last page."""
+    for c, text, _ in split_numbers(cards, chunks, words):
+        a, b, _sp = next(x for x in number_pages(chunks, words) if x[2]["text"] == text and chunks[x[0]]["end"] <= c["end"] + 1e-6)
+        times = [v for k, v in walk_times((c.get("anim") or {}).get("props") or {}) if isinstance(v, (int, float))]
+        last = c["start"] + max(times, default=0.0)
+        back = round(chunks[a]["start"], 3)
+        if back - last >= NUMBER_HOLD_S and back > c["start"]:
+            c["end"] = back
+        else:
+            c["end"] = round(chunks[b]["end"], 3)
+    return cards
+
+
+def walk_times(node, key=None):
+    """(key, value) of every time in a kinetic card's props (at, label_at, at_pct ... seconds after the card starts)."""
+    if isinstance(node, dict):
+        for k, v in node.items():
+            if isinstance(v, (int, float)) and not isinstance(v, bool) and (k == "at" or k.endswith("_at") or k.startswith("at_")):
+                yield k, v
+            else:
+                yield from walk_times(v, k)
+    elif isinstance(node, list):
+        for v in node:
+            yield from walk_times(v, key)
 
 
 def card_defaults(style):
@@ -2090,8 +2176,13 @@ KEY_GAP_S = 2.5    # key words at least this far apart (spoken numbers are not c
 
 def key_words(words):
     """Fork: indices of the take's key words, from its punctuated words: a name (capitalised inside a sentence,
-    not "I") and a content word held clearly longest for its length (people stretch the word they stress); one a
-    sentence, KEY_GAP_S apart, the name first."""
+    not "I"; with the word after it when that is capitalised too or ends the clause: "Planner Pro", "AI studio,") and
+    a content word held clearly longest for its length (people stretch the word they stress); one a sentence, none in
+    a sentence that says a number (its number is marked), KEY_GAP_S apart, the name first."""
+    sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "lib"))
+    from ai_editor import numbers
+    said = {i for sp in numbers.spans([w["text"] for w in words]) if not (sp["start"] == sp["end"] and sp["kind"] == "count"
+            and clean(sp["text"]).lower() in ("one", "a", "an")) for i in range(sp["start"], sp["end"] + 1)}
     content = lambda w: clean(w["text"]).lower() not in STOP and len(clean(w["text"])) > 3
     rate = lambda w: (w["end"] - w["start"]) / max(1, len(clean(w["text"])))
     rates = sorted(rate(w) for w in words if content(w))
@@ -2104,9 +2195,13 @@ def key_words(words):
                  and clean(words[i]["text"]).lower() not in STOP | {"i'm", "i'll", "i've", "i'd"} and len(clean(words[i]["text"])) > 1]
         held = [i for i in sent if content(words[i]) and med and rate(words[i]) >= KEY_STRESS * med and words[i]["end"] - words[i]["start"] >= 0.3]
         pick = names[:1] or sorted(held, key=lambda i: -rate(words[i]))[:1]
-        if pick and words[pick[0]]["start"] - last >= KEY_GAP_S:
+        if pick and words[pick[0]]["start"] - last >= KEY_GAP_S and not said & set(sent):
             out.append(pick[0])
             last = words[pick[0]]["start"]
+            k = pick[0] + 1
+            if names[:1] == pick and k in sent and not ends_clause(words[pick[0]]["text"]) and clean(words[k]["text"]).lower() not in STOP \
+                    and (clean(words[k]["text"])[:1].isupper() or ends_clause(words[k]["text"])):
+                out.append(k)   # "AI studio," / "Planner Pro": the name is two words
         sent.clear()
     for i, w in enumerate(words):
         sent.append(i)
@@ -2134,10 +2229,13 @@ def mark_emph(chunks, cap=None, words=()):
         for sp in numbers.spans([w["text"] for w in words]):
             if sp["start"] == sp["end"] and sp["kind"] == "count" and clean(sp["text"]).lower() in ("one", "a", "an"):
                 continue
-            mark(round(words[sp["start"]]["start"], 3), round(words[sp["end"]]["start"], 3), "number")
-        for i in key_words(words):
+            for i in range(sp["start"], sp["end"] + 1):   # its number words, not the "and" or "a" between them
+                if clean(words[i]["text"]).lower() not in ("and", "a", "an", "of"):
+                    mark(round(words[i]["start"], 3), round(words[i]["start"], 3), "number")
+        keys = key_words(words)
+        for i in keys:
             page = next((c for c in chunks if any(round(x["start"], 3) == round(words[i]["start"], 3) for x in c["words"])), None)
-            if page and not any(x.get("emph") == "number" for x in page["words"]):
+            if page and (not any(x.get("emph") == "number" for x in page["words"]) or i - 1 in keys):
                 mark(round(words[i]["start"], 3), round(words[i]["start"], 3), "key")
         for c in chunks:
             for x in c["words"]:
@@ -2718,7 +2816,7 @@ def build(style, words, meta, images=(), aspect="auto", cuts=(), visuals=(), edi
     cards = scene_grounds(cards, style)
     if off_screen(style):
         cards = hold_scenes(cards, words, duration, 1 - style["face"]["present_pct"] / 100)
-    cards = bridge_kinetic(cards)
+    cards = bridge_kinetic(whole_numbers(space_kinetic(cards), chunks, words) if kinetic_on(style) else cards)
     gap = card_gap_s(style)
     quiet = [g for g in card_gaps(cards, duration) if g[1] - g[0] > gap]
     cover = audio_cover(edit_dir, words)
@@ -3385,6 +3483,12 @@ def demo():
     assert kn["anim"]["props"]["beside"] == bs, kn   # any kinetic card over a scene stops its band above the picture
     # a kinetic card under KINETIC_BRIDGE_S before the next kinetic card or scene holds until it (the captions never flash
     # back for a word); a longer gap is kept
+    # fork: a real card ending under KINETIC_GAP_S before a kinetic card ends that much before it, when it still holds
+    # REAL_MIN_S (the beat finder counted on that second of footage); too short to, or a capture beside its stats: left
+    kc_ = {"start": 29.2, "end": 33.0, "anim": {"type": "number_chain", "props": {}}}
+    assert space_kinetic([{"src": "images/b.png", "start": 25.0, "end": 28.6, "layout": "scene"}, dict(kc_)])[0]["end"] == 28.2
+    assert space_kinetic([{"src": "images/b.png", "start": 27.0, "end": 28.6}, dict(kc_)])[0]["end"] == 28.6
+    assert space_kinetic([{"src": "images/b.png", "start": 29.0, "end": 33.0}, {**kc_, "anim": {"type": "stat_stack", "props": {}}}])[0]["end"] == 33.0
     br = bridge_kinetic([sb(1.0, 2.0), sb(2.6, 4.0, id="u"), {"src": "images/e.png", "start": 4.7, "end": 6.0, "layout": "scene",
                          "box": list(SCENE_BOX)}, sb(7.5, 9.0, id="v")])
     assert [c["end"] for c in br] == [2.6, 4.7, 6.0, 9.0], br
@@ -3505,15 +3609,18 @@ def demo():
     # fork, opt-in emphasis captions: every spoken number (split over two 2-word pages, marked on both), a name, and
     # a stressed word; a lone "one" is no figure; off (no emphasis_scale) a 2-word page keeps upstream's rule
     said = ("We baked two hundred and forty croissants. One of them burned. Then Sourdough sold out. "
-            "Honestly, it was really just wonderful.").split()
-    tk, t = [], 0.0
+            "Honestly, it was really just wonderful. It took three and a half weeks. We sold twelve enormous cakes. "
+            "Later we moved into Market Hall, and that was it.").split()
+    tk, te = [], 0.0
     for x in said:
-        d = 0.9 if x == "wonderful." else 0.3
-        tk.append({"text": x, "start": round(t, 2), "end": round(t + d, 2)})
-        t += d + 0.05
+        d = 0.9 if x in ("wonderful.", "enormous") else 0.3
+        tk.append({"text": x, "start": round(te, 2), "end": round(te + d, 2)})
+        te += d + 0.05
     on = lambda c: [w["text"] for p in c for w in p["words"] if w.get("emph")]
     em2 = mark_emph(chunk_captions(tk, 2, "sentence"), {"emphasis_scale": 1.1}, tk)
-    assert on(em2) == ["two", "hundred", "and", "forty", "Sourdough", "wonderful"], on(em2)
+    # only a number's own words ("and a" of "three and a half" stay plain); a held word in a sentence that says a
+    # number is not marked (its number is); a two-word name is marked whole
+    assert on(em2) == ["two", "hundred", "forty", "Sourdough", "wonderful", "three", "half", "twelve", "Market", "Hall"], on(em2)
     assert [w["text"] for w in em2[1]["words"]] == ["two", "hundred"] and em2[2]["words"][0]["text"] == "and"
     assert not on(mark_emph(chunk_captions(tk, 2, "sentence"), {"emphasis_color": "#FFD400"}, tk))
     assert emph_on({"emphasis_scale": 1}) and not emph_on({}) and not emph_on(None)
@@ -3618,13 +3725,24 @@ def demo():
     bx = clear_entrances([zp(24.0, 28.5)], [{"start": 28.2, "end": 30.0, "layout": "box"}])
     assert bx[0]["end"] + PUNCH_S <= 28.2 - ENTER_S[0] + 1e-6, bx
     assert len(clear_entrances([zp(1.0, 3.0), zp(3.1, 5.0)], [])) == 1
-    # ... unless the joined hold would be static past PUNCH_JOIN_MAX_S on plain footage: out, a rest, in again
-    lj = clear_entrances([zp(45.7, 47.26), zp(47.26, 49.8), zp(49.8, 52.41)], [])
+    # fork, with kinetic cards in the plan (one far away here): two punches on plain footage join unless the joined
+    # hold would be static past PUNCH_JOIN_MAX_S: out, a rest, in again
+    far = [{"start": 90.0, "end": 92.0, "anim": {"type": "kinetic_number", "props": {}}}]
+    lj = clear_entrances([zp(45.7, 47.26), zp(47.26, 49.8), zp(49.8, 52.41)], far)
     assert [(z["start"], z["end"]) for z in lj] == [(45.7, 49.24), (49.8, 52.41)], lj
     # an out straight into an in (0.2 s apart) surges: joined when short, else a rest between them
-    assert [(z["start"], z["end"]) for z in clear_entrances([zp(1.0, 3.0), zp(3.2, 5.0)], [])] == [(1.0, 5.0)]
-    rz = clear_entrances([zp(49.8, 52.41), zp(52.62, 55.03)], [])
+    assert [(z["start"], z["end"]) for z in clear_entrances([zp(1.0, 3.0), zp(3.2, 5.0)], far)] == [(1.0, 5.0)]
+    rz = clear_entrances([zp(49.8, 52.41), zp(52.62, 55.03)], far)
     assert [(z["start"], z["end"]) for z in rz] == [(49.8, 52.06), (52.62, 55.03)], rz
+    # with none (every upstream style), upstream's rule: only zooms closer than a punch's travel join
+    up = lambda zs: [(z["start"], z["end"]) for z in clear_entrances(zs, [])]  # noqa: E731
+    assert up([zp(1.0, 2.0), zp(2.3, 3.5)]) == [(1.0, 2.0), (2.3, 3.5)] and up([zp(1.0, 3.5), zp(3.8, 7.0)]) == [(1.0, 3.5), (3.8, 7.0)]
+    assert up([zp(45.7, 47.26), zp(47.26, 49.8), zp(49.8, 52.41)]) == [(45.7, 52.41)]
+    # a punch out that would land in the second of footage between a scene and the kinetic card after it goes under
+    # the scene instead (one move in that gap, not two)
+    gk = [{"start": 25.3, "end": 28.2, "layout": "scene"}, {"start": 29.2, "end": 33.0, "anim": {"type": "number_chain", "props": {}}}]
+    gz = clear_entrances([zp(23.3, 29.3)], gk)
+    assert [(z["start"], z["end"]) for z in gz] == [(23.3, 26.75)], gz
     # a punch that a scene would swallow lands as the scene leaves
     assert [(z["start"], z["end"]) for z in clear_entrances([zp(10.0, 11.4)], [{"start": 10.1, "end": 12.8, "layout": "scene"}])] == [(13.55, 14.95)]
     with tempfile.TemporaryDirectory() as td:   # an audio clip: its cover moves on sentence starts, no zooms
@@ -4141,9 +4259,11 @@ def main():
     prof = profile.load()   # the start skill's answers: brand kit, what to avoid, sound
     sp = Path(a.style)
     style = effective_style(sp, prof, edit_dir)
-    if kinetic_on(style):   # the number beats, found from the words into visuals.json (references/kinetic.md "Automatic beats")
-        import kinetic_beats
+    import kinetic_beats   # the number beats, found from the words into visuals.json (references/kinetic.md "Automatic beats")
+    if kinetic_beats.auto_on(style):
         kinetic_beats.refresh(edit_dir, style, a.words, probe(video)["duration"])
+    else:   # turned off: the beats it wrote leave visuals.json (hand-written ones stay)
+        kinetic_beats.clear(edit_dir)
     visuals = json.loads(vis.read_text(encoding="utf-8")) if vis.exists() else []
     plan = build(style, json.loads(Path(a.words).read_text(encoding="utf-8")),
                  probe(video), images, a.aspect, cut_points(edit_dir), visuals, edit_dir,

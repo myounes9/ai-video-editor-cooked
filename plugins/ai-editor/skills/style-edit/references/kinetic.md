@@ -21,35 +21,57 @@ visuals.json, and it adds them there from the cut's words (`"auto": "kinetic"` o
 `kinetic_title` and `cta_follow` are never placed automatically, and the word captions carry every other line.
 
 - **Candidates**, from numbers.py spans over the punctuated words, by sentence and clause: the **hook** (the first
-  money, count or percent figure in the first 3 s or the first sentence, its sub-line a duration said there, "in 3.5
-  weeks"); a **chain** (2-4 counts, each in its own clause and smaller than the last, within 8 s: a funnel); a **goal**
-  (a percent with "goal", "target" or "of the way" and a scaled figure in its sentence); a **stat run** (2-4 labelled
-  figures in one sentence that count different things, a `stat_stack`); a **counter** (a count of 50 or more, with a
-  stamp when rejected, ignored, failed, ghosted, lost ... follows in the sentence); a **tally** (5-30 of a plural
-  thing); a lone **money** figure; a lone percent or a count of 31-49; a **step tracker** ("two main kinds of bread",
-  "three layers", then "one is", "the other is", "layer two is", "step three," ...; or "step one, step two" with no
-  count), one beat for the count, one per item filled on its label, and a "?" slot on "another <the same noun>".
-  Left out: a duration (only a sub-line), a year, a name's number ("Planner 3", "GPT-4"), an ordinal ("step one"), a
-  lone "one" (only a chain's last figure), and a tracker whose items have no plain label (a filled slot needs one).
+  figure in the first sentence that is more than filler, or in its first 3 s, never past 6 s: money, or a count or a
+  percent of a plural thing said after it, "fifty loaves", "forty percent of buyers"; its sub-line a duration said
+  there, "in 3.5 weeks"); a **chain** (2-4 counts, each in its own clause and smaller than the last, within 8 s: a
+  funnel; a count in a sentence of its own needs a funnel cue, a verb like got, sent, booked, signed, or "to get
+  there", "out of", "of those": "We have 80 members. We also have 12 coaches." is a list); a **goal** (a percent with
+  "goal", "target" or "of the way" and a scaled figure in its sentence, up on the first of its words); a **stat run**
+  (2-4 labelled figures in one sentence that count different things, a `stat_stack`); a **counter** (a count of 50 or
+  more, with a stamp when rejected, ignored, failed, ghosted, lost ... follows in the sentence); a **tally** (5-30 of a
+  plural thing); a lone **money** figure; a lone percent or a count of 31-49; a **step tracker** ("two main kinds of
+  bread", "three layers", then "one is", "the other is", "layer two is", "now for step three," ...; or "step one, step
+  two" with no count), one beat for the count, one per item filled on its label, and a "?" slot on "another <the same
+  noun>".
+  Left out, as no count of things: a duration (only a sub-line), a sign or a part said with it ("minus five"; "half a
+  million" is 500K), a year ("2019", "back in twenty nineteen"), a name's number ("Planner 3", "GPT-4", "page 42", "day
+  30"), an ordinal ("step one"), a date ("June 21"), a clock time or an address ("at five", "at 221"), a phone number
+  or an ID (a leading 0, 7+ digits), two numbers said back to back ("twenty twenty-three", "three ninety-nine"), a range
+  or a ratio ("fifty to sixty", "between fifty and sixty", "one in ten"; of "from 200 to 12K" only the result), a
+  measure ("220 degrees", "500 grams", "fifty times"), "a hundred percent sure", and a lone "one" ("the best one",
+  "one of"), which only ends a chain after its verb ("and signed one."). A tracker item with no plain noun takes the
+  verb said for it ("step one is quick: you weigh the flour" is WEIGH; "Planner Pro, Oven Mate and Timer Box mix it"
+  is MIX); one with neither is left out with its tracker.
 - **Words**: each label is 1-2 of the speaker's own words next to the number (the noun after it, its currency word and
-  an "of" passed over; else the verb before it: "sign one"), as said, set in capitals by the renderer. A figure is
-  written from what was said: "4.5k dollars" -> "$4.5K", "three hundred and forty" -> "340", K/M/B only when one was said.
+  an "of" passed over; else the verb before it), as said, set in capitals by the renderer; never a number word or a
+  date. A chain's figure with only a verb before it is drawn bare ("1", not "1 SIGN"). A figure is written from what
+  was said: "4.5k dollars" -> "$4.5K", "three hundred and forty" -> "340", K/M/B only when one was said and it reads as
+  said ("two thousand three hundred and forty-five" is "2,345", never "2.345K").
   A chain or tracker whose labels would not fit (check.py `kinetic_fit`) keeps one word each, else it is left out.
 - **Ranking**: hook > chain = goal > stat run > counter > money > lone figure = tally > tracker beats (an item's
-  fill before the count's empty wells, which are kept only with a fill), plus clarity (labels, a stamp, more items).
+  fill before the count's empty wells, which are kept only with a fill), plus clarity (labels, a stamp, more items). A
+  tracker of sources, steps, ways, stages, phases, layers ... (the speech enumerating what the video is about) ranks
+  with a stat run.
 - **Density** (`graphics.kinetic_per_min`, default 8; the count is `budget.py`'s, "How many" below): at most rate x
-  minutes graphics in all; the real cards already there (images.json, visuals.json captures, posts, logos, titles,
-  ctas, kinetic beats written by hand) count first, the strongest candidates take the rest, and the hook is kept even
-  past it. Each beat carries its `strength` (its score, a tracker's beats sharing their best) and the hook `"hook":
-  true`, so plan.py `budget_cards` keeps the same ones. The style page's `cards.per_min` does not cap it; `cards.on`
-  false places none. 1 s of plain footage between
-  two kinetic cards (the next beat of the same tracker joins instead) and 0.5 s at the least beside a real card, which
-  a kinetic card never covers, except a `stat_stack` beside the capture of its figures. Each card holds 2 s after its
-  last word, cut to leave the gap, never under 1.5 s.
+  minutes graphics in all, a tracker's beats one graphic; the real cards already there (images.json, visuals.json
+  captures, posts, logos, titles, ctas, kinetic beats written by hand) count first, the strongest candidates take the
+  rest, and the hook is kept even past it. Each beat carries its `strength` (its score, a tracker's beats sharing their
+  best) and the hook `"hook": true`, so plan.py `budget_cards` keeps the same ones. The style page's `cards.per_min`
+  does not cap it; `cards.on` false places none. 1 s of plain footage between any two cards, kinetic or real (the next
+  beat of the same tracker joins instead); a kinetic card never covers a real one, except a `stat_stack` beside the
+  capture of its figures. Each card holds 2 s after its last word, cut to leave the gap, never under 1.3 s; a real card
+  before one ends 1 s before it when it still holds 2 s (plan.py `space_kinetic`). A strong beat (a counter, stat run,
+  chain or goal) blocked only by the hold of the kinetic card before it, said 1 s or more after that card's last word,
+  bridges from it (that card holds until it starts, plan.py `bridge_kinetic`), two cards and 12 s at the most: the
+  strongest beats win, not the first come. No card ends on the first words of a number said after it: it ends as that
+  number's caption page starts (else plan.py holds it over the whole number).
 - **Kept until something changes**: `kinetic.auto.json` holds a fingerprint of the cut's words, the real cards and the
   rate. While it matches, plan.py keeps the beats as they are, so a review note's change to one (`plan.py beat`)
-  survives the next plan; when any changes they are found again. `graphics.kinetic_auto: false` turns the finder off
-  (hand-written beats only).
+  survives the next plan; when any changes they are found again, and what the notes did to them is laid on again: a
+  beat a note removed stays out, a field a note changed (a hold, a label) keeps its value (`"removed"` and `"edits"`
+  there, matched by the beat's type, word and figures; delete the file to start over). A beat with its `"auto"` mark
+  taken off is hand-written from then on. `graphics.kinetic_auto: false` (hand-written beats only) or
+  `graphics.kinetic` off: plan.py takes the automatic beats out of visuals.json (`kinetic_beats.clear`).
 - **By hand**: `kinetic_beats.py find edits/NAME` lists every candidate, kept or why not; `write edits/NAME [--force]`
   writes them now; `words FILE.json [--per-min N] [--json]` reads any word-timed transcript (words.json, a
   transcriber's `{"words": [...]}`). `route.py beats` marks the sentences that get one `[kinetic]`: give those lines
@@ -84,7 +106,10 @@ visuals.json, and it adds them there from the cut's words (`"auto": "kinetic"` o
 - **Captions**: the word captions fade out only while a number card is up (every format but `kinetic_title` and
   `cta_follow`) and back right after it (`hide_captions`, default true for those, false for the two; a card's own
   value wins). Two
-  cards under 0.6 s apart keep them hidden in between. Everywhere else the word captions carry the line.
+  cards under 0.6 s apart keep them hidden in between. Everywhere else the word captions carry the line. Never half a
+  number: a card whose end would hide the first page of a number said after it ("a hundred and" hidden, "sixty-four"
+  shown reads 64) ends as that page starts, when it still holds 1.3 s after its last part, else holds over the whole
+  number (plan.py `whole_numbers`); check.py plan FAILs a plan that still splits one.
 - **Hold**: a lockup holds at least 1.2 s after its last landing and leaves in time to be gone when the card ends
   (`hold_s`, or the next speech, wins over the hold). `out_at` (optional) asks it to stay until then. A kinetic card
   that ends under 1 s before the next kinetic card or scene holds until it (plan.py `bridge_kinetic`), so the captions
@@ -92,7 +117,9 @@ visuals.json, and it adds them there from the cut's words (`"auto": "kinetic"` o
 - **Zooms**: punches happen on the plain footage between cards. A punch with an edge under a card is cut back to end
   before the card comes in, or to start once it has gone (plan.py `punch_between`), when 0.8 s of it is left there;
   else it eases under the card as a soft push (0.8 s each way), and a punch beside such a push gives way to it rather
-  than joining it. No zoom cuts under a kinetic card's hold. A zoom up with one grows from the head's top, never from
+  than joining it. An edge that would land in the second of footage between a scene and the kinetic card after it
+  goes under the scene instead (one move there, not two). Two punches on plain footage join into one hold up to 5 s
+  (only with kinetic cards in the plan; every other style keeps upstream's rule). No zoom cuts under a kinetic card's hold. A zoom up with one grows from the head's top, never from
   the chin (plan.py `clear_chin`), so the head holds its place.
 - **Labels** land no earlier than their figure + 0.15 s. Keep them to one or two short words: they stay phone-readable
   (48 px, 44 at the least), wrapping onto two lines before they shrink, never closer than 40 px to the next. A
@@ -114,7 +141,8 @@ still means none). `lib/ai_editor/budget.py` holds it, so the beat finder and pl
 the strongest: the hook always (a beat with `"hook": true`, else the first graphic in the opening 3 s), then by each
 beat's `strength` (0-1; a real source with none counts 0.75, a kinetic beat 0.5), a beat that would leave under 1 s
 of plain footage beside one already kept counting 0.2 less, so the picks spread out (the beats of one tracker
-are one graphic coming back: never penalised beside each other). Each card left out is named on
+are one graphic coming back: counted once, kept or left out together, never penalised beside each other). Each card
+left out is named on
 stderr. plan.json records `graphics_budget`; style_check.py and quality.py compare the cards a minute with it, and do
 not flag a kinetic kind the copied creator hardly uses, or a soft push under a kinetic card, as hers to match.
 
@@ -125,8 +153,11 @@ not flag a kinetic kind the copied creator hardly uses, or a soft push under a k
   or this video's own.
 - A rule in words sets them, at its own scope (`taste.py` `settings_for`, laid in by `load_json`): "add motion
   graphics", "kinetic number titles", "the hook's number gets a graphic", "a progress bar for the goal" turn
-  `graphics.kinetic` on; "no motion graphics" turns it off; "fewer / more motion graphics" sets `kinetic_per_min`
-  6 / 10, "N graphics a minute" sets N. A value saved in the same scope wins over the words. `taste.py map "<note>"`
+  `graphics.kinetic` on; a no on either side of the words turns it off ("no motion graphics", "do not add motion
+  graphics", "never use kinetic titles", "skip the progress bars", "motion graphics: none", "I hate kinetic text");
+  "fewer / more motion graphics" ("too many", "tone them down") sets `kinetic_per_min` 6 / 10, "N graphics a minute"
+  and "no more than N a minute" set N. A note that is unclear (two negations, "don't let the motion graphics cover my
+  face") sets nothing and stays a rule in words. A value saved in the same scope wins over the words. `taste.py map "<note>"`
   prints what a note sets; `taste.py report` and the style's skill show it on the rule ("from its words", "Sets:").
 - Emphasis captions (fork, opt-in): `captions.emphasis_scale` (about 1.1; 1 marks in colour only) turns them on.
   plan.py `mark_emph` then marks every spoken number, all of its words (numbers.py on the punctuated words, so a
@@ -135,7 +166,10 @@ not flag a kinetic kind the copied creator hardly uses, or a soft push under a k
   has a number), on pages of any length, two words included. Captions.tsx draws them in `captions.emphasis_color`
   (#FFD400 for this look), one weight heavier, `emphasis_scale` bigger through a transform: the page keeps its size
   and its line breaks (the fit leaves the room), and a stressed word keeps its colour while it is said. "Key words in
-  yellow, slightly bigger" sets #FFD400 and 1.1.
+  yellow, slightly bigger" sets #FFD400 and 1.1; "never highlight key words in the captions" sets `emphasis_scale`
+  null (off). Only a number's own words are marked ("three and a half": THREE, HALF), a two-word name whole ("Market
+  Hall,"), and no key word in a sentence that says a number (its number is marked). An older style.json that still
+  holds upstream's retired `emphasis_scale` turns these on: remove it to keep upstream's emphasis.
 - When a learned rule changes one of these, `review.py learn` and `taste.py add` print `REPLAN:`: run what it names
   (plan.py, whose beat finder places the kinetic beats again, and which marks the emphasis), then the stills and the
   render, so the note shows on this video too.

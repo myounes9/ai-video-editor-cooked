@@ -8,22 +8,23 @@ Fork base: upstream commit `4d48b2e` (ai-editor 2.4.0, creator-teardown 2.6.0).
 Upstream merged since: ai-editor 2.7.8 (upstream `871cabe`), on branch `p3-base`.
 Fork work so far: Phase 1, merged on branch `phase1` from four branches (`p1-numbers`, `p1-render`,
 `p1-lottie`, `p1-determinism`), Phase 2 (kinetic titles), merged on branch `phase2`, and Phase 3 (the kinetic
-titles placed automatically), merged on branch `phase3` from `p3-beats`, `p3-place` and `p3-rules`. Each change has
+titles placed automatically), merged on branch `phase3` from `p3-beats`, `p3-place` and `p3-rules`, with the review's
+fixes on top (section 9). Each change has
 its own entry under "## Unreleased" in CHANGELOG.md.
 
 ## What the fork changes, and why
 
 ### 1. Spoken numbers (`p1-numbers`)
 
-Why: the plan check failed real cards. "two hundred and fifty" was read as 2, 100 and 50, so a card
-showing "250" counted as a number nobody says; "7.5K" on a card never matched a spoken "seven point
+Why: the plan check failed real cards. "three hundred and forty" was read as 3, 100 and 40, so a card
+showing "340" counted as a number nobody says; "4.5K" on a card never matched a spoken "four point
 five k"; an ease name such as "power2.out" or "back.out(2.5)" in a card's props counted as a number
 on screen.
 
 - `plugins/ai-editor/lib/ai_editor/numbers.py` (new): one shared parser for spoken numbers (standard
   library only). `spans()` gives each number in a run of words with its value, its kind (count,
   percent, money, duration) and its first and last word, so later steps can land a graphic on it.
-  `written()` reads the card side ("€7.5K", "100K", "50%"). The file is named like Python's own
+  `written()` reads the card side ("€4.5K", "20K", "50%"). The file is named like Python's own
   `numbers` module; an 8-line guard at its top hands back the real module when Python loads it by
   that name (several shared scripts put `lib/ai_editor` first on the import path).
 - `plugins/ai-editor/skills/style-edit/scripts/check.py`: `said_numbers` and `unsaid_numbers` use
@@ -194,14 +195,54 @@ graphics three ways, and a real edit lost every kinetic card to the split panel.
   cards hide them. `StyleEdit.tsx`: over a dark scene ground the emphasis captions keep their colour.
 - `style_check.py`: with kinetic titles on, a kinetic card counts as the creator's text cards in her mix.
 
+### 9. Review fixes (Phase 3, on `phase3`)
+
+Why: a review of the automatic path found a caption that read a number the speaker did not say (a card's end hid "a
+hundred and" of "a hundred and sixty-four"), first-come picks instead of the strongest, a tracker the user asked for
+that could never fit, rules in words that read "do not add motion graphics" as a yes, and a beat finder that made
+cards of clock times, years, dates, prices and ranges.
+
+- `lib/ai_editor/numbers.py`: "half a million" is 500000 (was 1000000), "minus five" is -5 (the span starts on its
+  sign); `written()` reads a minus sign straight before digits. The demo's take is made up (an ice cream van).
+  `check.py` `said_numbers` no longer reads those words alone as other numbers, so a "1M" or "5" card for them FAILs.
+- `skills/style-edit/scripts/kinetic_beats.py`: only counts of things are figures (`figures()`: no sign, year, date,
+  clock time, address, phone number, name's number, measure, back-to-back pair, range or ratio, "a hundred percent
+  sure", pronoun "one"); the hook needs money or a count or percent of a plural thing, from the first sentence that is
+  more than filler, never past 6 s; a chain across sentences needs a funnel cue (`funnel()`), ends on "one" only after
+  its verb and draws it bare; labels are never number words or dates; "2,345", never "2.345K"; a goal comes up on its
+  first word; tracker items with no noun take their verb, "now for step two" is a cue; a tracker of sources, steps or
+  ways ranks with a stat run (`ENUM_BONUS`). `select()`: a tracker is one graphic, holds cut to 1.3 s for the gap, 1 s
+  beside real cards too (they end sooner: plan.py `space_kinetic`), a strong beat bridges from the one before it, and
+  no card ends on the first words of the next number (`whole()`). `refresh()` keeps what review notes did to its beats
+  through a re-find (`"removed"`, `"edits"`, `beat_key()`); `clear()` takes them out when the style turns them off
+  (plan.py now calls one or the other on every plan). Fixtures reshaped, a 28-sentence negative table.
+- `lib/ai_editor/budget.py` `pick`: a tracker's beats are one graphic, kept or left out together (route.py,
+  style_check.py count them so too).
+- `skills/style-edit/scripts/plan.py`: `space_kinetic`, `whole_numbers` and `split_numbers` (check.py plan FAILs a card
+  that hides the start of a number whose rest shows); `clear_entrances` joins punches on plain footage (and splits
+  them past 5 s) only with kinetic cards in the plan, so upstream styles zoom as upstream's do, and moves an edge in the
+  gap between a scene and the kinetic card after it under the scene; emphasis marks a number's own words only (not
+  "and a"), a two-word name whole, and no key word in a sentence that says a number.
+- `skills/style-edit/scripts/check.py` render: a kinetic card's type is measured as what is brighter than the footage
+  (its scrim is not its ink) and WARNs off centre (3%) or past the side margin. `remotion/src/kinetic/NumberChain.tsx`
+  centres the row on its ink (a long last label pulled it right) and `tokens.ts` `LABEL.over` (36 -> 12 px) keeps an
+  outer label 60 px from the edge, the safe zone's side; `test/templates.mjs` checks the centring.
+- `lib/ai_editor/taste.py` `settings_for`: a no anywhere in the clause is a no, two or one in a note about placement
+  is unclear (nothing set); "no more than N a minute" is a rate, "not only photos" a contrast; a no to emphasis sets
+  `emphasis_scale` null.
+- Privacy: the fork owner's figures are gone from check.py's and numbers.py's docs, FORK.md, the CHANGELOG and the
+  feedback matrix (made-up figures instead); they stay in the public history of `main`.
+- Migration: upstream once documented `captions.emphasis_scale` and retired it in 2.7.8; the fork reads it as the
+  opt-in, so an older style.json that still holds it gets the fork's emphasis captions. Remove the key to keep
+  upstream's.
+
 ## What to offer upstream, and what stays here
 
 Neutral fixes, worth a pull request to upstream (each a real bug any user hits):
 
-- Spoken numbers (1). Before offering it: replace the demo's fixture in `numbers.py` (it holds the
-  transcript of one of the fork owner's own videos, with real income figures; upstream's rule is
-  that nothing personal ships) with a made-up take, and consider renaming the file to avoid the
-  `numbers` clash with Python's own module (for example `spoken.py`), which removes the guard.
+- Spoken numbers (1), with "half a million" and "minus five" read right (9). Its demo's take is made up since (9); the
+  earlier one, reworded from one of the fork owner's own videos, is still in this repo's history. Consider renaming the
+  file to avoid the `numbers` clash with Python's own module (for example `spoken.py`), which removes the guard.
 - Lottie cards (3), as they are.
 - A caption figure's decimal point (8, plan.py `cased`): "3.5k" was drawn "35k", a number nobody said.
 - Same frames in every tab (4), as it is.

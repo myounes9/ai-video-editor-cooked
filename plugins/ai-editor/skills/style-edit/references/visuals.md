@@ -282,7 +282,7 @@ Every overlay drops in just before its word, punches on its hit words and leaves
 ### anim
 
 One idea per card, only words and numbers the speaker said (`check.py` FAILs any other number; it reads
-"two hundred and fifty" as 250 and "7.5k" as "€7.5K", and a K/M/B or % the speaker did not say is a WARN,
+"three hundred and forty" as 340 and "4.5k" as "€4.5K", and a K/M/B or % the speaker did not say is a WARN,
 a different one a FAIL). `type` is any template in motion.md;
 the eight original names still work. Parts land on their own words (`"word"`, `"off_word"`), and a
 part's picture is `{"logo": ...}` or `{"src": "images/..."}`. `*word*` sets the stressed word in the

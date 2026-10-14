@@ -35,8 +35,9 @@ export const PERCENT_K = 0.56;
 /** A label's size: k x its figure's size, never under `size` px; to let the figures grow it may step down to kMin x the
  *  figure and `soft` px (a two-word label wraps onto two lines before it goes smaller), and only when nothing else fits
  *  to `floor` px (caps about 40 px tall at 1080: still read at phone size).
- *  over: how far an outer label may reach past the grid into the side margin. px on a 1080 short side. */
-export const LABEL = { k: 0.2, kMin: 0.16, size: 48, soft: 48, floor: 44, over: 36 };
+ *  over: how far an outer label may reach past the grid into the side margin, px on a 1080 short side: to 60 px from
+ *  the edge, the reels safe zone's side (plan.py SAFE, which check.py render measures the drawn type against). */
+export const LABEL = { k: 0.2, kMin: 0.16, size: 48, soft: 48, floor: 44, over: 12 };
 
 // ---------- grid and placement ----------
 /** Every lockup hangs from one left text edge and stops at one right edge: 72 and 1008 px of 1080. */

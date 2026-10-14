@@ -189,32 +189,70 @@ COLOURS = {"yellow": KEY_YELLOW, "white": "#FFFFFF", "orange": "#FF9500", "red":
 _KINETIC = (r"motion[- ]graphics?|kinetic|animated (?:motion |number |key )?(?:graphics?|titles?|numbers?|figures?|callouts?|text)"
             r"|number (?:titles?|graphics?|cards?|animations?)|(?:hook'?s?|key) (?:key )?(?:numbers?|figures?)(?: graphics?)?"
             r"|numbers? (?:pop|land|count|build)s?|step (?:cards?|trackers?)|progress bars?|goal bars?")
-_NOT = r"\b(?:no|without|stop (?:adding|using|putting)|remove|drop|turn off|don'?t (?:add|want|use|put))\b"
-_FEWER, _MORE = r"\b(?:fewer|less)\b", r"\b(?:more)\b"
+# A rule says no to a setting when its clause (the sentence, or the part before or after a "but") holds one negation,
+# on either side of the words that name it; two (or a negation in a note about where or how they look) is unclear,
+# and the note stays a word rule. "no more than N" / "at most N" is a rate, never a no.
+_NOT = (r"\b(?:no|not|never|none|nothing|without|avoid|stop|skip|remove|drop|ditch|disable|kill|lose|hate|dislike"
+        r"|turn (?:it |them )?off|get rid of|cut out|don'?t|do not|doesn'?t|didn'?t|won'?t|shouldn'?t)\b")
+_CAP = (r"\b(?:no|not) more than (\d+(?:\.\d+)?)|\b(?:at most|max(?:imum)?|up to) (\d+(?:\.\d+)?)"
+        r"|\bnot (?:only|just|merely)\b|\bno (?:plain|static|text)\b")   # "graphics, not only photos": a contrast, no no
+_FEWER = r"\b(?:fewer|less|too (?:many|much|busy)|tone (?:it |them )?down|overkill|cut back)\b"
+_MORE = r"\b(?:more)\b"
+_HOW = (r"\b(?:cover|covers|covering|face|eyes|head|size|bigger|smaller|larger|higher|lower|move|moved|colou?r|font|faster|"
+        r"slower|longer|shorter|position|placed|overlap)\b")   # a note about where or how they look, not whether
 _EMPH_CTX = r"caption|key ?words?|keywords|stress|emphasi|highlight"
 _EMPH_SUBJ = r"key ?words?|keywords|numbers?|figures?|stress|emphasi|highlight|important words?|payoff"
 _BIGGER = r"\b(?:(?:slightly |a (?:bit|touch|little) )?(?:bigger|larger|bolder|heavier)|pops? out|stand(?:s)? out)\b"
 _SAME = r"\b(?:same size|not bigger|no bigger|never bigger)\b"
 
 
+def clause(t, at, cut=r"[.;!?]|\bbut\b"):
+    """The clause of text t round position at: its sentence, cut at a "but" (cut)."""
+    a = max([0] + [m.end() for m in re.finditer(cut, t[:at])])
+    m = re.search(cut, t[at:])
+    return t[a:at + m.start()] if m else t[a:]
+
+
+def polarity(c, how=False):
+    """True (asks for it), False (says no) or None (unclear) for one clause: one negation is a no, two cancel into
+    unclear, and so does a negation in a note about where or how they look (how: _HOW counts)."""
+    c = re.sub(_CAP, " ", re.sub(_SAME, " ", c))
+    n = len(re.findall(_NOT, c))
+    if n == 0:
+        return True
+    return False if n == 1 and not (how and re.search(_HOW, c)) else None
+
+
 def settings_for(text, section=None):
     """{setting: value} a rule or note asks for in words: the fork's motion graphics (graphics.kinetic,
     graphics.kinetic_per_min) and emphasis captions (captions.emphasis_color, captions.emphasis_scale). {} when it
-    names none. Fewer / more graphics step from KINETIC_RATE (6 / 10); a number a minute is taken as said."""
-    t = " ".join(str(text or "").lower().split())
+    names none, or when it is unclear whether it says yes or no (polarity). Fewer / more graphics ("too many",
+    "tone them down") step from KINETIC_RATE (6 / 10); a number a minute ("no more than 3 a minute") is taken as said.
+    A no to emphasis sets captions.emphasis_scale None (off)."""
+    t = " ".join(str(text or "").lower().replace("’", "'").split())
     out = {}
     kin = re.search(rf"\b(?:{_KINETIC})\b", t)
     if kin:
-        out["graphics.kinetic"] = not re.search(rf"{_NOT}[^.;]{{0,30}}$", t[:kin.start()])
-        rate = re.search(rf"\b(\d+(?:\.\d+)?)\s*(?:{_KINETIC}|graphics?|cards?)?\s*(?:a|per|/|each)\s*min", t)
-        if out["graphics.kinetic"] and rate:
+        c = clause(t, kin.start())
+        on = polarity(c, how=True)
+        if on is None:
+            return {}
+        out["graphics.kinetic"] = on
+        rate = re.search(r"\b(\d+(?:\.\d+)?)\s*(?:[a-z-]+\s+){0,3}?(?:a|per|/|each)\s*min", t)
+        if on and rate:
             out["graphics.kinetic_per_min"] = float(rate[1]) if "." in rate[1] else int(rate[1])
-        elif out["graphics.kinetic"] and re.search(rf"{_FEWER}[^.;]{{0,20}}(?:{_KINETIC}|graphics)", t):
+        elif on and re.search(_FEWER, clause(t, kin.start(), r"[.;!?]")):   # "... but fewer of them"
             out["graphics.kinetic_per_min"] = KINETIC_RATE - 2
-        elif out["graphics.kinetic"] and re.search(rf"{_MORE}[^.;]{{0,20}}(?:{_KINETIC}|graphics)", t):
+        elif on and re.search(rf"{_MORE}[^.;]{{0,20}}(?:{_KINETIC}|graphics)", t):
             out["graphics.kinetic_per_min"] = KINETIC_RATE + 2
     ctx = (section or "").strip().lower() == "captions" or re.search(_EMPH_CTX, t)
-    if ctx and re.search(rf"\b(?:{_EMPH_SUBJ})", t) and not (kin and re.search(r"\b(?:titles?|graphics?|cards?)\b", t[kin.start():kin.end()])):
+    subj = re.search(rf"\b(?:{_EMPH_SUBJ})", t)
+    if ctx and subj and not (kin and re.search(r"\b(?:titles?|graphics?|cards?)\b", t[kin.start():kin.end()])):
+        on = polarity(clause(t, subj.start()))
+        if on is None:
+            return {}
+        if not on:
+            return {**out, "captions.emphasis_scale": None}
         hexes = re.findall(r"#[0-9a-f]{6}\b", t)
         named = [COLOURS[w] for w in re.findall(r"\b(" + "|".join(COLOURS) + r")\b", t)]
         colour = (hexes[0].upper() if hexes else named[0] if named else None)
@@ -692,6 +730,23 @@ def demo_words(d, sp, eb, ed):
     assert m("stressed words #00AAFF, same size", "captions") == {"captions.emphasis_color": "#00AAFF", "captions.emphasis_scale": 1}
     assert m("yellow kinetic number titles over the head") == {"graphics.kinetic": True}   # a title's colour, not the captions'
     assert m("Captions bigger", "captions") == {} and m("fewer zooms") == {} and m("cut the um at 0:12") == {}
+    # a no is a no on either side of the words, never a yes; unclear (two negations, a note about where they sit) is {}
+    off = {"graphics.kinetic": False}
+    for said in ("Do not add motion graphics to my videos", "never use motion graphics", "avoid kinetic titles",
+                 "stop the kinetic numbers", "skip the progress bars", "the motion graphics were too much, remove them",
+                 "motion graphics: none", "I hate kinetic text", "no motion graphics please", "without any kinetic numbers"):
+        assert m(said) == off, (said, m(said))
+    for said in ("Never highlight key words in the captions", "no yellow on key words in the captions",
+                 "don't make the numbers in the captions bigger"):
+        assert m(said, "captions") == {"captions.emphasis_scale": None}, (said, m(said, "captions"))
+    assert m("no more than 3 motion graphics a minute") == {"graphics.kinetic": True, "graphics.kinetic_per_min": 3}
+    assert m("at most 4 kinetic numbers per minute") == {"graphics.kinetic": True, "graphics.kinetic_per_min": 4}
+    assert m("too many motion graphics") == m("I love the kinetic numbers but fewer of them") == \
+        {"graphics.kinetic": True, "graphics.kinetic_per_min": 6}
+    assert m("don't let the motion graphics cover my face") == {} and m("don't remove the motion graphics") == {}
+    assert m("key words in yellow, not bigger", "captions") == {"captions.emphasis_color": "#FFD400", "captions.emphasis_scale": 1}
+    assert m("Add animated motion graphics on the key beats, not only static photos cut in") == {"graphics.kinetic": True}
+    assert m("Kinetic number titles on the number beats, no plain text cards") == {"graphics.kinetic": True}
     assert replan(["graphics.kinetic"]).startswith("REPLAN: graphics.kinetic changed: run plan.py again: it runs the beat finder")
     assert "plan.py" in replan(["captions.emphasis_scale"]) and replan(["captions.size_pct"]) == ""
     # a word rule on a style: its edits get the settings, other edits do not; counted as applied

@@ -12,7 +12,7 @@ Settings, style.json (or the user's taste.json) "graphics":
                     page's cards.per_min; cards.on false still means none.
 
 allowance(style, duration_s): the most graphics for that length, or None when kinetic titles are off.
-pick(items, n): the n strongest, in their own order. The hook (an item with "hook": true, else the first one starting
+pick(items, n): the n strongest graphics, in their own order (a step tracker's beats, one props "id", are one). The hook (an item with "hook": true, else the first one starting
 in the opening HOOK_S) is always kept. Strength is an item's "strength" (0-1, the beat finder's score), else
 REAL_STRENGTH for a real source (a capture, post, logo) and KINETIC_STRENGTH for a kinetic beat. One that would
 leave under MIN_PLAIN_S of plain footage beside one already kept counts TOUCH_PENALTY less, so the picks spread out
@@ -79,31 +79,36 @@ def is_hook(item):
 
 
 def group(item):
-    """The beats of one step_build tracker (its props "id") are one graphic coming back: never apart in the picks'
-    spacing."""
+    """The beats of one step_build tracker (its props "id") are one graphic coming back: they count once, are kept or
+    left out together, and are never spaced apart."""
     a = item.get("anim") or item
     return (a.get("props") or {}).get("id") if a.get("type") == "step_build" else None
 
 
 def pick(items, n, start=lambda i: i["start"], end=lambda i: i.get("end", i["start"])):
-    """The n items to keep (None: all), in their own order: the hook, then one at a time the strongest, a beat that
-    would leave under MIN_PLAIN_S beside one already kept counting TOUCH_PENALTY less (ties: the earlier)."""
+    """The items to keep for n graphics (None: all), in their own order: the hook, then one graphic at a time the
+    strongest (a tracker's beats are one graphic, its strength their best), one that would leave under MIN_PLAIN_S
+    beside one already kept counting TOUCH_PENALTY less (ties: the earlier)."""
     items = list(items)
-    if n is None or len(items) <= n:
+    order = sorted(range(len(items)), key=lambda i: start(items[i]))
+    units = {}
+    for i in order:
+        units.setdefault(group(items[i]) or ("one", i), []).append(i)
+    units = list(units.values())
+    if n is None or len(units) <= n:
         return items
     if n <= 0:
         return []
-    order = sorted(range(len(items)), key=lambda i: start(items[i]))
-    hook = next((i for i in order if is_hook(items[i])), None)
+    hook = next((u for u in units if any(is_hook(items[i]) for i in u)), None)
     if hook is None:
-        hook = next((i for i in order if start(items[i]) < HOOK_S), None)
+        hook = next((u for u in sorted(units, key=lambda u: start(items[u[0]])) if start(items[u[0]]) < HOOK_S), None)
     keep = [] if hook is None else [hook]
-    touches = lambda i: any(start(items[i]) - end(items[k]) < MIN_PLAIN_S and start(items[k]) - end(items[i]) < MIN_PLAIN_S
-                            and not (group(items[i]) and group(items[i]) == group(items[k])) for k in keep)
+    touches = lambda u: any(start(items[i]) - end(items[k]) < MIN_PLAIN_S and start(items[k]) - end(items[i]) < MIN_PLAIN_S  # noqa: E731
+                            for i in u for v in keep for k in v)
     while len(keep) < n:
-        rest = [i for i in order if i not in keep]
-        keep.append(max(rest, key=lambda i: (strength(items[i]) - TOUCH_PENALTY * touches(i), -start(items[i]))))
-    return [items[i] for i in sorted(keep)]
+        rest = [u for u in units if u not in keep]
+        keep.append(max(rest, key=lambda u: (max(strength(items[i]) for i in u) - TOUCH_PENALTY * touches(u), -start(items[u[0]]))))
+    return [items[i] for i in sorted(i for u in keep for i in u)]
 
 
 def demo():
@@ -134,7 +139,10 @@ def demo():
     # a tracker's next beat joins the one before: no spacing penalty between them, so it is kept with it
     tk = lambda s, e, **x: c(s, e, "step_build", **x) | {"anim": {"type": "step_build", "props": {"id": "t"}}}  # noqa: E731
     tr = [c(0.4, 2.0), tk(5.0, 7.0, strength=0.3), tk(7.0, 9.0, strength=0.3), c(9.2, 11.0, strength=0.25)]
-    assert pick(tr, 3) == tr[:3] and count(8, 30) == 4 and count(8, 4) == 1 and count(0, 60) == 0
+    assert pick(tr, 3) == tr and count(8, 30) == 4 and count(8, 4) == 1 and count(0, 60) == 0
+    # ... and a tracker that comes back later is still one graphic: kept or left out whole
+    tb = [c(0.4, 2.0), tk(5.0, 7.0, strength=0.7), c(10.0, 12.0, strength=0.6), tk(20.0, 22.0, strength=0.7), c(25.0, 27.0, strength=0.4)]
+    assert pick(tb, 3) == tb[:4] and pick(tb, 2) == [tb[0], tb[1], tb[3]], [x["start"] for x in pick(tb, 2)]
     print("budget demo ok")
 
 

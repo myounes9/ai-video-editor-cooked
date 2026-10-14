@@ -9,7 +9,7 @@ plan: every card inside the app's safe zones, vertical cards centred, no card on
 it is up (face.json, moved by the zooms or the split window), captions inside the safe zone and
 never held long past their words, no stretch with nothing changing on screen, not more text cards
 than picture cards, text cards' text at least 34 px, no number on a built card the speaker does not say
-(read as people say them: "two hundred and fifty" is 250, "7.5k" is "€7.5K"; lib/ai_editor/numbers.py), a music
+(read as people say them: "three hundred and forty" is 340, "4.5k" is "€4.5K"; lib/ai_editor/numbers.py), a music
 bed when the style runs one.
 render: the planned music bed is in the render's audio, not silent. On the rendered mp4 (4 samples a second), where the card's drawn pixels are: on the face
 (YuNet, face.py), off centre, or not moving. On cut.mp4's audio: silences inside the speech, and
@@ -41,6 +41,8 @@ from plan import BROW_SHARE, EYES_SHARE, GAP_S, KIN_BAND, KINETIC, QUIET_HOLD_S,
 
 CENTRE_PLAN = 1.5      # % of the width a vertical card's box centre may sit off 50
 CENTRE_INK = 2.0       # % of the width a card's drawn content may sit off centre
+KIN_CENTRE = 3.0       # % of the width a kinetic card's type may sit off centre (a stat_stack beside a capture excepted)
+KIN_LIFT = 24          # a kinetic card's type is brighter than the footage under it by this (grey levels); its scrim darkens
 OVERLAY_FILL = 0.7     # share of its own box an overlay diagram must draw across
 WORD_S = 1.2           # a caption up longer than this per word is a misheard word held on screen
 TAIL_S = 0.3           # a caption held longer than this past its last word
@@ -209,6 +211,15 @@ def check_plan(plan, face=None, cuts=(), static_s=STATIC_S, visuals=None, brand=
     step = (face or {}).get("step_s", 0.5)
     heads = [{"t": hd["t"], "box": on_screen(hd["box"], hd["t"], plan) if hd["box"] else None}
              for hd in (face or {}).get("heads", [])]
+    chunks = (plan.get("captions") or {}).get("chunks") or []
+    if plan.get("kinetic") and chunks:   # a number card's end never hides the first words of a number said after it
+        from plan import split_numbers
+        cw = [w for ch in chunks for w in ch.get("words") or []]
+        for c, text, t in split_numbers(cards, chunks, cw):
+            out.append(finding("FAIL", t, f"'{c['trigger_word']}' {c['anim']['type']} hides the captions over the start of "
+                               f"'{text}' and the rest shows after it: the viewer reads a different number",
+                               "plan again (plan.py whole_numbers ends the card before that number or holds it over all of it), "
+                               "or set the beat's hold_s to end before the number"))
     for c in cards:
         name = f"'{c['trigger_word']}' {c.get('src') or c['anim']['type']}"
         x, y, w, h = c["box"]
@@ -564,19 +575,23 @@ def shown_texts(props, kinetic=False):
 
 
 def said_numbers(text):
-    """The numbers spoken in a transcript, as people say them (numbers.py spans(): "two hundred and fifty" ->
-    250, "7.5k" and "seven point five k" -> 7500, "two and a half" -> 2.5), plus each number word alone and a
-    tens word with its unit ("two hundred and fifty" also gives 2, 100, 50; "forty two" 40, 2, 42), so nothing
+    """The numbers spoken in a transcript, as people say them (numbers.py spans(): "three hundred and forty" ->
+    340, "4.5k" and "four point five k" -> 4500, "two and a half" -> 2.5), plus each number word alone and a
+    tens word with its unit ("three hundred and forty" also gives 3, 100, 40; "forty two" 40, 2, 42), so nothing
     that passed before fails now. (said, percent, bare): percent the ones said as a percent, bare the digits
-    of a scaled one ("7.5" of "7.5k"), which stand for nothing on their own."""
+    of a scaled one ("4.5" of "4.5k"), which stand for nothing on their own. A number said as a part ("half a
+    million") or with its sign ("minus five") counts only as said (500000, -5): its words alone are no number."""
     said, pct, bare = set(), set(), set()
-    for w in numbers.written(text):
+    loose = re.sub(r"(?i)\b(?:half|quarter) an? (?:hundred|thousand|million|billion)\b|\b(?:minus|negative) [$€£]?[\d.,]+[km]?"
+                   r"|\b(?:minus|negative)(?: (?:and|[a-z]+-[a-z]+|" + "|".join(list(numbers.UNITS) + list(numbers.TENS) + list(numbers.BIG))
+                   + r")\b)+", " ", text)
+    for w in numbers.written(loose):
         said.add(numbers.norm(w["value"]))
         if w["raw"] != w["value"]:
             bare.add(numbers.norm(w["raw"]))
         if w["kind"] == "percent":
             pct.add(numbers.norm(w["value"]))
-    ws = re.findall(r"[a-z]+", text.lower())
+    ws = re.findall(r"[a-z]+", loose.lower())
     for i, w in enumerate(ws):
         v = numbers.UNITS.get(w, numbers.TENS.get(w, numbers.BIG.get(w)))
         if v is None:
@@ -594,8 +609,8 @@ def said_numbers(text):
 def unsaid_numbers(plan, heard=None):
     """[(card, number as shown, what was said instead)]: a number on a built card that the speaker never says
     as shown. Instead is None when nobody says it at all (a FAIL); else the card adds a scale or a % the
-    speaker did not say ("$2M" when "two" was said, "50%" for "fifty users", "7.5" for "7.5k": a WARN). A
-    card's K/M/B must be the spoken one: "€7.5M" when "7.5k" was said is a FAIL. A capture or a real post is
+    speaker did not say ("$2M" when "two" was said, "50%" for "fifty users", "4.5" for "4.5k": a WARN). A
+    card's K/M/B must be the spoken one: "€4.5M" when "4.5k" was said is a FAIL. A capture or a real post is
     the source itself and is exempt; a Lottie card's words are its props.texts. The speaker's numbers come
     from heard (cut.transcript.json, punctuated) and the caption chunks, each chunk's end ending a number
     (a chunk has no punctuation: "a thousand" | "and three people" is 1000 and 3, never 1003). Without
@@ -805,6 +820,10 @@ def check_render(edit, plan, video):
                     heads.append(b + [round(100 * (min(f[5], f[7]) - BROW_UP * f[3]) / sh, 1)])
             heads = sorted(heads, key=lambda b: -b[2] * b[3])[:1]
         grey = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY).astype(np.float32)
+        lift = None
+        if any((cards[i].get("anim") or {}).get("type") in KINETIC for i in up):
+            # a kinetic card's own type, not its scrim: brighter than the footage under it (white, gold, the marker)
+            lift = (grey - cv2.cvtColor(bg, cv2.COLOR_BGR2GRAY).astype(np.float32) > KIN_LIFT).astype(np.uint8)
         al = None if split or not any(cards[i].get("layer") == "behind" for i in up) else cutout_alpha(edit, plan, t)
         person = None if al is None else cv2.warpAffine(cv2.resize(al, (W, H), interpolation=cv2.INTER_AREA), zm, (W, H)) > 230
         skip = kinetic_skip(t, cards, plan["zooms"], fps, split)
@@ -837,7 +856,7 @@ def check_render(edit, plan, video):
             # Measured once the card has settled (every scene part landed), just before it leaves:
             # a scene that builds left to right is off centre mid-build by design.
             if st["mid"] is None and t >= max((c["start"] + c["end"]) / 2, c["end"] - 0.6):
-                ys, xs = np.nonzero(mask)
+                ys, xs = np.nonzero(mask & lift if lift is not None and (c.get("anim") or {}).get("type") in KINETIC else mask)
                 st["mid"] = (t, None if not len(xs) else [100 * xs.min() / W, 100 * ys.min() / H,
                                                           100 * (xs.max() + 1) / W, 100 * (ys.max() + 1) / H])
     for i, c in enumerate(cards):
@@ -865,6 +884,15 @@ def check_render(edit, plan, video):
                                    PLAN_FIX + "; then render again" if explain else
                                    "plan again: drop the beat's \"box\" in visuals.json/images.json so plan.py centres it, "
                                    "or give a capture a \"crop\" round the evidence; then render again"))
+            kin = (c.get("anim") or {}).get("type") in KINETIC
+            side = SAFE[aspect_of(plan)][0]
+            if kin and not (c["anim"]["type"] == "stat_stack" and c["anim"].get("props", {}).get("beside")) \
+                    and (x0 < side or x1 > 100 - side or abs(cx - 50) > KIN_CENTRE):
+                out.append(finding("WARN", st["mid"][0], f"{name} type spans {x0:.0f}-{x1:.0f}% of the width: "
+                                   + (f"{cx - 50:+.1f}% off centre" if abs(cx - 50) > KIN_CENTRE else
+                                      f"past the {side:g}% side margin"),
+                                   "look at it: shorten a long label in visuals.json (or drop it), or make it a stat_stack; "
+                                   "plan and render again"))
         elif c["end"] - c["start"] > 0.8 and st["n"]:
             rec["ink"] = None
             out.append(finding("WARN", (c["start"] + c["end"]) / 2, f"{name} card: nothing drawn found in its box",
@@ -1208,7 +1236,7 @@ def demo():
                       {"anim": {"type": "chat", "props": {"messages": [{"text": "3x faster"}]}}, "trigger_word": "it", "start": 1},
                       {"anim": {"type": "social_post", "props": {"text": "99 likes"}}, "trigger_word": "days", "start": 2}]}
     assert [(c["trigger_word"], n, near) for c, n, near in unsaid_numbers(talk)] == [("it", "3", None)], unsaid_numbers(talk)
-    # numbers as people say them: "two hundred and fifty" is 250 on a card, "7.5k" is "€7.5K", "100k" is "100K";
+    # numbers as people say them: "three hundred and forty" is 340 on a card, "4.5k" is "€4.5K", "20k" is "20K";
     # an ease's digits ("power3.out", "back.out(1.7)") are not on screen; an invented "37" still fails
     lines = ["we printed three hundred and forty flyers, raised 4.5k dollars", "and we are at forty percent of our 20k goal"]
     said = {"style": {"y_pct": 68}, "chunks": [{"text": t, "start": i * 1.5, "end": i * 1.5 + 1.4, "words": [
@@ -1316,6 +1344,10 @@ def demo():
     assert check(["I have two clients"], "$2M ARR") == [("$2M", "2, never $2M")]
     assert check(["we grew fifty users"], "50%") == [("50%", "50, never 50%")]
     assert check(["we raised 4.5k dollars"], "4.5 a week") == [("4.5", "4.5 only with a K, M or B after it")]
+    # a part of a scale or a sign said with a number is that number: "half a million" is no 1M, "minus five" no 5
+    assert check(["we sold half a million cookies"], "1M cookies") == [("1M", None)]
+    assert check(["we sold half a million cookies"], "500K cookies") == []
+    assert check(["it was minus five degrees"], "5 degrees") == [("5", None)] and check(["it was minus five degrees"], "-5 degrees") == []
     assert any(f["level"] == "WARN" and "shows $2M; the speaker says 2" in f["what"] for f in check_plan(
         {**plan, "captions": caps(["I have two clients"]), "cards": [
             {"anim": {"type": "arrow_callout", "props": {"text": "$2M ARR"}}, "trigger_word": "two", "start": 0, "end": 1,

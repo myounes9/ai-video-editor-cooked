@@ -4,7 +4,7 @@
 // served beside <publicDir>.
 // Kinetic cases are first checked as numbers (kinetic/probe.ts, the KineticProbe composition): nothing past the frame,
 // nothing drawn on anything else, labels 40 px apart on a row, connectors at their length, a step label inside its well,
-// a stamp over at most the foot of its figure, a count never past its final value (and final on its landing frame),
+// a stamp over at most the foot of its figure, a chain centred on its ink, a count never past its final value (and final on its landing frame),
 // tally tiles never before their figure. A case with "expect_error" must throw that message; "probe_only" skips the
 // render. Exits 1 on any problem, after rendering the rest.
 import fs from "node:fs";
@@ -50,6 +50,10 @@ const checkProbe = (res, c) => {
     if (back >= 0) bad.push(`its count goes back from ${n.shown[back - 1]} to ${n.shown[back]} on frame ${back}`);
     if (n.shown[n.land] !== n.final) bad.push(`its count shows ${n.shown[n.land]} on its landing frame, not ${n.final}`);
     if (n.final > 0 && n.shown[0] < Math.floor(0.4 * n.final) - 1) bad.push(`its count starts at ${n.shown[0]}, under 40% of ${n.final}`);
+  }
+  if (c.card.anim.type === "number_chain") {   // a chain is centred on what it draws, a long outer label included
+    const l = Math.min(...res.parts.map((p) => p.r[0])), r = Math.max(...res.parts.map((p) => p.r[2]));
+    if (Math.abs((l + r) / 2 - W / 2) > 0.02 * W) bad.push(`its ink (${Math.round(l)}-${Math.round(r)} px) sits ${Math.round((l + r) / 2 - W / 2)} px off centre`);
   }
   if (res.fills && res.fills.first < res.fills.marker - 1e-6) bad.push(`a tile fills at ${res.fills.first.toFixed(2)} s, before its figure has landed (${res.fills.marker.toFixed(2)} s)`);
   return bad;

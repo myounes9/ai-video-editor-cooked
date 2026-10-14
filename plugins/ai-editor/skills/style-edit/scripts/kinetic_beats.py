@@ -11,28 +11,38 @@ before it reads visuals.json, so every new video gets its number beats with nobo
 (references/kinetic.md "Automatic beats"). Only number beats: kinetic_title and cta_follow are never placed here.
 
 1. Candidates. numbers.py spans() over the whole run of punctuated words (captions.json, else words.json), read with
-   their sentence and clause (punctuation; a pause over 0.8 s ends a sentence too):
-   - hook: the first money, count or percent figure in the first 3 s or the first sentence; its sub-line is a
-     duration said in the same sentence ("in 3.5 weeks"), else the figure's own label.
+   their sentence and clause (punctuation; a pause over 0.8 s ends a sentence too). Only counts of things (figures()):
+   no duration, sign ("minus five"), year, name's number ("page 42", "Planner 3"), date, clock time or address ("at
+   five"), phone number, two numbers said back to back ("twenty twenty-three", "three ninety-nine"), range or ratio
+   ("fifty to sixty", "one in ten"), measure ("220 degrees"), "a hundred percent sure", or lone "one" ("the best one").
+   - hook: the first figure in the first sentence that is more than filler, or in its first HOOK_S, never past
+     HOOK_MAX_S: money, or a count or percent of a plural thing said after it; its sub-line is a duration said in the
+     same sentence ("in 3.5 weeks"), else the figure's own label. A bare figure is no hook.
    - chain (number_chain): 2-4 counts, each in its own clause, within CHAIN_S, each smaller than the one before (a
-     funnel: flyers -> tastings -> one signed).
-   - goal (goal_bar): a percent with "goal", "target" or "of the way" in its sentence, and a scaled figure there.
+     funnel: flyers -> tastings -> orders); one said in a sentence of its own needs a funnel cue (funnel()); a lone
+     "one" ends one only as a verb's object ("and signed one."), drawn bare (no verb label).
+   - goal (goal_bar): a percent with "goal", "target" or "of the way" in its sentence, and a scaled figure there; the
+     card comes up on the first of its words.
    - stat run (stat_stack): 2-4 labelled figures in one sentence that count different things.
    - counter: one count of COUNTER_MIN or more with a label; a stamp when an outcome word (rejected, ignored, failed,
      ghosted, lost ...) follows in the sentence. tally: 5-30 of a plural thing. money: a lone money figure. figure:
      a lone percent or a count of 31-49 (both kinetic_number).
    - step tracker (step_build): an enumeration ("two main kinds of bread", "three layers", then "one is" / "the
      other is" / "layer two is" / "step three," ...), one beat when the count is said and one per item, each item
-     filled on its label; "another <same noun>" later adds a "?" slot. Each beat is its own candidate.
-2. Labels: 1-2 of the transcript's own words next to the number (the noun after it, else the verb before it), as said;
-   the renderer sets them in capitals. A figure is written from what was said: "4.5k dollars" -> "$4.5K", "three hundred
-   and forty" -> "340", K/M/B only when one was said (check.py plan grounds every figure again).
+     filled on its label (a noun, else the verb said for it: "step one is quick: you weigh" is WEIGH); "another <same
+     noun>" later adds a "?" slot. One of sources, steps or ways (ENUM) ranks with a stat run (ENUM_BONUS).
+2. Labels: 1-2 of the transcript's own words next to the number (the noun after it, else the verb before it), as said,
+   never a number word or a date; the renderer sets them in capitals. A figure is written from what was said: "4.5k
+   dollars" -> "$4.5K", "three hundred and forty" -> "340", K/M/B only when one was said and it reads as said ("2,345",
+   never "2.345K"); check.py plan grounds every figure again.
 3. Ranking and density: hook > chain = goal > stat run > counter > money > figure = tally > tracker beats (an item's
-   fill before the count's empty wells, kept only with a fill), adjusted
-   for clarity (labels, a stamp, more items). The strongest are kept, at most round(per_min x minutes) graphics in
-   all, the real cards already placed (images.json, visuals.json captures, posts, logos, titles, hand-written kinetic
-   beats) counted first. The hook is always kept. Between any two cards GAP_S of plain footage (the next beat of the
-   same tracker joins instead); never over a real card, except a stat_stack beside a capture.
+   fill before the count's empty wells, kept only with a fill), adjusted for clarity (labels, a stamp, more items).
+   The strongest are kept, at most round(per_min x minutes) graphics in all (a tracker's beats are one graphic), the
+   real cards already placed (images.json, visuals.json captures, posts, logos, titles, hand-written kinetic beats)
+   counted first. The hook is always kept. Between any two cards GAP_S of plain footage: a hold is cut to HOLD_TIGHT_S
+   for it, a real card before a beat ends sooner (plan.py space_kinetic), and a strong beat blocked only by the hold of
+   the one before bridges from it (BRIDGE_*); the next beat of the same tracker joins instead. Never over a real card,
+   except a stat_stack beside a capture. No card ends on the first words of a number said after it (whole()).
 
 Settings (style.json, taste.json): graphics.kinetic (on), graphics.kinetic_per_min (KINETIC_PER_MIN, every graphic a
 minute, real ones included), graphics.kinetic_auto (false: only hand-written kinetic beats). The rate and the count
@@ -42,7 +52,8 @@ and the hook "hook": true, so plan.py keeps the same ones when it counts the car
 
 refresh() keeps its beats ("auto": "kinetic" in visuals.json) while the cut's words, the real cards and the rate stay
 the same (kinetic.auto.json holds their fingerprint), so a review note's change to one survives the next plan; any of
-those changing finds them again. Stdlib only, deterministic.
+those changing finds them again, the note's removals and changes laid on them again (beat_key). Turned off, it clears
+them (clear()). Stdlib only, deterministic.
 """
 import argparse
 import hashlib
@@ -56,14 +67,19 @@ sys.path.insert(0, str(HERE))
 sys.path.insert(1, str(HERE.parents[2] / "lib"))
 from ai_editor import budget, numbers  # noqa: E402
 
-VERSION = 1            # bump when the rules change: the fingerprint changes and every edit's beats are found again
+VERSION = 2            # bump when the rules change: the fingerprint changes and every edit's beats are found again
 KINETIC_PER_MIN = budget.DEFAULT_PER_MIN   # graphics a minute in all (real ones included), graphics.kinetic_per_min
-GAP_S = 1.0            # plain footage kept between two kinetic cards (plan.py bridges any closer than its 1 s)
-REAL_GAP_S = 0.5       # and at the least beside a real card (GAP_S when the beat's hold allows it)
+GAP_S = 1.0            # plain footage kept between two cards, kinetic or real (plan.py bridges kinetic ones closer than 1 s)
+REAL_MIN_S = 2.0       # a real card before a kinetic one ends GAP_S before it when it still holds this (plan.py space_kinetic)
 LEAD_S = 0.1           # plan.CARD_LEAD_S: a card starts this long before its word
 HOLD_MIN_S = 1.5       # a lockup stays this long after its last word at the least (1.2 s still + its landing)
+HOLD_TIGHT_S = 1.3     # ... cut to this to leave the gap before the next card, or a number said next whole (plan.NUMBER_HOLD_S)
 HOLD_WANT_S = 2.0      # and this long when nothing follows soon
+BRIDGE_MIN_S = 1.0     # a card blocked only by the hold of the kinetic card before it bridges from it (plan.py bridge_kinetic)
+BRIDGE_MAX_S = 12.0    # when it starts this long after that card's last word; two bridged cards are up this long at the most
+BRIDGE_SCORE = 60      # and only a strong beat bridges (a counter, stat run, chain or goal; never a tally or a lone figure)
 HOOK_S = 3.0           # a figure said this early is the hook, whatever the first sentence's length
+HOOK_MAX_S = 6.0       # and never one said later than this (both from the first sentence that is more than filler)
 CHAIN_S = 8.0          # a chain's figures are said within this
 CHAIN_STEP_S = 5.0     # and each within this of the one before
 COUNTER_MIN = 50       # a count this big counts up
@@ -71,6 +87,7 @@ TALLY = (5, 30)        # a count in this range of a plural thing fills tiles
 TRACKER_S = 40.0       # a tracker's items are said within this of its count
 SCORE = {"hook": 100, "chain": 80, "goal": 80, "stat": 70, "counter": 60, "money": 50, "figure": 45, "tally": 45,
          "fill": 30, "tracker": 22, "question": 20}   # a tracker's count alone is empty wells: kept only with a fill
+ENUM_BONUS = 42        # a tracker of sources, steps or ways (the spine of the video) ranks with a stat run: fill 72
 TYPE = {"hook": "kinetic_number", "chain": "number_chain", "goal": "goal_bar", "stat": "stat_stack", "counter": "kinetic_number",
         "money": "kinetic_number", "figure": "kinetic_number", "tally": "kinetic_number", "tracker": "step_build",
         "fill": "step_build", "question": "step_build"}
@@ -109,6 +126,19 @@ OPENERS = set("and so now okay ok then well also but".split()) | FILLERS   # pas
 CALENDAR = set("""january february march april may june july august september october november december monday tuesday
 wednesday thursday friday saturday sunday""".split())   # "in March 300 people came": a date, not a name's number
 IRREGULAR = {"people", "children", "men", "women", "data", "media", "feet", "teeth", "mice"}
+ENUM = set("""source sources step steps way ways stage stages phase phases stream streams method methods layer layers pillar
+pillars""".split())   # what a tracker counts when the speech enumerates sources or steps (ENUM_BONUS)
+NAMED = STEP_NOUNS | set("""number page pages episode episodes chapter day week month year room level version season code
+zip table gate row line channel track act round lap no""".split())   # "page 42", "day 30", "month three": a name, not a count
+YEAR_PREP = set("in since of until by from back around year".split())   # "back in twenty nineteen": a year
+LINK = {"to", "in", "or", "and"}   # "fifty to sixty", "one in ten", "between fifty and sixty": a range or a ratio
+FUNNEL = set("""got get gets sent closed close signed sign converted convert booked book landed land won win turned became
+ended led gave brought resulted sold sell replied answered paid bought joined showed""".split())
+FUNNEL_CUE = (("to", "get", "there"), ("out", "of"), ("of", "those"), ("of", "them"), ("of", "which"))
+MEASURE = set("""degree degrees gram grams kilo kilos kilogram kilograms kg kilometer kilometers kilometre kilometres km meter
+meters metre metres mile miles liter liters litre litres ml cm inch inches feet foot calorie calories kcal times mph""".split())
+SURE = set("sure certain honest true right agree committed convinced serious".split())   # "a hundred percent sure": an idiom
+NOT_ONE = DETS | set("""best last first next only single each every no any which another other just same right whole""".split())
 
 
 def low(text):
@@ -126,6 +156,12 @@ def ends(text, marks=",.;:!?"):
 
 def plural(w):
     return w in IRREGULAR or (len(w) > 3 and w.endswith("s") and not w.endswith(("ss", "us", "is")))
+
+
+def numword(c):
+    """A number said in a word or digits ("twenty-three", "hundred", "4.5k"): never a label."""
+    return bool(numbers.DIGITS.fullmatch(c)) or any(x in numbers.UNITS or x in numbers.TENS or x in numbers.BIG
+                                                     for x in c.split("-") if x)
 
 
 def key_of(text):
@@ -177,7 +213,7 @@ class Take:
                     break
                 j += 1
                 continue
-            if c in STOP or numbers.DIGITS.fullmatch(c) or c in numbers.UNITS or c in numbers.TENS:
+            if c in STOP or numword(c) or c in CALENDAR or c == "between":
                 break
             col.append(j)
             if ends(raw):
@@ -193,18 +229,17 @@ class Take:
 
 
 def figure_text(take, sp):
-    """The figure as drawn, from what was said: "$4.5K", "340", "1,200", "40%". K/M/B only when one was said."""
+    """The figure as drawn, from what was said: "$4.5K", "340", "1,200", "40%". K/M/B only when one was said, and only
+    when it reads as said: "two thousand three hundred and forty-five" is "2,345", never "2.345K"."""
     v, said = sp["value"], " ".join(take.low[sp["i0"]:sp["i1"] + 1])
     if sp["kind"] == "percent":
         return numbers.norm(v) + "%"
     scaled = bool(re.search(r"\d(k|m|bn|b)\b", said)) or any(t in numbers.SCALE for t in re.split(r"[\s-]+", said))
+    body = f"{int(v):,}" if v == int(v) else numbers.norm(v)
     if scaled and v >= 1000:
-        for div, suf in ((10 ** 9, "B"), (10 ** 6, "M"), (1000, "K")):
-            if v >= div:
-                body = numbers.norm(v / div) + suf
-                break
-    else:
-        body = f"{int(v):,}" if v == int(v) else numbers.norm(v)
+        div, suf = next((d, x) for d, x in ((10 ** 9, "B"), (10 ** 6, "M"), (1000, "K")) if v >= d)
+        if round(v / div, 1) == round(v / div, 6) or re.search(r"\d(k|m|bn|b)\b", said):
+            body = numbers.norm(v / div) + suf
     return (currency(take, sp) if sp["kind"] == "money" else "") + body
 
 
@@ -228,39 +263,71 @@ def label_of(take, sp):
     nxt = next((take.low[k] for k in range(sp["i1"] + 1, end + 1) if take.low[k] not in FILLERS), "")
     skip = WEAK | set(CURRENCY) | {"of"} | ({"in", "on"} if nxt in CURRENCY else set())   # "2k dollars on ads"
     after = take.phrase(sp["i1"] + 1, end, skip) if not ends(take.w[sp["i1"]]["text"], ".!?") else []
+    if after and take.low[after[0]] in MEASURE:
+        return [], None   # "220 degrees", "500 grams", "fifty times": a measure, not a count of things
     if after:
         return after, "after"
     k = sp["i0"] - 1
     while k >= 0 and (take.low[k] in FILLERS or k == sp["i0"] - 1 and take.low[k] in OBJECTS):
         k -= 1
     if k >= 0 and take.sent[k] == take.sent[sp["i0"]] and not ends(take.w[k]["text"]) and take.low[k] not in STOP \
-            and not numbers.DIGITS.fullmatch(take.low[k]) and take.low[k] not in WEAK and re.fullmatch(r"[a-z'-]+", take.low[k]):
+            and not numword(take.low[k]) and take.low[k] not in WEAK | CALENDAR and re.fullmatch(r"[a-z'-]+", take.low[k]):
         return [k], "before"
     return [], None
 
 
 def figures(take):
-    """The spoken numbers worth a graphic: each with its sentence, clause, label and how it is drawn. Leaves out a
-    duration (a sub-line, never a figure), a year, a name's number ("GPT-4", "Opus 5.5", "layer one": an ordinal the
-    tracker reads) and a lone "one" ("one is", "one of"), which only ends a chain."""
-    out = []
-    for sp in take.spans:
+    """The spoken numbers worth a graphic: each with its sentence, clause, label and how it is drawn. Leaves out what
+    is no count of things: a duration (a sub-line, never a figure), a sign said with it ("minus five"), a year
+    ("2019", "back in two thousand and nineteen"), a name's number ("GPT-4", "Planner 3", "page 42", "day 30", "layer
+    one": an ordinal the tracker reads), a date ("June 21"), a clock time or an address ("at five", "at 221"), a phone
+    number or an ID (a leading 0, 7+ digits), two numbers said back to back ("twenty twenty-three", "three ninety-nine",
+    "five five five": a year, a price, digits), a range or a ratio ("fifty to sixty", "between fifty and sixty", "one in
+    ten"; of "from 200 to 12K" only the result), and a lone "one" ("one is", "the best one"), which only ends a chain
+    after a verb ("and signed one.")."""
+    out, spans = [], take.spans
+    pair = set()
+    for a, b in zip(spans, spans[1:]):
+        gap = take.low[a["i1"] + 1:b["i0"]]
+        back = b["i0"] == a["i1"] + 1 and not ends(take.w[a["i1"]]["text"])
+        ranged = len(gap) == 1 and gap[0] in LINK and not ends(take.w[a["i1"]]["text"]) and b["kind"] != "duration" and (
+            gap[0] != "and" or a["i0"] and take.low[a["i0"] - 1] == "between") or gap == ["out", "of"]
+        if back or ranged:
+            pair.add(a["i0"])
+            if not (ranged and a["i0"] and take.low[a["i0"] - 1] == "from"):
+                pair.add(b["i0"])
+    for sp in spans:
         i0, i1 = sp["i0"], sp["i1"]
         raw = [take.w[i]["text"] for i in range(i0, i1 + 1)]
+        if sp["value"] < 0 or i0 in pair:
+            continue
+        if sp["kind"] == "percent" and sp["value"] == 100 and (i1 + 1 >= len(take.w) or take.low[i1 + 1] in SURE or ends(take.w[i1]["text"])):
+            continue   # "a hundred percent sure", "I agree a hundred percent."
         if any(re.search(r"[a-z]", r.lower()) and re.search(r"\d", r) and not numbers.DIGITS.fullmatch(low(r)) for r in raw):
             continue   # glued to a name: "GPT-4", "V2"
+        digits = re.sub(r"[^\d]", "", raw[0]) if numbers.DIGITS.fullmatch(low(raw[0])) else ""
+        if len(raw) == 1 and digits and (len(digits) > 1 and digits[0] == "0" or len(digits) >= 7 and "," not in raw[0]):
+            continue   # a phone number or an ID
         prev = take.low[i0 - 1] if i0 else ""
         prev_raw = take.w[i0 - 1]["text"] if i0 else ""
-        if prev in STEP_NOUNS or prev == "number" or (prev_raw[:1].isupper() and prev not in STOP | CALENDAR and i0 and
-                                                       take.sent[i0 - 1] == take.sent[i0] and take.sent_range(take.sent[i0])[0] != i0 - 1
-                                                       and not ends(prev_raw)):
-            continue   # an ordinal or a version: "step one", "Opus 5.5"
+        nxt = take.low[i1 + 1] if i1 + 1 < len(take.w) else ""
+        if prev in NAMED or prev in CALENDAR or nxt in CALENDAR or (prev_raw[:1].isupper() and prev not in STOP | CALENDAR and i0
+                                                                       and take.sent[i0 - 1] == take.sent[i0] and take.sent_range(take.sent[i0])[0] != i0 - 1
+                                                                       and not ends(prev_raw)):
+            continue   # an ordinal, a version or a date: "step one", "page 42", "Planner 3", "June 21"
         v = sp["value"]
-        if sp["kind"] == "count" and v == int(v) and 1900 <= v <= 2100 and re.fullmatch(r"\d{4}", low(raw[0])):
-            continue   # a year
         f = dict(sp, sent=take.sent[i0], clause=take.clause[i0], t=take.t(i0), text=figure_text(take, sp))
         f["label"], f["label_from"] = label_of(take, sp)
+        things = f["label_from"] == "after" and plural(take.low[f["label"][-1]])   # "2,000 people", never a year
+        if sp["kind"] == "count" and v == int(v) and 1900 <= v <= 2100 and (re.fullmatch(r"\d{4}", low(raw[0])) or prev in YEAR_PREP
+                                                                             and not things):
+            continue   # a year
+        if prev == "at" and sp["kind"] == "count" and not things:
+            continue   # "at five", "at 221 Baker Street": a time or an address ("we're at sixty-three regulars" stays)
         f["weak"] = v <= 1 and sp["kind"] == "count"
+        # a lone "one" may end a chain only as a verb's object at its clause's end: "and signed one."
+        f["end_ok"] = f["weak"] and i0 == i1 and prev not in NOT_ONE and re.fullmatch(r"[a-z'-]+", prev or "-") is not None \
+            and not numword(prev) and (ends(take.w[i1]["text"]) or nxt in ("and", "but", "so", "then", ""))
         # the figure's own word: its first, unless that is "a" ("a hundred and twenty-seven" lands on "hundred")
         f["word"] = i0 + 1 if take.low[i0] in ("a", "an") and i1 > i0 else i0
         out.append(f)
@@ -336,13 +403,27 @@ def clarity(fs):
     return sum(3 if f["label"] else -8 for f in fs)
 
 
+FILLER_SENT = OPENERS | set("okay alright right yeah yes hey hi guys look listen um uh".split())
+
+
 def hook(take, figs):
-    first = take.sent_range(0)[1] if take.w else -1
+    """The hook: the first figure said in the first sentence that is more than filler ("So. Um. Okay." passed over), or
+    in its first HOOK_S, never past HOOK_MAX_S: a money figure, or a count or percent of a plural thing said after it
+    ("fifty loaves", "forty percent of buyers"). A bare figure ("I wake up at five", "a hundred percent sure", "won three
+    to one") is no hook."""
+    real = lambda s: any(take.low[i] not in FILLER_SENT for i in range(take.sent_range(s)[0], take.sent_range(s)[1] + 1))  # noqa: E731
+    s0 = next((s for s in sorted(set(take.sent)) if real(s)), None)
+    if s0 is None:
+        return None
+    a0, first = take.sent_range(s0)
+    t0 = take.t(a0)
     for f in figs:
-        if f["weak"] or f["kind"] not in ("money", "count", "percent"):
+        if f["weak"] or f["kind"] not in ("money", "count", "percent") or f["i0"] < a0:
             continue
-        if f["i0"] > first and f["t"] > HOOK_S:
+        if f["i0"] > first and f["t"] - t0 > HOOK_S or f["t"] - t0 > HOOK_MAX_S:
             return None
+        if f["kind"] != "money" and not (f["label_from"] == "after" and plural(take.low[f["label"][-1]])):
+            continue
         sub, parts = [], [f["word"]]
         d = next((d for d in durations(take) if take.sent[d["i0"]] == f["sent"] and d["i0"] > f["i1"]), None)
         if d:
@@ -368,9 +449,21 @@ def hook(take, figs):
     return None
 
 
+def funnel(take, f):
+    """A figure said as the next step of a funnel: a funnel verb in its clause before it or just after it ("I got four
+    calls", "eighty signed up"), or "to get there", "out of", "of those" in its sentence."""
+    a, z = take.sent_range(f["sent"])
+    near = [take.low[k] for k in range(a, min(z, f["i1"] + 2) + 1) if take.clause[k] == f["clause"]]
+    said = take.low[a:z + 1]
+    return any(w in FUNNEL for w in near) or any(tuple(said[k:k + len(q)]) == q for q in FUNNEL_CUE for k in range(len(said)))
+
+
 def chains(take, figs):
-    """Every funnel: 2-4 counts, each in its own clause and smaller than the one before, close together."""
-    counts = [f for f in figs if f["kind"] == "count" and f["label"]]
+    """Every funnel: 2-4 counts, each in its own clause and smaller than the one before, close together; a count said
+    in a sentence of its own only with a funnel cue (funnel: "We have 80 members. We also have 12 coaches." is a list).
+    A lone "one" only ends one, after its verb ("and signed one."). An item's label is the noun said after it; a figure
+    with only a verb before it ("1" of "signed one") is drawn bare."""
+    counts = [f for f in figs if f["kind"] == "count" and (f["label"] or f["end_ok"])]
     out = []
     for a in range(len(counts)):
         if counts[a]["weak"]:
@@ -378,10 +471,10 @@ def chains(take, figs):
         run = [counts[a]]
         for f in counts[a + 1:]:
             p = run[-1]
-            if p["weak"] or len(run) == 4:
+            if p["weak"] or len(run) == 4 or f["weak"] and not f["end_ok"]:
                 break
             if f["value"] >= p["value"] or f["clause"] == p["clause"] or f["t"] - p["t"] > CHAIN_STEP_S \
-                    or f["t"] - run[0]["t"] > CHAIN_S:
+                    or f["t"] - run[0]["t"] > CHAIN_S or f["sent"] != p["sent"] and not funnel(take, f):
                 break
             if any(g["kind"] != "count" and p["i1"] < g["i0"] < f["i0"] for g in figs):
                 break   # a money figure or a percent between: two different things
@@ -390,10 +483,12 @@ def chains(take, figs):
             continue
         if len({f["sent"] for f in run}) == 1 and any(g["sent"] == run[0]["sent"] and not g["weak"] and g not in run for g in figs):
             continue   # "80 members, 12 coaches and 9.2k in revenue": a list of stats, not a funnel
-        items = [{"num": f["text"], "_word": f["word"], **label_parts(take, f)} for f in run]
-        parts = [f["word"] for f in run] + [f["label"][0] for f in run]
+        noun = lambda f: f["label_from"] == "after"  # noqa: E731
+        items = [{"num": f["text"], "_word": f["word"], **(label_parts(take, f) if noun(f) else {})} for f in run]
+        parts = [f["word"] for f in run] + [f["label"][0] for f in run if noun(f)]
         out.append(Card(take, "chain", run[0]["word"], {"items": items}, parts,
-                        SCORE["chain"] + 4 * (len(run) - 2) + clarity(run) / len(run), f"{len(run)} counts, each smaller"))
+                        SCORE["chain"] + 4 * (len(run) - 2) + clarity([f for f in run if not f["weak"]]) / len(run),
+                        f"{len(run)} counts, each smaller"))
     return out
 
 
@@ -415,7 +510,8 @@ def goals(take, figs):
         if gw is not None:
             props["_word_goal"] = gw
             parts.append(gw)
-        out.append(Card(take, "goal", f["word"], props, parts, SCORE["goal"], "a percent of a goal"))
+        # "our 20k goal is forty percent done": the card comes up on the first of its words
+        out.append(Card(take, "goal", min(f["word"], tgt["word"]), props, parts, SCORE["goal"], "a percent of a goal"))
     return out
 
 
@@ -469,10 +565,27 @@ def singles(take, figs):
     return out
 
 
+def plain_verb(take, k):
+    return re.fullmatch(r"[a-z'-]+", take.w[k]["text"].strip(",.:;!?")) is not None and take.low[k] not in \
+        STOP | LEAD_SKIP | DULL | WEAK | FILLERS and not numword(take.low[k])
+
+
 def item_label(take, j, end):
-    """A tracker item's label: the noun phrase after the cue's "is", ":" or "," (its article passed over)."""
+    """A tracker item's label: the noun phrase after the cue's "is", ":" or "," (its article passed over). A list of
+    names doing the step ("Planner Pro, Oven Mate, and Timer Box bake it") is named by its verb, so the labels stay
+    parallel; an item with no plain noun ("step one is quick: you weigh the flour", "step two is where we knead it")
+    by the first verb said after it, in its sentence or the next."""
     lab = take.phrase(j, end, LEAD_SKIP)
-    return lab if lab and take.low[lab[0]] not in DULL else []
+    nxt = lab[-1] + 1 if lab else end + 1
+    if lab and ends(take.w[lab[-1]]["text"], ",") and nxt <= end and take.w[nxt]["text"][:1].isupper() \
+            and "and" in take.low[nxt:min(end, nxt + 6) + 1]:
+        a = nxt + take.low[nxt:min(end, nxt + 6) + 1].index("and")
+        v = next((k for k in range(a + 2, end + 1) if plain_verb(take, k)), None)
+        return [v] if v is not None else []
+    if lab and take.low[lab[0]] not in DULL:
+        return lab
+    stop = take.sent_range(take.sent[end] + 1)[1] if end + 1 < len(take.w) else end
+    return next(([k] for k in range(j, stop + 1) if plain_verb(take, k)), [])
 
 
 def cue_items(take, a, limit_t):
@@ -481,8 +594,8 @@ def cue_items(take, a, limit_t):
     for c in sorted({take.clause[i] for i in range(a, len(take.w)) if take.t(i) <= limit_t}):
         i = max(a, take.clause.index(c))
         b1 = take.sent_range(take.sent[i])[1]
-        while i <= b1 and take.low[i] in OPENERS:
-            i += 1
+        while i <= b1 and (take.low[i] in OPENERS or take.low[i] == "for" and i < b1 and take.low[i + 1] in STEP_NOUNS):
+            i += 1   # "So", "Now for step two"
         if i > b1:
             continue
         w0, w1 = take.low[i], take.low[i + 1] if i + 1 <= b1 else ""
@@ -507,7 +620,8 @@ def cue_items(take, a, limit_t):
                 lab = item_label(take, j + 1, b1)
                 break
             j += 1
-        out.append((cue, lab, n))
+        if not any(c0 == cue for c0, _, _ in out):   # "Now, step three": its clause and the opener's lead to one cue
+            out.append((cue, lab, n))
     return out
 
 
@@ -568,7 +682,8 @@ def trackers(take, figs):
                 x["state"] = "filled"
             st[-1].update(state="question", _word=q)
             beats.append(("question", q, st, [q], f"another {take.text(noun[-1:])}"))
-        cards = [Card(take, cls, i0, {"id": tid, "slots": st}, parts, SCORE[cls] + (2 if n else 0), why, tracker=tid)
+        enum = ENUM_BONUS if any(take.low[x] in ENUM for x in noun) or n is None and take.low[a] in ENUM else 0
+        cards = [Card(take, cls, i0, {"id": tid, "slots": st}, parts, SCORE[cls] + (2 if n else 0) + enum, why, tracker=tid)
                  for cls, i0, st, parts, why in beats]
         if fits(cards[0]):
             out += cards
@@ -660,45 +775,86 @@ def rate(style):
     return budget.per_min({**style, "graphics": {**(style.get("graphics") or {}), "kinetic": True}})
 
 
-def select(cands, real, duration, per_min):
-    """The strongest candidates within the budget, none over a real card (a stat_stack may sit beside a capture),
-    GAP_S of footage between any two (the next beat of one tracker joins instead). Sets each card's end."""
+def unit(c):
+    """What a card counts as in the budget: one graphic, the beats of one tracker together (the same graphic coming
+    back, budget.group)."""
+    return c.tracker or id(c)
+
+
+def tight(c):
+    return round(c.last + HOLD_TIGHT_S, 3)
+
+
+def whole(take, c, e):
+    """e, or earlier: a card that hides the captions never ends on the first words of a number said after its own
+    ("a hundred and" hidden, "sixty-four" shown reads 64): it ends as that number is said, when it still holds
+    HOLD_TIGHT_S after its last part. Else plan.py whole_numbers holds it over the whole number."""
+    for sp in take.spans:
+        t0, t1 = take.t(sp["i0"]), take.w[sp["i1"]]["end"]
+        if c.s < t0 < e < t1 + 0.6 and t0 >= tight(c):
+            k = sp["i0"] - 1   # its caption page may start a word sooner ("about a" | "hundred and"): end before that word
+            return round(take.t(k) if take.sent[k] == take.sent[sp["i0"]] and take.t(k) >= tight(c) else t0, 3)
+    return e
+
+
+def select(cands, real, duration, per_min, take=None):
+    """The strongest candidates within the budget (a tracker's beats one graphic), none over a real card (a stat_stack
+    may sit beside a capture), GAP_S of footage between any two: a card's hold is cut to HOLD_TIGHT_S for it, a real
+    card before one ends sooner when it still holds REAL_MIN_S (plan.py space_kinetic), and a stronger card blocked only by
+    the hold of the kinetic card before it bridges from it (that one holds until it starts, plan.py bridge_kinetic; two
+    cards at the most, BRIDGE_MAX_S). The next beat of one tracker joins instead. Sets each card's end; none ends on the
+    first words of a number said after it (whole)."""
     if per_min <= 0:
         for c in cands:
             c.drop = "cards are off"
         return []
     total = budget.count(per_min, duration)
     room = max(0, total - len(real))
-    kept = []
+    kept, bridged = [], {}   # bridged: id(card) -> the card it bridges into (its next)
+    paired = set()
     for c in sorted(cands, key=lambda c: (-c.score, c.s, c.cls)):
-        if c.cls != "hook" and len(kept) >= room:
+        new = not (c.tracker and any(o.tracker == c.tracker for o in kept))
+        if c.cls != "hook" and new and len({unit(o) for o in kept}) >= room:
             c.drop = f"over the budget ({total} graphics at {per_min:g} a minute, {len(real)} already placed)"
             continue
         if c.cls == "tracker" and not any(o.tracker == c.tracker and o.cls == "fill" for o in kept):
             c.drop = "none of its items is kept: its slots would stay empty"
             continue
+        bridge = None
         for o in kept:
             a, b = (o, c) if o.s <= c.s else (c, o)
             if a.tracker and a.tracker == b.tracker and b.s - a.s >= 0.5 and not any(
                     x.tracker == a.tracker and a.s < x.s < b.s for x in kept):
                 continue   # the next beat of the same tracker joins it
-            if b.s - a.e_min < GAP_S:
-                c.drop = f"too close to the {o.cls} at {o.s:.2f} s"
-                break
+            if b.s - tight(a) >= GAP_S:
+                continue
+            if c.score >= BRIDGE_SCORE and b.s - a.last >= BRIDGE_MIN_S and b.e_min - a.s <= BRIDGE_MAX_S and bridge is None \
+                    and not {id(a), id(b)} & paired \
+                    and not any(a.s < x.s < b.s for x in kept) and not (a.tracker or b.tracker):
+                bridge = (a, b)
+                continue
+            c.drop = f"too close to the {o.cls} at {o.s:.2f} s"
+            break
         else:
             for s, e, kind, pic in real:
                 if c.type == "stat_stack" and pic and s < c.e_min and c.s < e:
                     continue   # stats beside the capture of them
-                if s - c.e_min < REAL_GAP_S and c.s - e < REAL_GAP_S:
+                if s >= c.s and s - tight(c) < GAP_S or s < c.s and e > c.s - GAP_S and c.s - GAP_S - s < REAL_MIN_S:
                     c.drop = f"too close to the {kind} card at {s:.2f} s"
                     break
         if not c.drop:
             kept.append(c)
+            if bridge:
+                bridged[id(bridge[0])] = bridge[1]
+                paired.update({id(bridge[0]), id(bridge[1])})
     kept.sort(key=lambda c: c.s)
     for c in kept:   # a tracker's beats stand or fall together when plan.py counts the cards (budget.pick)
         c.strength = max(o.score for o in kept if o is c or (c.tracker and o.tracker == c.tracker))
     walls = sorted([(c.s, c) for c in kept] + [(s, None) for s, e, kind, pic in real], key=lambda x: x[0])
     for c in kept:
+        if id(c) in bridged:
+            c.e = bridged[id(c)].s   # it holds until the next one starts (plan.py bridge_kinetic)
+            continue
         e, joined = c.e_want, None
         for s, o in ((s, o) for s, o in walls if s > c.s):
             if o is None and c.type == "stat_stack" and s < c.e_min:
@@ -706,9 +862,13 @@ def select(cands, real, duration, per_min):
             if o is not None and o.tracker and o.tracker == c.tracker and s - c.e_min < 1.0:
                 joined = s   # plan.py holds the tracker until its next beat, which carries on from it
             else:
-                e = min(e, s - GAP_S)   # never under e_min: beside a real card the gap may be REAL_GAP_S
+                e = min(e, s - GAP_S)
             break
-        c.e = joined if joined is not None else round(min(duration, max(c.e_min, e)), 3)
+        if joined is not None:
+            c.e = joined
+            continue
+        e = max(tight(c), e)   # never under HOLD_TIGHT_S; the gap checks above left room for it
+        c.e = round(min(duration, whole(take, c, e) if take else e), 3)
     return kept
 
 
@@ -720,7 +880,7 @@ def find(words, style=None, visuals=(), images=(), duration=None):
     duration = duration or take.w[-1]["end"]
     cands = candidates(take)
     real = real_cards(take, visuals, images, style or {}, duration)
-    return select(cands, real, duration, rate(style or {})), cands
+    return select(cands, real, duration, rate(style or {}), take), cands
 
 
 def beats(words, style=None, visuals=(), images=(), duration=None):
@@ -746,12 +906,39 @@ def auto_on(style):
     return bool(g.get("kinetic")) and g.get("kinetic_auto", True) is not False
 
 
+def beat_key(b):
+    """A beat's identity from one find to the next: its type, word (and nth for a tracker's beats) and the figures or
+    labels it shows, so a review note's change to it is found again after a re-cut."""
+    shown_ = re.findall(r'"(?:num|pct|target|label)": "([^"]*)"', json.dumps(b.get("props") or {}, ensure_ascii=False))
+    return "|".join([str(b.get("type")), key_of(str(b.get("word", ""))), str(b.get("nth", 1) if b.get("type") == "step_build" else "")]
+                     + shown_)
+
+
+def clear(edit, log=None):
+    """The style turned the automatic beats off (graphics.kinetic or graphics.kinetic_auto false): the beats this
+    script wrote leave visuals.json, and kinetic.auto.json goes. Hand-written beats stay. Returns how many left."""
+    edit = Path(edit)
+    vp, sp = edit / "visuals.json", edit / STATE
+    visuals = json.loads(vp.read_text(encoding="utf-8")) if vp.exists() else []
+    rest = [v for v in visuals if v.get("auto") != AUTO]
+    if len(rest) != len(visuals):
+        vp.write_text(json.dumps(rest, indent=1), encoding="utf-8")
+        print(f"kinetic: automatic beats off, {len(visuals) - len(rest)} removed from visuals.json", file=log or sys.stderr)
+    if sp.exists():
+        sp.unlink()
+    return len(visuals) - len(rest)
+
+
 def refresh(edit, style, words_path=None, duration=None, force=False, log=None):
     """plan.py's step: the automatic number beats in visuals.json, found again only when the cut's words, the real
-    cards or the rate changed (or force). Returns the beats it owns now. Prints one line per beat to log (stderr)."""
+    cards or the rate changed (or force). A review note's change to one of them is kept through that: a beat it removed
+    stays out, and the fields it changed are laid on the beat found again (kinetic.auto.json "removed" and "edits",
+    matched by beat_key; delete that file to start over). Off (auto_on false), it clears the ones it wrote. Returns
+    the beats it owns now. Prints one line per beat to log (stderr)."""
     log = log or sys.stderr
     edit = Path(edit)
     if not auto_on(style):
+        clear(edit, log)
         return []
     words = words_of(edit, words_path)
     vp, ip, sp = edit / "visuals.json", edit / "images.json", edit / STATE
@@ -770,14 +957,31 @@ def refresh(edit, style, words_path=None, duration=None, force=False, log=None):
         print(f"kinetic: {len(mine)} automatic number beat{'s' if len(mine) != 1 else ''} kept (same cut, cards and rate; "
               "kinetic_beats.py write --force finds them again)", file=log)
         return mine
+    # what the review notes did to the beats written last time: removed ones stay out, changed fields are kept
+    written = {beat_key(b): b for b in state.get("written", [])}
+    now = {beat_key(b): b for b in mine}
+    removed = set(state.get("removed", [])) | {k for k in written if k not in now}
+    edits = dict(state.get("edits", {}))
+    for k, b in now.items():
+        if k in written and b != written[k]:
+            edits[k] = {**edits.get(k, {}), **{f: v for f, v in b.items() if written[k].get(f) != v}}
     kept, cands = find(words, style, rest, images, duration)
-    new = [c.beat() for c in kept]
+    new, out = [], []
+    for c in kept:
+        b = c.beat()
+        k = beat_key(b)
+        if k in removed:
+            out.append(f"  (left out: a review note removed the {b['type']} on '{b['word']}')")
+            continue
+        new.append({**b, **edits.get(k, {})})
+        out.append("  " + c.line() + ("  (kept the review's change)" if k in edits else ""))
     vp.write_text(json.dumps(rest + new, indent=1), encoding="utf-8")
-    sp.write_text(json.dumps({"fingerprint": fp, "beats": len(new), "per_min": pm}, indent=1), encoding="utf-8")
+    sp.write_text(json.dumps({"fingerprint": fp, "beats": len(new), "per_min": pm, "written": new, "removed": sorted(removed),
+                              "edits": edits}, indent=1), encoding="utf-8")
     print(f"kinetic: {len(new)} number beat{'s' if len(new) != 1 else ''} of {len(cands)} candidates into visuals.json "
           f"({pm:g} graphics a minute in all):", file=log)
-    for c in kept:
-        print("  " + c.line(), file=log)
+    for line in out:
+        print(line, file=log)
     return new
 
 
@@ -798,19 +1002,60 @@ def timed(text, t0=0.0, step=0.32):
     return out
 
 
-BAKERY = ("We made 4.5k dollars in three and a half weeks, and this is how we did it. So we bake two main "
-          "kinds of bread. One is a sourdough that we launched last month, and the other is a seeded rye. To find buyers we "
-          "printed three hundred and forty flyers. We got six cafe tastings, and we managed to sign one. And right now we "
-          "are at forty percent of our 20k goal, and we need another kind of bread for it.")
-GYM = ("This year our little gym grew a lot. Right now we have eighty members, twelve coaches, and 9.2k dollars in "
-       "monthly revenue. To get there I sent a hundred and twenty emails to local offices and got ignored by all of "
-       "them. Then we tested eighteen different workouts with our members. So come and train with us.")
+BAKERY = ("Our 20k goal for the year is forty percent done. We bake in two stages. The first stage is the starter, and the "
+          "second stage is the cold proof. Last spring we handed out three hundred and forty flyers, got sixty tastings, and "
+          "booked twelve cafe orders. One cafe paid us 4.5k dollars in three and a half weeks. Next we may add another stage.")
+GYM = ("Our little gym opened in a cold garage next to the station. Today eighty members, twelve coaches and 9.2k dollars of "
+       "monthly revenue keep it going. Last winter we mailed a hundred and twenty local offices, and most of those letters "
+       "were ignored. We also built eighteen workouts for beginners. Train with us.")
 PODCAST = ("Our podcast hit 50k downloads in six months. So here's the plan. Step one, we record the episode. Step two, we "
            "cut the clips. Step three, we post every clip. Last week a sponsor paid us 2.5k dollars for one episode. "
            "That is it.")
 GARDEN = ("Here is how our garden shop works. We run it on Planner 3 and it costs nothing. We sold thirty-five lemon trees "
           "this spring, and fifty percent of buyers came back. We also sold 1.2k euros of seeds, and eleven raised beds, "
           "and nine hundred bulbs in one week. The other news is the shop. Follow along.")
+STALL = ("Our flower stall had a slow start this year, so we tried everything. We baked sixteen kinds of cookies for the market. "
+         "Then we mailed three hundred flyers, got forty calls, and booked nine weddings. And we knocked on a hundred and sixty "
+         "doors, and most of them refused. That is how it went.")
+# Shapes that are no count of things, said as an opening line: no candidate at all, or only the ones named (a sign
+# or a part said with a number is that number; a list said over sentences is no funnel; a pronoun "one" ends none).
+NOT_FIGURES = [
+    ("I wake up at five every day and bake until nine. Then I sleep.", []),
+    ("We open at 7:30 and close at 6. People queue at the door.", []),
+    ("I was twenty-two when I started. Now I am thirty-five years old.", []),
+    ("Call us at 555 1234 or text 0612345678 any time. We answer fast.", []),
+    ("Our number is five five five, one two three four. Call any time.", []),
+    ("We are at 221 Baker Street. Come and see us.", []),
+    ("Our zip code is 90210. Everyone knows it.", []),
+    ("Back in twenty twenty-three we opened the shop. It changed everything.", []),
+    ("In two thousand and nineteen I quit my job. Then I started baking.", []),
+    ("I was born in nineteen ninety-five and I love bread.", []),
+    ("I am a hundred percent sure this works. Try it.", []),
+    ("We won three to one against the other bakery. It was close.", []),
+    ("On June 21 we opened, and on July 4 we closed for a day.", []),
+    ("A loaf costs three ninety-nine. That is cheap.", []),
+    ("We sell between fifty and sixty loaves a day. Some days more.", []),
+    ("One in ten customers buys a cake. The rest buy bread.", []),
+    ("Turn to page 42 of the recipe book. It is the best one.", []),
+    ("Day 30 of baking every day. Still going.", []),
+    ("Bake it at two hundred and twenty degrees for forty minutes. Then let it rest.", []),
+    ("Use five hundred grams of flour and three hundred and fifty grams of water. Mix well.", []),
+    ("I tried a lot of ovens. This one is the best one I ever had. The other one broke after a week.", []),
+    ("It was minus five degrees outside and we still had sixty people in line.", ["hook:60", "counter:60"]),
+    ("We sold half a million cookies last year. Insane.", ["hook:500K", "counter:500K"]),
+    ("We have eighty members. We also have twelve coaches. And we make 9k a month.", ["hook:80", "counter:80", "tally:12"]),
+    ("We baked forty cakes. We sold twelve, and I kept the best one.", ["hook:40", "chain:40>12", "figure:40"]),
+    ("I sent sixty messages, got four calls, and that one changed everything.", ["hook:60", "chain:60>4", "counter:60"]),
+    ("We made two thousand three hundred and forty-five dollars this month. Not bad.", ["hook:$2,345", "money:$2,345"]),
+    ("So. Um. Okay. Let me tell you. This year we made eighty thousand euros from one shop.", ["hook:€80K", "money:€80K"]),
+]
+
+
+def brief(c):
+    p = c.beat()["props"]
+    if c.cls == "chain":
+        return "chain:" + ">".join(i["num"] for i in p["items"])
+    return f"{c.cls}:{p.get('num') or p.get('pct') or ''}"
 
 
 def demo():
@@ -820,24 +1065,23 @@ def demo():
     by = {}
     for c in cands:
         by.setdefault(c.cls, c)
-    # the bakery: the hook with its duration as the sub-line, a funnel, a goal, a tracker of two with a "?" slot
-    h = by["hook"].beat()
-    assert h["type"] == "kinetic_number" and h["props"]["num"] == "$4.5K" and h["props"]["variant"] == "hook", h
-    assert [x["text"] for x in h["props"]["sub"]] == ["in", "3.5", "weeks"] and (h["word"], h["nth"]) == ("4.5k", 1), h
-    ch = by["chain"].beat()["props"]["items"]
-    assert [(i["num"], i["label"]) for i in ch] == [("340", "flyers"), ("6", "cafe tastings"), ("1", "sign")], ch
-    assert ch[0]["word"] == "three" and ch[1]["label_word"] == "cafe" and ch[2]["label_word"] == "sign", ch
+    # the bakery: no hook (no count of things in the opening line), a goal, a tracker of two stages with a "?" slot, a funnel
+    assert "hook" not in by, by["hook"].line()
     g = by["goal"].beat()["props"]
     assert g == {"pct": "40%", "word_pct": "forty", "count_word": "percent", "target": "20K", "word_target": "20k",
-                 "word_goal": "goal"}, g
+                 "word_goal": "goal"} and by["goal"].beat()["word"] == "20k", g
+    ch = by["chain"].beat()["props"]["items"]
+    assert [(i["num"], i["label"]) for i in ch] == [("340", "flyers"), ("60", "tastings"), ("12", "cafe orders")], ch
+    assert ch[0]["word"] == "three" and ch[2]["label_word"] == "cafe", ch
     tr = [c for c in cands if c.tracker]
     assert [c.cls for c in tr] == ["tracker", "fill", "fill", "question"] and len({c.tracker for c in tr}) == 1, [c.cls for c in tr]
     sl = [c.beat()["props"]["slots"] for c in tr]
-    assert [s["label"] for s in sl[0][:2]] == ["sourdough", "seeded rye"] and sl[0][2] == {"state": "off"}, sl[0]
-    assert sl[0][0]["word"] == "two" and [s["state"] for s in sl[2]] == ["filled", "filled", "off"] and sl[2][1]["word"] == "seeded", sl
+    assert [s["label"] for s in sl[0][:2]] == ["starter", "cold proof"] and sl[0][2] == {"state": "off"}, sl[0]
+    assert sl[0][0]["word"] == "two" and [s["state"] for s in sl[2]] == ["filled", "filled", "off"] and sl[2][1]["word"] == "cold", sl
     assert sl[3][2] == {"state": "question", "word": "another"}, sl[3]
-    assert tr[1].beat()["word"] == "One" and tr[2].beat()["word"] == "other", "an item's beat starts on its cue"
-    assert kept[0].cls == "hook" and {"chain", "goal", "fill"} <= {c.cls for c in kept}, [c.line() for c in kept]
+    assert tr[1].beat()["word"] == "first" and tr[2].beat()["word"] == "second", "an item's beat starts on its cue"
+    assert tr[1].score == SCORE["fill"] + 2 + ENUM_BONUS, "a tracker of stages is the take's spine: it ranks with a stat run"
+    assert by["money"].beat()["props"]["num"] == "$4.5K"
 
     gym = timed(GYM)
     kept, cands = find(gym, many)
@@ -846,10 +1090,10 @@ def demo():
     assert [(s["num"], s.get("label")) for s in st] == [("80", "members"), ("12", "coaches"), ("$9.2K", "monthly revenue")], st
     co = next(c for c in cands if c.cls == "counter" and "stamp" in c.props).beat()["props"]
     assert co["num"] == "120" and co["variant"] == "counter" and co["stamp"] == {"text": "ignored", "word": "ignored"}, co
-    assert [x["text"] for x in co["sub"]] == ["emails"] and co["land_word"] == "emails" and co["word"] == "hundred", co
+    assert [x["text"] for x in co["sub"]] == ["local", "offices"] and co["land_word"] == "local" and co["word"] == "hundred", co
     ta = by["tally"].beat()["props"]
     assert ta["num"] == "18" and ta["variant"] == "tally" and [x["text"] for x in ta["sub"]] == ["workouts"], ta
-    assert "hook" not in by and "chain" not in by, "no figure in the first sentence; 80 members, 12 coaches and $9.2K is a list"
+    assert "hook" not in by and "chain" not in by, "no figure in the opening line; 80 members, 12 coaches and $9.2K is a list"
 
     pod = timed(PODCAST)
     kept, cands = find(pod, many)
@@ -861,6 +1105,11 @@ def demo():
     assert [(s["word"], s["nth"]) for s in steps] == [("Step", 1), ("Step", 2), ("Step", 3)], "ordinals, no count said"
     assert [x["state"] for x in steps[0]["props"]["slots"]] == ["filled", "empty", "empty"], steps[0]
     assert by["money"].beat()["props"]["num"] == "$2.5K" and "sub" not in by["money"].beat()["props"]
+    # steps with no plain noun are named by their verb; a list of names doing a step, by the verb they do it with
+    rt = timed("Our bakery runs on a simple routine every day. There are three steps to this. Step one is quick: you weigh "
+               "the flour. Now for step two, Planner Pro, Oven Mate, and Timer Box mix it. Step three is where we bake.")
+    sl = [c.beat()["props"]["slots"] for c in find(rt, many)[1] if c.tracker]
+    assert [x["label"] for x in sl[0]] == ["weigh", "mix", "bake"] and len(sl) == 4, sl
 
     gar = timed(GARDEN)
     cands = find(gar, {"graphics": {"kinetic": True}})[1]
@@ -871,9 +1120,15 @@ def demo():
     assert st == [[("35", "lemon trees"), ("50%", "buyers")], [("€1.2K", "seeds"), ("11", "raised beds"), ("900", "bulbs")]], st
     assert not [c for c in cands if c.tracker], "'the other news' is no item: no count or ordinals were said"
 
-    # grounding: every figure is one check.py reads as said, every word on screen one the take says
+    # what is no count of things never becomes a card: times, ages, phone digits, addresses, years, dates, prices,
+    # ranges, ratios, names' numbers, measures, a pronoun "one", a sign or a part said with the number
+    for text, want in NOT_FIGURES:
+        got = sorted({brief(c) for c in find(timed(text), {"graphics": {"kinetic": True, "kinetic_per_min": 60}})[1]})
+        assert got == sorted(want), (text, got)
+
+    # grounding: every figure is one check.py reads as said; every label word is said, and none is a number or a date
     from check import said_numbers
-    for ws in (bake, gym, pod, gar):
+    for ws in [bake, gym, pod, gar, timed(STALL)] + [timed(t) for t, _ in NOT_FIGURES]:
         said, pct, _ = said_numbers(" ".join(w["text"] for w in ws))
         vocab = {low(w["text"]) for w in ws}
         for c in find(ws, {"graphics": {"kinetic": True, "kinetic_per_min": 60}})[1]:
@@ -883,30 +1138,49 @@ def demo():
                            for w in numbers.written(n)), (n, c.line())
             for t in re.findall(r'"(?:label|text)": "([^"]+)"', b):
                 assert all(low(x) in vocab or numbers.written(x) for x in t.split()), (t, c.line())
+            for t in re.findall(r'"label": "([^"]+)"', b):
+                assert not any(numword(low(x)) or low(x) in CALENDAR for x in t.split()), (t, c.line())
 
-    # ranking and density: 8 a minute over the 30 s bakery take is 4 graphics: the strongest, the hook always
+    # ranking and density: 8 a minute over the 23 s bakery take is 3 graphics, a tracker's beats one of them
     k8 = find(bake, {"graphics": {"kinetic": True}})[0]
-    assert [c.cls for c in k8] == ["hook", "fill", "chain", "goal"], [c.line() for c in k8]
-    assert [c.cls for c in find(bake, {"graphics": {"kinetic": True, "kinetic_per_min": 1}})[0]] == ["hook"], "the hook stays"
+    assert [c.cls for c in k8] == ["goal", "fill", "fill", "chain", "question"], [c.line() for c in k8]
+    assert [c.cls for c in find(pod, {"graphics": {"kinetic": True, "kinetic_per_min": 1}})[0]] == ["hook"], "the hook stays"
     assert find(bake, {"graphics": {"kinetic": True}, "cards": {"on": False}})[0] == [], "cards off: none"
     assert [c.line() for c in find(bake, {**many, "cards": {"per_min": 4}})[0]] == [c.line() for c in find(bake, many)[0]], \
         "the graphics budget wins over the style page's cards.per_min (budget.py)"
-    sb = beats(bake, {"graphics": {"kinetic": True}})
+    sb = beats(pod, {"graphics": {"kinetic": True}})
     assert sb[0]["hook"] is True and sb[0]["strength"] == 1.0 and not any(b.get("hook") for b in sb[1:]), sb
     assert len({b["strength"] for b in sb if b["type"] == "step_build"}) == 1, "a tracker's beats share their strength"
-    # plain footage between cards: GAP_S between any two kept, except the next beat of one tracker, which joins
-    for ws in (bake, gym, pod, gar):
+    # the strongest win, not the first come: a counter blocked only by a chain's hold bridges from it (the chain holds
+    # until it starts) and the weaker tally loses the last place
+    stall = timed(STALL)
+    ks = find(stall, {"graphics": {"kinetic": True, "kinetic_per_min": 6}})[0]
+    assert [c.cls for c in ks] == ["chain", "counter"] and ks[0].e == ks[1].s, [c.line() for c in ks]
+    assert [c.cls for c in find(stall, {"graphics": {"kinetic": True, "kinetic_per_min": 9}})[0]] == ["tally", "chain", "counter"]
+    # a card never ends on the first words of a number said after it: it ends as that number starts
+    nx = timed("It was a quiet month at the shop, so we tried the post. We sent ninety letters, got twelve replies, and signed four deals. And about a hundred and twenty people "
+               "ignored us. Fine.")
+    k1 = find(nx, {"graphics": {"kinetic": True, "kinetic_per_min": 3}})[0]
+    a_ = next(w["start"] for w, x in zip(nx, nx[1:]) if w["text"] == "a" and x["text"] == "hundred")
+    assert [c.cls for c in k1] == ["chain"] and k1[0].e == a_, ([c.line() for c in k1], a_)
+    # plain footage between cards: GAP_S between any two kept, except a tracker's next beat or a bridge, which join
+    for ws in (bake, gym, pod, gar, stall):
         ks = find(ws, {"graphics": {"kinetic": True, "kinetic_per_min": 60}})[0]
         for a, b in zip(ks, ks[1:]):
-            assert b.s - a.e >= GAP_S - 1e-6 or (a.tracker and a.tracker == b.tracker and a.e == b.s), (a.line(), b.line())
-        assert all(c.last < c.e and (c.e >= c.last + HOLD_MIN_S - 1e-6 or any(o.tracker and o.tracker == c.tracker and o.s == c.e for o in ks))
-                   for c in ks), [c.line() for c in ks]
+            assert b.s - a.e >= GAP_S - 1e-6 or a.e == b.s, (a.line(), b.line())
+        assert all(c.last < c.e and (c.e >= c.last + HOLD_TIGHT_S - 1e-6 or any(o.s == c.e for o in ks) or c.e == ws[-1]["end"])
+                   for c in ks), \
+            [c.line() for c in ks]
     # a real card (the user's photo on "flyers") takes the chain's place and its share of the budget
     kr = find(bake, {"graphics": {"kinetic": True}}, images=[{"src": "images/flyer.png", "word": "flyers", "nth": 1, "hold_s": 3}])[0]
-    assert "chain" not in {c.cls for c in kr} and len(kr) == 3, [c.line() for c in kr]
+    assert "chain" not in {c.cls for c in kr} and len({unit(c) for c in kr}) == 2, [c.line() for c in kr]
     # ... and a capture beat with its fetched image is one card, not two
     cap = [{"kind": "capture", "word": "flyers", "nth": 1, "url": "https://example.com/flyer"}]
-    assert len(find(bake, {"graphics": {"kinetic": True}}, visuals=cap, images=[{"src": "images/capture-1-flyers.png", "word": "flyers", "nth": 1}])[0]) == 3
+    kc = find(bake, {"graphics": {"kinetic": True}}, visuals=cap, images=[{"src": "images/capture-1-flyers.png", "word": "flyers", "nth": 1}])[0]
+    assert len({unit(c) for c in kc}) == 2, [c.line() for c in kc]
+    # a real card ending under GAP_S before a kinetic card ends sooner (plan.py space_kinetic) when it holds REAL_MIN_S
+    near = [{"src": "images/stall.png", "word": "slow", "nth": 1, "hold_s": 4.4}]   # 1.7-6.1 s, the tally at 5.25 s
+    assert "tally" in {c.cls for c in find(stall, many, images=near)[0]}
     # a stat_stack may sit beside the capture of its own figures; nothing else goes under a real card
     cap = [{"kind": "capture", "word": "coaches", "nth": 1, "url": "https://example.com/stats", "hold_s": 3}]
     kg = find(gym, many, visuals=cap)[0]
@@ -914,8 +1188,8 @@ def demo():
     assert "tally" not in {c.cls for c in find(gym, many, visuals=[{**cap[0], "word": "eighteen"}])[0]}
     demo_plan(bake)
     demo_refresh(bake)
-    n = sum(len(find(timed(t), {"graphics": {"kinetic": True}})[1]) for t in (BAKERY, GYM, PODCAST, GARDEN))
-    print(f"kinetic_beats ok ({n} candidates in 4 made-up takes)")
+    n = sum(len(find(timed(t), {"graphics": {"kinetic": True}})[1]) for t in (BAKERY, GYM, PODCAST, GARDEN, STALL))
+    print(f"kinetic_beats ok ({n} candidates in 5 made-up takes, {len(NOT_FIGURES)} shapes that are no count)")
 
 
 def demo_plan(bake):
@@ -934,35 +1208,65 @@ def demo_plan(bake):
     first = {c["anim"]["type"]: c for c in reversed(kc)}
     assert first["number_chain"]["anim"]["props"]["items"][2]["label_at"] > 0, first["number_chain"]
     gb = first["goal_bar"]["anim"]["props"]
-    assert gb["at_pct"] > 0 and gb["count_at"] > gb["at_pct"] and gb["at_target"] > gb["count_at"] and gb["at_goal"] > gb["at_target"], gb
-    hk = kc[0]
+    # "our 20k goal is forty percent done": the card comes up on the target, the % lands on its own word after
+    assert 0 < gb["at_target"] < gb["at_goal"] < gb["at_pct"] < gb["count_at"], gb
+    pod = timed(PODCAST)
+    pp = plan.build({**st, "captions": {"words_per_caption": 3}}, pod, {**meta, "duration": pod[-1]["end"] + 0.5}, visuals=beats(pod, st))
+    hk = pp["cards"][0]
     assert hk["anim"]["props"]["sub"][1]["at"] > hk["anim"]["props"]["at"], hk
+    # a number card held past the start of a number said after it (a review note's long hold) never cuts it in half:
+    # plan.py whole_numbers ends it as that number's first page starts, and check.py plan FAILs a plan that does not
+    nx = timed("It was a quiet month at the shop, so we tried the post. We sent ninety letters, got twelve replies, and "
+               "signed four deals. And about a hundred and twenty people ignored us. Fine.")
+    v = beats(nx, {"graphics": {"kinetic": True, "kinetic_per_min": 3}})
+    mid = next(w["end"] for w, x in zip(nx, nx[1:]) if w["text"] == "hundred" and x["text"] == "and") + 0.05
+    v[0]["hold_s"] = round(mid - (next(w["start"] for w in nx if w["text"] == "ninety") - LEAD_S), 2)
+    a_ = next(w["start"] for w, x in zip(nx, nx[1:]) if w["text"] == "a" and x["text"] == "hundred")
+    stw = {**st, "captions": {"words_per_caption": 2}}
+    px = plan.build(stw, nx, {**meta, "duration": nx[-1]["end"] + 0.5}, visuals=v)
+    chunks, card = px["captions"]["chunks"], px["cards"][0]
+    first = next(c for c in chunks if any(abs(w["start"] - a_) < 1e-6 for w in c["words"]))
+    assert card["end"] == round(first["start"], 3), (card["end"], first)
+    assert plan.split_numbers(px["cards"], chunks, nx) == []
+    from check import check_plan
+    bad = {**px, "cards": [{**card, "end": round(mid, 3)}]}
+    assert plan.split_numbers(bad["cards"], chunks, nx) and any("hides the captions over the start of" in f["what"] and
+                                                              f["level"] == "FAIL" for f in check_plan(bad)), "check.py plan FAILs it"
 
 
 def demo_refresh(bake):
     """refresh(): writes its beats into visuals.json beside the hand-written ones, keeps them (and a change made to
-    one) while nothing changes, finds them again when the words do; off unless graphics.kinetic."""
+    one) while nothing changes; finds them again when the words do, a review note's removal and changes kept; clears
+    them when the style turns them off."""
     import tempfile
     import io
     d = Path(tempfile.mkdtemp(prefix="kinetic_beats_"))
     (d / "words.json").write_text(json.dumps(bake), encoding="utf-8")
-    mine = [{"kind": "capture", "word": "sourdough", "nth": 1, "url": "https://example.com/bread", "format": "sticker"}]
+    mine = [{"kind": "capture", "word": "flyers", "nth": 1, "url": "https://example.com/flyers", "format": "sticker"}]
     (d / "visuals.json").write_text(json.dumps(mine), encoding="utf-8")
     style = {"graphics": {"kinetic": True}}
     quiet = io.StringIO()
-    assert refresh(d, {"graphics": {}}, log=quiet) == [] and json.loads((d / "visuals.json").read_text(encoding="utf-8")) == mine
+    vis_now = lambda: json.loads((d / "visuals.json").read_text(encoding="utf-8"))  # noqa: E731
+    assert refresh(d, {"graphics": {}}, log=quiet) == [] and vis_now() == mine
     new = refresh(d, style, log=quiet)
-    vis = json.loads((d / "visuals.json").read_text(encoding="utf-8"))
-    assert vis[0] == mine[0] and vis[1:] == new and all(v["auto"] == AUTO for v in new) and new[0]["type"] == "kinetic_number", vis
-    assert len(new) == budget.allowance(style, bake[-1]["end"]) - 1, len(new)   # the capture counted first
-    vis[1]["hold_s"] = 2.0   # a review note changed the hook
+    vis = vis_now()
+    assert vis[0] == mine[0] and vis[1:] == new and all(v["auto"] == AUTO for v in new) and new[0]["type"] == "goal_bar", vis
+    units = {(b["props"].get("id") if b["type"] == "step_build" else i) for i, b in enumerate(new)}
+    assert len(units) == budget.allowance(style, bake[-1]["end"]) - 1, new   # the capture counted first
+    # a review note removes the goal bar and shortens the first fill
+    vis = [v for v in vis if v.get("type") != "goal_bar"]
+    vis[1]["hold_s"] = 2.0
     (d / "visuals.json").write_text(json.dumps(vis), encoding="utf-8")
-    assert refresh(d, style, log=quiet)[0]["hold_s"] == 2.0, "kept while the cut, the cards and the rate are the same"
-    assert refresh(d, {"graphics": {"kinetic": True, "kinetic_auto": False}}, log=quiet) == []
-    (d / "words.json").write_text(json.dumps(bake[:-12]), encoding="utf-8")   # a re-cut
+    assert refresh(d, style, log=quiet) == vis[1:], "kept while the cut, the cards and the rate are the same"
+    (d / "words.json").write_text(json.dumps(bake[:-6]), encoding="utf-8")   # a re-cut: the beats are found again ...
     again = refresh(d, style, log=quiet)
-    assert again[0]["hold_s"] != 2.0 and len(json.loads((d / "visuals.json").read_text(encoding="utf-8"))) == 1 + len(again)
+    assert "goal_bar" not in {b["type"] for b in again} and again[0]["hold_s"] == 2.0, again   # ... the note's changes kept
+    st = json.loads((d / STATE).read_text(encoding="utf-8"))
+    assert len(st["removed"]) == 1 and st["removed"][0].startswith("goal_bar|") and list(st["edits"].values()) == [{"hold_s": 2.0}], st
     assert refresh(d, style, force=True, log=quiet) == again
+    # turned off (kinetic_auto false, or kinetic off): the beats it wrote leave visuals.json, hand-written ones stay
+    assert refresh(d, {"graphics": {"kinetic": True, "kinetic_auto": False}}, log=quiet) == [] and vis_now() == mine
+    assert not (d / STATE).exists()
 
 
 # ---------------------------------------------------------------- CLI
