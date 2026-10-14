@@ -1054,9 +1054,11 @@ def run(edit, plan, video, plan_path, style=None, cuts=(), brand=None):
         grey = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
         ih, iw = grey.shape
         rr = rec.setdefault(f"{i}:{c['trigger_word']}", {})
-        if bgv is None:
-            bgv = float(np.median(grey))
-            bad = []                           # no uniform panel: nothing to overflow
+        if bgv is None or plan.get("kinetic") and anim.get("type") in KINETIC:
+            # no uniform panel: nothing to overflow. A kinetic title floats over the whole frame with no panel; under a
+            # punch zoom the whole frame differs from the cut and reads as one flat "panel" whose edges are the frame's
+            bgv = float(np.median(grey)) if bgv is None else bgv
+            bad = []
         else:
             rr["edges"] = ov = edge_overflow(grey, bgv)
             bad = [k for k, v in ov.items() if v > EDGE_ROWS]

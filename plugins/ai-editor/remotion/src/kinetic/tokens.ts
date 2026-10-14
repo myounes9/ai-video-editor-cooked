@@ -84,3 +84,26 @@ export const BLUR = { k: 0.15, minPx: 6, maxPx: 7 };
 // ---------- eases ----------
 export const EASE = { pull: "power3.out", settle: "expo.out", rise: "expo.out", exit: "power2.in", draw: "power3.out",
   handoff: "power3.in", count: "expo.out", sheen: "power1.inOut", scrimIn: "sine.out", scrimOut: "sine.in" };
+
+// ---------- goal_bar ----------
+/** The goal track (no panel): a pill well with its remainder showing (a 1 px edge in alpha, a gradient shade under its
+ *  top lip, never a blurred inset shadow), a key-colour fill lit from the top, a glow band behind it (a gradient, never
+ *  a box-shadow) and the target marker at its end: a smoked disc, a white rim and a dot that turns key on "goal".
+ *  Sizes are shares of the figure size S; times in seconds unless named in frames. */
+export const GOAL = {
+  well: "rgba(255,255,255,0.14)", edge: "rgba(255,255,255,0.22)", shade: "rgba(0,0,0,0.38)", fillTop: "#FFE14D",
+  /** Under the well with no panel behind it: a dark tint, so the remainder still reads over a bright wall. */
+  under: "rgba(0,0,0,0.2)",
+  /** The glow band's colour as r,g,b (its alpha moves: rest, while the fill runs, the landing flare's peak). */
+  glow: "255,212,0", glowRest: 0.32, glowRun: 0.5, glowFlare: 0.85,
+  discFill: "rgba(20,20,24,0.55)", rim: WHITE,
+  /** Track height (at least `minH` px at 1080), the gap above it, the disc's diameter on the track height. */
+  h: 0.15, minH: 22, gap: 0.17, discK: 1.35,
+  /** The module's widest, in px at 1080 (the vertical grid's width): a wide frame centres it rather than stretch it. */
+  maxW: 936,
+  /** The well draws along its length from the figure's pull over draw; the disc pops (back.out, sized, never scaled) on
+   *  the target's word; two rings leave it on "goal", ringGap frames apart, each growing to ringOut x its radius. */
+  draw: 0.38, pop: 0.34, popEase: "back.out(2.2)", ring: 0.7, ringGap: 5, ringOut: 2.1, flareFrames: 6,
+  /** A count with no word for its end reads final this long after its figure's word ("forty percent"). */
+  countAfter: 0.3,
+};
