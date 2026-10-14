@@ -55,7 +55,7 @@ held lockup pushes 1.5%; it leaves in one feathered sweep, left to right. Counte
 | type | built | shows | props |
 |---|---|---|---|
 | `number_chain` | yes | 2-4 figures that lead one to the next, each on its word; a connector draws just before the next lands; earlier figures stay, in foil; fixed columns, equal connectors | `items: [{num, label?, at, label_at?}]`, `out_at?`, `band?`, `hide_captions?` |
-| `kinetic_number` | planned | one figure with a sub-line of words; variants `hook` (default), `counter` (counts from 40% on its word), `tally` (up to ~30 tiles fill while it counts), `stamp` (a word like SOLD OUT stamps in) | `num`, `at`, `variant?`, `sub?: [{text, at, key?}]`, `stamp?: {text, at}` |
+| `kinetic_number` | yes | one figure, centred on the grid, with an optional sub-line of words under it, each on its word (key words in foil); variants `hook` (default: the figure on its marker), `counter` (counts from 40% to land on `land_at`), `tally` (a counter beside 1-30 tiles that fill as the count passes each one's share), `stamp` (a word like SOLD OUT stamps across the figure on its word, which hands the figure to the foil); any variant may carry a `stamp` | `num`, `at`, `variant?`, `land_at?` (counter, tally; else `at` + 0.35 s), `sub?: [{text, at, key?}]`, `stamp?: {text, at}`, `tiles?` (tally, 1-30; else the value, capped at 30), `out_at?`, `band?`, `hide_captions?` |
 | `goal_bar` | planned | the goal layout without a panel: the % on the left with a small cap-aligned %, the target on the same baseline under a small GOAL label; a pill track with its remainder, a fill with a glow band and a landing flare, a target marker that pops on the target and rings on "goal" | `pct`, `target`, `at_pct`, `at_target`, `at_goal?` |
 | `step_build` | planned | a tracker of 2-4 slots (`empty`, `filled`, `question`) that returns at several beats with the same slots and identity | `slots: [{label, at, state}]`, `id?` |
 | `stat_stack` | planned | 2-4 stats landing one by one in a compact stack or row, beside a real screenshot card | `stats: [{num, label, at}]`, `layout?: "stack" \| "row"` |
@@ -63,6 +63,17 @@ held lockup pushes 1.5%; it leaves in one feathered sweep, left to right. Counte
 | `cta_follow` | planned | a handle and a follow button that presses on "follow", an optional avatar circle | `handle`, `at`, `follow_at`, `avatar?` (an image file) |
 
 A planned format is registered but stops the render with its name until its branch builds it.
+
+A `kinetic_number` beat, the spoken words filled in by plan.py (`word` -> `at`, `land_word` -> `land_at`; the
+sub-line's and the stamp's `word` -> `at`):
+
+```json
+{"word": "two", "kind": "anim", "type": "kinetic_number", "hold_s": 4,
+ "props": {"num": "200", "variant": "counter", "word": "two", "land_word": "hundred",
+           "sub": [{"text": "croissants", "word": "croissants"}], "stamp": {"text": "sold out", "word": "sold"}}}
+```
+
+Keep the sub-line to a few words (it sits on one line under the figure); the stamp's word is said, never added.
 
 ## Building a format (for the renderer)
 
