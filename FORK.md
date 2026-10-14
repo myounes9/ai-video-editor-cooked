@@ -103,6 +103,8 @@ chain of figures) have no page to capture. The kinetic family sets them over the
   grounding on every figure, not a text card once opted in.
 - `references/kinetic.md` (new), pointers in `motion.md` and `contracts.md`; tests in `remotion/test/kinetic/` and
   `test/determinism.mjs`.
+- `KineticNumber.tsx` (`p2-number`): `kinetic_number`, one figure with a sub-line; variants hook, counter, tally and
+  stamp. Cases in `remotion/test/kinetic/kinetic_number.json`.
 
 Fork-only: a look this fork chose (words over the footage, a house key colour), against upstream's rule that a
 number is shown inside the page that published it. Off unless a style opts in.

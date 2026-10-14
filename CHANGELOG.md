@@ -4,6 +4,15 @@ What changed for every user, newest first.
 
 ## Unreleased
 
+- Kinetic titles: `kinetic_number` is built (fork, opt-in with the rest of the family). One key figure, centred on
+  the grid, pulled on as ink on its marker on its word, with an optional sub-line under it whose words land on
+  their own words (never before the figure + 0.15 s; key words in foil). Variants: `hook` (the default), `counter`
+  (counts from 40% of its value and reads final on `land_at`, its spoken word, where the landing hit fires),
+  `tally` (a counter beside a grid of 1-30 tiles, each filling on the frame the count passes its share, the last
+  with a short flare) and `stamp` (a word such as REJECTED slams across the figure on its word with a short jolt and
+  one ring; the figure hands off from its marker to the foil, so it stays key-coloured). Props in
+  `references/kinetic.md`; made-up cases in `remotion/test/kinetic/kinetic_number.json`, two of them in
+  `test/determinism.mjs`.
 - Kinetic titles, the foundation (fork, opt-in). A style that sets `"graphics": {"kinetic": true}` (style.json or
   taste) may set key figures and words over the footage on their spoken words; every other style plans and checks
   exactly as before. The renderer has a new family under `remotion/src/kinetic/` with one design system for all of
