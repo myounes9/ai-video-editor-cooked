@@ -59,8 +59,8 @@ held lockup pushes 1.5%; it leaves in one feathered sweep, left to right. Counte
 | `goal_bar` | yes | where the speaker is on the way to a goal, without a panel: the % on the left as the key figure on its marker, counting from 40% to land on its count word (its % at 0.56x, cap-aligned); the target in foil on the same baseline at the grid's right edge under a small GOAL label (the label's cap top on the figure's); under both a pill track the width of the grid whose remainder always shows, its fill running with the count, a glow band and a 6-frame flare on the landing; a target marker on the track's end pops on the target's word and sends two rings on "goal"; on a wide frame the module keeps the vertical grid's width, centred | `pct` ("50%" or 50), `target` ("20K", "€20K"), `at_pct` (or `at`), `count_at?` (when the count reads final; default `at_pct` + 0.3), `at_target`, `at_goal?`, `label?` ("GOAL"), `out_at?`, `band?`, `hide_captions?` |
 | `step_build` | yes | a tracker of 2-4 slots in fixed columns that returns at several beats with the same slots and identity: an empty slot is a smoked glass well with its number, a filled one gets its label pulled on by the marker and handed to the foil (gold edge), a question slot is a dashed well with a "?"; a slot popping in makes room first | `slots: [{label?, state: "empty" \| "filled" \| "question" \| "off", at?}]` (2-4), `id?`, `join_in?`, `join_out?`, `out_at?`, `band?`, `hide_captions?` |
 | `stat_stack` | yes | 2-4 stats landing one by one in a compact row or stack (figure on the marker, then foil; label beside it, on its baseline, wrapping onto two lines that span the figure's caps), in the part of the band a capture beside it leaves free | `stats: [{num, label?, at, label_at?}]` (2-4), `layout?: "row" \| "stack"`, `beside?: [x, y, w, h]`, `out_at?`, `band?`, `hide_captions?` |
-| `kinetic_title` | planned | a key-word title for a beat with no number: 1-3 lines, each word on its time, key words in the key colour | `lines: [{words: [{text, at, key?}]}]` |
-| `cta_follow` | planned | a handle and a follow button that presses on "follow", an optional avatar circle | `handle`, `at`, `follow_at`, `avatar?` (an image file) |
+| `kinetic_title` | yes | a key-word title for a beat with no number: 1-3 lines, each word on its time; a line with a key word is set in Anton, its key words pulled on by the marker (a run of key words shares one marker) and handed to the foil when the next run comes; a line with none is a supporting line in Oswald at 0.4x; centred on the grid | `lines: [{words: [{text, at, key?}]}]` (1-3 lines, one word per entry), `out_at?`, `band?`, `hide_captions?` |
+| `cta_follow` | yes | a handle over a follow button, beside an optional avatar circle with a key-colour ring; the button wipes in as an empty well and on "follow" presses, the marker pulled across it turns it to FOLLOWING with a check, and two rings leave it | `handle` (no spaces; an "@" is added), `at`, `follow_at`, `avatar?` (an image file, "images/..."), `button?` ("Follow"), `pressed?` ("Following"), `out_at?`, `band?`, `hide_captions?` |
 
 A goal beat in visuals.json: `{"word": "forty", "kind": "anim", "type": "goal_bar", "hold_s": 5, "props": {"pct": "40%",
 "word_pct": "forty", "count_word": "percent", "target": "20K", "word_target": "20k", "word_goal": "goal"}}` (plan.py
@@ -106,6 +106,25 @@ A stat_stack may share its beat with a real capture of the same numbers (a dashb
 that card's box as `beside` (the card up with it longest; a `beside` in props wins) and the stats keep 24 px clear of
 it, in the biggest part of the band it leaves free (above, below, left or right), as a row or a stack, whichever fits
 biggest unless `layout` says.
+
+**kinetic_title**: give each title word as its own entry and let plan.py time it. A word's `word` (else its own
+`text`) is matched in reading order from the card's start, so a repeated word lands on its own later saying; a
+word given an `at` and no `word` keeps it. Mark the one to three words that carry the beat `"key": true`; keep the
+other lines short (they set small). Not for a number: use `kinetic_number` or `number_chain`.
+
+```json
+{"word": "this", "kind": "anim", "type": "kinetic_title", "hold_s": 3,
+ "props": {"lines": [{"words": [{"text": "this"}, {"text": "is"}, {"text": "how"}]}, {"words": [{"text": "sourdough", "key": true}]},
+                     {"words": [{"text": "we"}, {"text": "bake"}, {"text": "by"}, {"text": "hand"}]}]}}
+```
+
+**cta_follow**: on the spoken ask ("give me a follow"). `follow_word` gives `follow_at`. Use the creator's real
+handle and, when they have one, their profile picture as `avatar`; never a made-up account.
+
+```json
+{"word": "give", "kind": "anim", "type": "cta_follow", "hold_s": 4,
+ "props": {"handle": "@yourhandle", "follow_word": "follow", "avatar": "images/avatar.jpg"}}
+```
 
 ## Building a format (for the renderer)
 

@@ -13,6 +13,21 @@ What changed for every user, newest first.
   one ring; the figure hands off from its marker to the foil, so it stays key-coloured). Props in
   `references/kinetic.md`; made-up cases in `remotion/test/kinetic/kinetic_number.json`, two of them in
   `test/determinism.mjs`.
+- Kinetic titles: `kinetic_title` and `cta_follow` are built (fork, opt-in, `references/kinetic.md`).
+  `kinetic_title` sets a key-word title for a beat with no number: 1-3 lines, every word on its own spoken word. A
+  line holding a key word is set in Anton, its key words pulled on by the highlighter marker (a run of key words
+  shares one marker whose edge runs on word by word) and handed to the gold foil when the next run comes, so they
+  stay key-coloured; a line with none is a supporting line in Oswald at 0.4x; the title is centred on the grid at
+  the largest size the face band allows. plan.py times each title word in reading order (a repeated word lands on
+  its own later saying). `cta_follow` puts the handle over a follow button beside an optional avatar circle with a
+  key-colour ring: the button wipes in as an empty well and on "follow" dips, the marker is pulled across it to
+  FOLLOWING with a check drawn on, and two rings leave it (`follow_word` -> `follow_at`). Both hold at least 1.2 s
+  after their last landing and hide the word captions while up. quality.py judges a kinetic title's landing on
+  the last word it shows in its first 0.6 s (it builds word by word), and skips the box-card edge and outline-jitter
+  reads on opted-in kinetic cards (their box is the frame; their parts rise one by one by design). Tests: made-up
+  cases in `remotion/test/kinetic/kinetic_title.json` and `cta_follow.json` (one each in `test/determinism.mjs`),
+  and the plan.py and quality.py demos.
+
 - Kinetic titles, the foundation (fork, opt-in). A style that sets `"graphics": {"kinetic": true}` (style.json or
   taste) may set key figures and words over the footage on their spoken words; every other style plans and checks
   exactly as before. The renderer has a new family under `remotion/src/kinetic/` with one design system for all of
