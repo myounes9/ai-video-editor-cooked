@@ -19,9 +19,10 @@ place: a clip whose last check passed replaces its beat with a video_card of the
 clip_motion.py so the motion finishes 0.25 s before the card leaves; the template beat is kept under "fallback"
 and comes back for a clip that did not pass. Never edits anything but visuals.json and images/motion-*.mp4.
 Beside kinetic titles (style.json graphics.kinetic, the fork): the number beats are the titles', so pick takes only a
-list, a flow, a before and after or a mechanism on a line no number beat says, never up with one, and no more clips
-than the graphics budget's room (split_beats; style-edit references/kinetic.md "Motion clips"); place keeps a beat's
-template when the titles have since taken its line. Kinetic titles off: upstream's picks, beats_for unchanged.
+list, a flow, a before and after or a mechanism on a line no number beat says, ending before the next such line, never
+up with one, and only the clips the graphics budget keeps, each ranked as its template as plan.py ranks it
+(split_beats; style-edit references/kinetic.md "Motion clips"); place keeps a beat's template when the titles have
+since taken its line. Kinetic titles off: upstream's picks, beats_for unchanged.
 """
 import argparse
 import json
@@ -210,13 +211,14 @@ def beats_for(visuals, words, aspect="9:16", max_n=8, images=(), types=MOTION_TY
 BEATS_FOR_SHA = "e8bf4d2f053be04fc716c6de1858937e7e17b00bd41924d9bc4e10420b212e46"
 
 
-def kinetic_split(style, words, visuals, images=()):
-    """What kinetic titles leave to the clips (style-edit kinetic_beats.split), or None when they are off."""
+def kinetic_split(style, words, visuals, images=(), duration=None):
+    """What kinetic titles leave to the clips (style-edit kinetic_beats.split), or None when they are off. duration:
+    the cut's length (kinetic_beats.video_duration), as plan.py counts the budget over it."""
     if not (((style or {}).get("graphics") or {}).get("kinetic")):
         return None
     sys.path[:0] = [str(SKILL.parent / "style-edit" / "scripts"), str(PLUGIN / "lib")]
     import kinetic_beats
-    return kinetic_beats.split(words, style, visuals, images)
+    return kinetic_beats.split(words, style, visuals, images, duration)
 
 
 def split_types(types):
@@ -229,35 +231,59 @@ def split_types(types):
 
 def split_veto(b, split, sents, types):
     """Why beat b (beats.json) is no clip beside kinetic titles, or None: a type the titles own, its line says a number
-    beat, or it is up with one."""
+    beat, its window runs over a line one says (a count left out over the budget too: the line is still the titles'),
+    or it is up with a kept one."""
     if b["type"] not in types:
         return "the numbers are the kinetic titles'"
     si = next((k for k, s in enumerate(sents) if s["start"] <= b["start"] + CARD_LEAD_S <= s["end"] + 0.05), None)
     if si is not None and any(sents[si]["start"] <= t <= sents[si]["end"] + 0.05 for t in split["said"]):
         return "its line says a number beat (the kinetic titles')"
-    k = next((x for x in split["kept"] if x[0] - 1e-6 <= b["start"] < x[1]), None)
+    end = b["start"] + b["dur"]
+    t = next((t for t in split["said"] if b["start"] < t < end), None)
+    if t is not None:
+        return f"it runs over a number said at {t:.2f} s (the kinetic titles')"
+    k = next((x for x in split["kept"] if b["start"] < x[1] - 0.01 and x[0] < end - 0.01), None)
     if k:
         return f"up with the kinetic title at {k[0]:.2f}-{k[1]:.2f} s"
     return None
+
+
+def word_ref(words, i):
+    """{"word", "nth"} for words[i], as word_time finds it again."""
+    return {"word": words[i]["text"], "nth": sum(clean(w["text"]) == clean(words[i]["text"]) for w in words[:i + 1])}
+
+
+def fit_window(b, end, words, face, aspect):
+    """Beat b ending at `end` instead: its WORDS and canvas for the shorter window."""
+    dur = round(end - b["start"], 2)
+    return {**b, "dur": dur, "size": card_size(face, b["start"], b["start"] + dur, aspect),
+            "words": [{"w": w["text"], "t": round(w["start"] - b["start"], 2)} for w in words
+                      if b["start"] <= w["start"] < b["start"] + dur]}
 
 
 def split_beats(visuals, words, aspect="9:16", max_n=8, images=(), types=MOTION_TYPES, amount=1.0, face=None,
                 split=None, style=None):
     """beats_for beside kinetic titles (split: kinetic_split). The number beats are the titles' (style-edit
     references/kinetic.md "Motion clips"): a beat whose line a number beat says a part of (kept or not) is no clip, and
-    reaches beats_for as a time only (images), so a clip before it still ends in time, as do the kept beats; types
-    lose the counter and the logo cluster (split_types); a beat routed elsewhere on a line that only says a figure the
-    titles would not draw ("twice") is a clip of the line's other kind; none is up with a kept beat (split_veto); and
-    at most the graphics budget's room: budget.allowance less the number beats and every card that is no candidate
-    here (kinetic_beats.real_cards), the longest windows kept. Returns (beats, {"room", "lines"})."""
+    reaches beats_for as a time only (images), as does the first word of every such line and each kept beat's word, so
+    a clip before one ends before it: its WORDS never hold a figure the titles own; types lose the counter and the
+    logo cluster (split_types); a beat routed elsewhere on a line that only says a figure the titles would not draw
+    ("twice") is a clip of the line's other kind; none is up with a kept beat (split_veto); one that would end under
+    kinetic_beats.GAP_S before a kept beat ends that much before it when it still holds MIN_S, as plan.py space_kinetic
+    would cut it; and only the clips the graphics budget keeps: budget.pick over the number beats, every card that is
+    no candidate here (kinetic_beats.real_cards) and the candidates, a clip ranked as its template, as plan.py
+    budget_cards picks them. Returns (beats, {"room", "cands", "lines", "others"})."""
     sys.path[:0] = [str(SKILL.parent / "style-edit" / "scripts"), str(PLUGIN / "lib")]
     import kinetic_beats
     import route
+    from ai_editor import budget
     types = split_types(types)
     sents = sentences(words)
     sent_of = lambda t: next((k for k, s in enumerate(sents) if s["start"] <= t <= s["end"] + 0.05), None)   # noqa: E731
     covered = {k for k, s in enumerate(sents) if any(s["start"] <= t <= s["end"] + 0.05 for t in split["said"])}
     times = list(images) + [{"word": w, "nth": n} for _, _, w, n in split["kept"] if w]
+    firsts = {round(sents[k]["start"], 3) for k in covered}
+    times += [word_ref(words, i) for i, w in enumerate(words) if round(w["start"], 3) in firsts]   # a number line's first word
     animated = {sent_of(t) for v in visuals if v.get("kind") == "anim" and v.get("word")
                 for t in [word_time(words, v["word"], v.get("nth", 1))] if t is not None}
     view = []
@@ -273,18 +299,26 @@ def split_beats(visuals, words, aspect="9:16", max_n=8, images=(), types=MOTION_
                 v = {**v, "kind": "anim", "type": pt, "props": {}, "promoted": v.get("kind")}
                 animated.add(si)
         view.append(v)
-    out = [b for b in beats_for(view, words, aspect, max_n, times, types, amount, face) if not split_veto(b, split, sents, types)]
+    out = []
+    for b in beats_for(view, words, aspect, max_n, times, types, amount, face):
+        k0 = min((x[0] for x in split["kept"] if x[0] > b["start"] + 1e-6), default=None)
+        if k0 is not None and b["start"] + b["dur"] > k0 - kinetic_beats.GAP_S and k0 - kinetic_beats.GAP_S - b["start"] >= MIN_S:
+            b = fit_window(b, k0 - kinetic_beats.GAP_S, words, face, aspect)   # plain footage before the title
+        if not split_veto(b, split, sents, types):
+            out.append(b)
     cand = {b["i"] for b in out}
     take = kinetic_beats.Take(words)
     others = kinetic_beats.real_cards(take, [v for k, v in enumerate(visuals) if k not in cand], images, style or {},
-                                      take.w[-1]["end"] if take.w else 0)
-    room = max(0, (split["allowance"] or 0) - split["units"] - len(others))
-    if len(out) > room:   # the longest windows, as beats_for keeps them
-        keep = {b["id"] for b in sorted(out, key=lambda b: -b["dur"])[:room]}
-        out = [b for b in out if b["id"] in keep]
+                                      split.get("duration") or (take.w[-1]["end"] if take.w else 0))
+    items = [dict(c) for c in split.get("cards", [])] + [{"start": s, "end": e, "type": kind} for s, e, kind, _ in others]
+    items += [{"start": b["start"], "end": b["start"] + b["dur"], "type": "video_card", "_clip": b["id"],
+               **({"strength": visuals[b["i"]]["strength"]} if visuals[b["i"]].get("strength") is not None else {})} for b in out]
+    keep = {x.get("_clip") for x in budget.pick(items, split["allowance"] or 0)}
+    n = len(out)
+    out = [b for b in out if b["id"] in keep]
     for b in out:
-        b["beside_kinetic"] = True   # the brief: this edit's figures are its kinetic titles
-    return out, {"room": room, "lines": len(covered)}
+        b["beside_kinetic"] = True   # the brief: this edit's number beats are its kinetic titles
+    return out, {"room": len(out), "cands": n, "lines": len(covered), "others": len(others)}
 
 
 def card_size(face, start, end, aspect="9:16"):
@@ -386,15 +420,17 @@ def pick(edit, max_n=8):
     if board_size(style):   # Motion design: logos and flows land as tiles on the canvas, never as clips
         types = tuple(t for t in types if t not in ("logo_cluster", "flow"))
     view = [v.get("fallback") or v for v in visuals]
-    split = kinetic_split(style, words, view, images)
+    split = kinetic_split(style, words, view, images, cut_duration(edit, style))
     if split is None:   # upstream's picks, unchanged
         beats = beats_for(view, words, aspect, max_n, images, types, cfg["amount"], face)
     else:
         beats, how = split_beats(view, words, aspect, max_n, images, types, cfg["amount"], face, split, style)
-        print(f"kinetic titles on: the numbers are theirs ({how['lines']} line(s) a number beat says, no clip there, never a "
-              f"counter); clips only for a list, a flow, a before and after or a mechanism, in the graphics budget's room: "
-              f"{how['room']} of {split['allowance']} ({split['units']} number graphic(s) and the edit's other cards first)"
-              + ("" if how["room"] else ": the budget is full, no clip") + " (style-edit references/kinetic.md \"Motion clips\")")
+        print(f"kinetic titles on: the numbers are theirs ({how['lines']} line(s) a number beat says, no clip there or "
+              f"over it, never a counter); clips only for a list, a flow, a before and after or a mechanism, in the one "
+              f"graphics budget: {split['allowance']} in all, {split['units']} number graphic(s) and {how['others']} other "
+              f"card(s) of the edit; {how['room']} of {how['cands']} candidate clip(s) kept, ranked as their templates "
+              "(plan.py keeps the same)" + ("" if how["room"] or not how["cands"] else ": the budget is full, no clip")
+              + " (style-edit references/kinetic.md \"Motion clips\")")
     pj = edit / "plan.json"
     if pj.exists() and pj.stat().st_mtime >= (edit / "visuals.json").stat().st_mtime:   # the plan dropped some beats
         kept = {(c.get("trigger_word") or "").lower() for c in json.loads(pj.read_text(encoding="utf-8")).get("cards", [])}
@@ -451,8 +487,8 @@ def pick(edit, max_n=8):
             before=b["before"], after=b["after"], words=json.dumps(b["words"]), type=b["type"], props=json.dumps(b["props"]),
             images=", ".join(str((edit / "images" / p).resolve()) for p in pics) or "none", motion=Path(__file__).resolve(), rounds=ROUNDS,
             env=f'AI_EDITOR_HOME="{os.environ["AI_EDITOR_HOME"]}" ' if os.environ.get("AI_EDITOR_HOME") else "",
-            start=("- This edit's figures are its kinetic titles (words over the footage, on their own words): draw no counter "
-                   "and no figure of your own.\n" if b.get("beside_kinetic") else "") +
+            start=("- This edit's number beats are its kinetic titles' (words over the footage, on other lines): no counter, "
+                   "nothing counting up, and no figure but those said in `WORDS`, shown as said.\n" if b.get("beside_kinetic") else "") +
                   ("- A clip the user approved before is in `start.html` (same kind of beat). You may start from its design, "
                   "but re-time every part to this clip's `WORDS` and change it for this line: an unchanged copy fails "
                   "`check`.\n- Notes on this clip, if any: `notes.md` beside this brief. Do what they say.\n\n"
@@ -664,6 +700,16 @@ def place(edit):
     return placed, back
 
 
+def cut_duration(edit, style):
+    """The cut's length plan.py counts the graphics budget over (style-edit kinetic_beats.video_duration), or None:
+    kinetic titles off, or no cut.mp4 (the last word's end then)."""
+    if not (((style or {}).get("graphics") or {}).get("kinetic")):
+        return None
+    sys.path[:0] = [str(SKILL.parent / "style-edit" / "scripts"), str(PLUGIN / "lib")]
+    import kinetic_beats
+    return kinetic_beats.video_duration(edit)
+
+
 def place_veto(edit, visuals):
     """For place: beat -> why it stays its template beside kinetic titles (split_veto), else None. Kinetic titles off,
     or no captions.json and style.json to read them from: never."""
@@ -673,7 +719,7 @@ def place_veto(edit, visuals):
     style = effective(edit)
     words = [w for w in json.loads((edit / "captions.json").read_text(encoding="utf-8")) if w.get("type", "word") == "word"]
     images = json.loads((edit / "images.json").read_text(encoding="utf-8")) if (edit / "images.json").exists() else []
-    split = kinetic_split(style, words, [v.get("fallback") or v for v in visuals], images)
+    split = kinetic_split(style, words, [v.get("fallback") or v for v in visuals], images, cut_duration(edit, style))
     if split is None:
         return lambda b: None
     sents, types = sentences(words), split_types(allowed_types(motion_cfg(style)))
@@ -971,13 +1017,28 @@ def demo_kinetic():
     assert picked([stray, lst, ba], on) == picked([{**stray, "kind": "card"}, lst, ba], on) == [("notes", "need"), ("side_by_side", "Before")]
     assert picked([stray, lst, ba], {}) == [("likes", "sold"), ("notes", "need"), ("side_by_side", "Before")]
     assert picked([{**stray, "kind": "card"}, lst, ba], {"graphics": {"kinetic": False}})[0] == ("likes", "sold")
-    # a full budget: the number beat and two real screenshots fill 12 a minute over this take (3), so no clip
+    # a full budget: the number beat and two real screenshots fill 12 a minute over this take (3), so no clip (budget.pick
+    # keeps the screenshots, each clear of the cards it keeps, over the templates the clips would replace)
     twelve = {"graphics": {"kinetic": True, "kinetic_per_min": 12}}
-    shots = [{"src": "images/a.png", "word": "every", "nth": 1}, {"src": "images/b.png", "word": "shop.", "nth": 1}]
+    shots = [{"src": "images/a.png", "word": "every", "nth": 1}, {"src": "images/b.png", "word": "salt", "nth": 1}]
     sp = kinetic_split(twelve, words, [lst, ba], shots)
     assert (sp["allowance"], sp["units"]) == (3, 1) and picked([lst, ba], twelve, shots) == [], sp
-    # ... one screenshot leaves room for one: the longest window (the before and after, 3 s)
+    # ... one screenshot leaves room for one: the one plan.py keeps, the before and after (the list's card would sit
+    # right after the screenshot, so budget.pick spreads the picks out to the before and after)
     assert picked([lst, ba], twelve, shots[:1]) == [("side_by_side", "Before")]
+    # a likes beat is never a clip beside the titles, even on a line whose only figure they would not draw ("twice")
+    tw = kinetic_beats.timed("Our bakery sold 340 loaves in one week. It was a long and happy week for every one of us "
+                             "at the shop. The new oven is twice as fast as the old one.")
+    twice = {"word": "oven", "nth": 1, "kind": "anim", "type": "likes", "hold_s": 2.5, "props": {}}
+    assert [b["type"] for b in split_beats([twice], tw, split=kinetic_split(on, tw, [twice]), style=on)[0]] == []
+    assert [b["type"] for b in beats_for([twice], tw)] == ["likes"]   # kinetic titles off: upstream's counter clip
+    # a placed clip counts as its template, so placing one never moves the number beats (kinetic_beats.refresh's
+    # fingerprint and the beats found stay the same)
+    wtk = kinetic_beats.Take(words)
+    placed_ba = placed_beat(ba, {"word": "Before", "nth": 1, "dur": 3.0, "size": [1200, 630], "id": "02-before"}, "images/m.mp4", 0, 0)
+    assert kinetic_beats.real_cards(wtk, [placed_ba], (), on, 15.0) == kinetic_beats.real_cards(wtk, [ba], (), on, 15.0)
+    assert kinetic_beats.beats(words, on, [lst, placed_ba]) == kinetic_beats.beats(words, on, [lst, ba])
+    demo_windows()
     # a clip is never up with a number beat (one written by hand, held long); without the titles it is upstream's clip
     held = {"word": "340", "nth": 1, "kind": "anim", "type": "kinetic_number", "hold_s": 6.0, "props": {"num": "340", "word": "340"}}
     near = {"word": "It", "nth": 1, "kind": "anim", "type": "notes", "hold_s": 3.0}
@@ -1006,12 +1067,86 @@ def demo_kinetic():
             got = pick(e)
             assert [(b["type"], b["word"]) for b in got] == [("notes", "need"), ("side_by_side", "Before")], got
             assert all(b["beside_kinetic"] for b in got) and len(stale["beats"]) == 3
-            assert "draw no counter" in (e / "motion" / got[0]["id"] / "brief.md").read_text(encoding="utf-8")
+            assert "no counter, nothing counting up" in (e / "motion" / got[0]["id"] / "brief.md").read_text(encoding="utf-8")
+            # the budget is counted over the cut's length, as plan.py probes it: a 30 s cut.mp4 gives 15 at 30 a minute
+            # where the last word's end (15 s) gives 8
+            import contextlib
+            import io
+            run(["ffmpeg", "-v", "error", "-f", "lavfi", "-i", "color=c=gray:s=108x192:d=30:r=30", "-pix_fmt", "yuv420p", e / "cut.mp4"])
+            said = io.StringIO()
+            with contextlib.redirect_stdout(said):
+                pick(e)
+            assert "budget: 15 in all" in said.getvalue(), said.getvalue()
         finally:
             if keep is None:
                 os.environ.pop("AI_EDITOR_HOME", None)
             else:
                 os.environ["AI_EDITOR_HOME"] = keep
+
+
+def demo_windows():
+    """Beside kinetic titles, a clip's window and its plan: it never runs over a number line (a count the budget left
+    out included), it ends kinetic_beats.GAP_S before a kept number beat as plan.py would cut it, and plan.py keeps the
+    very clip pick built when the candidates outnumber the room (a made-up take)."""
+    sys.path[:0] = [str(SKILL.parent / "style-edit" / "scripts"), str(PLUGIN / "lib")]
+    import contextlib
+    import io
+    import kinetic_beats
+    import plan
+    words = kinetic_beats.timed("Our bakery sold 340 loaves in one week. It was a long and happy week for every one of us "
+                                "at the shop. We bake rye, spelt, oat and wheat. We sold 900 rolls. Then we rested and went "
+                                "home to sleep for a while.")
+    rolls = next(w["start"] for w in words if w["text"] == "900")
+    line = next(w["start"] for w in words if w["text"] == "We" and w["start"] > 9)   # "We sold 900 rolls."
+    bake = {"word": "bake", "nth": 1, "kind": "anim", "type": "notes", "hold_s": 4.0}
+
+    def planned(style, visuals, images=()):
+        """split_beats' clips, placed as motion.py place would, then plan.build: (clips, plan cards, stderr)."""
+        sp = kinetic_split(style, words, visuals, images)
+        out = split_beats(visuals, words, images=images, split=sp, style=style)[0]
+        vis = list(visuals)
+        for b in out:
+            vis[b["i"]] = placed_beat(visuals[b["i"]], b, f"images/motion-{b['id']}.mp4", 0.2, b["dur"] - 0.6)
+        meta = {"video": "cut.mp4", "width": 1080, "height": 1920, "fps": 30, "duration": words[-1]["end"]}
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            p = plan.build(style, words, meta, images=images, visuals=kinetic_beats.beats(words, style, vis, images) + vis)
+        return out, p["cards"], err.getvalue()
+    # 8 a minute (2 here): the hook and the list's template fill it, so the 900 is left out; the list's clip still ends
+    # before the line that says it, and none of its WORDS is the figure
+    eight = {"graphics": {"kinetic": True, "kinetic_per_min": 8}, "captions": {"words_per_caption": 3}}
+    sp = kinetic_split(eight, words, [bake])
+    assert [k[2] for k in sp["kept"]] == ["340"] and rolls in sp["said"], sp
+    out, cards, _ = planned(eight, [bake])
+    assert [b["word"] for b in out] == ["bake"] and out[0]["start"] + out[0]["dur"] <= line - CARD_LEAD_S + 1e-6, out
+    assert not any(w["w"] in ("900", "rolls.") for w in out[0]["words"]), out[0]["words"]
+    vc = next(c for c in cards if plan.motion_clip(c))
+    assert vc["end"] < rolls, vc
+    # ... a stale beats.json (picked before the titles took that line) runs over it: place keeps the template
+    sents = sentences(words)
+    stale = {**out[0], "dur": 4.0}
+    assert "runs over a number" in (split_veto(stale, sp, sents, split_types(MOTION_TYPES)) or ""), stale
+    # 10 a minute (3): the 900 is kept; the clip ends GAP_S before its title, so plan.py space_kinetic leaves it whole
+    # and its motion finishes on screen
+    ten = {**eight, "graphics": {"kinetic": True, "kinetic_per_min": 10}}
+    out, cards, _ = planned(ten, [bake])
+    k900 = next(c for c in cards if c.get("trigger_word") == "900")
+    vc = next(c for c in cards if plan.motion_clip(c))
+    assert abs(out[0]["start"] + out[0]["dur"] - (k900["start"] - kinetic_beats.GAP_S)) < 0.011, (out, k900)
+    assert abs(vc["end"] - (out[0]["start"] + out[0]["dur"])) < 1e-6 and vc["end"] <= k900["start"] - kinetic_beats.GAP_S, (vc, k900)
+    # candidates over the room: one screenshot, a list and a before and after at 10 a minute (3, the hook included):
+    # pick builds one, and plan.py keeps that very clip (ranked as its template), the list's template left out
+    tb = kinetic_beats.timed("Our bakery sold 340 loaves in one week. It was a long and happy week for every one of us "
+                             "at the shop. You need flour, water, salt and time. Before we kneaded every loaf by hand, now "
+                             "the mixer does it. We love what we do here every day.")
+    lst = {"word": "need", "nth": 1, "kind": "anim", "type": "notes", "hold_s": 2.5}
+    ba = {"word": "Before", "nth": 1, "kind": "anim", "type": "side_by_side", "hold_s": 3.0, "props": {"a": "hand", "b": "mixer"}}
+    shot = [{"src": "images/a.png", "word": "every", "nth": 1}]
+    words = tb
+    out, cards, err = planned(ten, [lst, ba], shot)
+    assert [b["word"] for b in out] == ["Before"], out
+    assert [plan.motion_clip(c) for c in cards if plan.motion_clip(c)] == [out[0]["id"]] and "motion clip" not in err, (cards, err)
+    assert [plan.kind_of(c) for c in cards] == ["kinetic_number", "shot", "video_card"], [plan.kind_of(c) for c in cards]
 
 
 def main():

@@ -66,8 +66,8 @@ local, so they are made now and made again if the cut changes.
 4b. **Motion briefs:** `python3 "<ROOT>/skills/motion/scripts/motion.py" pick EDIT`. It turns the beats that need
    motion into clip folders under `EDIT/motion/` and prints each id. Return every `EDIT/motion/<id>/brief.md`
    in `motion_briefs` (the caller launches the clip-builders; you never build clips). It prints `not installed`:
-   return `[]`, the template cards stay. With kinetic titles on it leaves the number lines to them and builds no more
-   clips than the graphics budget's room (it prints both): never move or add a beat to get a clip.
+   return `[]`, the template cards stay. With kinetic titles on it leaves the number lines to them and builds only the
+   clips the graphics budget keeps (it prints both): never move or add a beat to get a clip.
 5. **Fetch, face, plan and sheet**, one Bash call (face.py does not need the captures, so it runs beside them;
    `edit.py stills` runs `check.py plan` itself and stops on a FAIL):
 

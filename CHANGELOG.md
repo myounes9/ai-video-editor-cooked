@@ -9,16 +9,19 @@ What changed for every user, newest first.
   run, a tracker; kept or left out over the budget), or a kinetic beat written by hand, gets no motion hint in
   beats.json and no motion clip, whatever card visual-prep put there, and route.py gives no `counter` hint at all. The
   motion skill's clips take only a list, a flow, a before and after or a mechanism (an app at work, a curve) on the
-  lines left, never while a number card is up, and they share the one graphics budget (`graphics.kinetic_per_min`,
-  real screenshots included): `motion.py pick` builds no more than the room the number beats and the other cards
-  leave, none when it is full, and tells each clip-builder to draw no figure; plan.py counts the clips last in the same
-  budget and drops, with a warning, a clip past it or up with a kinetic card; `motion.py place` keeps a beat's template
-  when the titles have since taken its line. The beat finder reads a placed clip as the beat it replaced, so building
-  one never moves the number beats. Kinetic titles off, or a split or board layout, the motion skill is upstream's,
-  unchanged (its picker is upstream's code byte for byte, which the demo checks). Guidance: style-edit
-  `references/kinetic.md` "Motion clips", motion `references/clip-brief-card.md`, visual-prep and template-filler.
-  Tests: route.py, motion.py and plan.py demos (a made-up take with a count, a list and a before and after; a full
-  budget; kinetic titles off; a stray clip on a number card).
+  lines left, ending before the next number line (so a clip's words never hold a figure the titles own, one left out
+  over the budget included) and 1 s before a kept number card, never while one is up. They share the one graphics
+  budget (`graphics.kinetic_per_min`, real screenshots included, counted over the cut's length as plan.py probes it):
+  a clip is ranked as the template it replaced, `motion.py pick` builds only the clips that budget keeps (none when it
+  is full) and tells each clip-builder to draw no counter and no figure but those said in its words; plan.py drops,
+  with a warning, a clip up with a kinetic card and gives its slot to the next strongest; `motion.py place` keeps a
+  beat's template when the titles have since taken its line or its window. The beat finder reads a placed clip as the
+  beat it replaced, so building one never moves the number beats. Kinetic titles off, or a split or board layout, the
+  motion skill is upstream's, unchanged (its picker is upstream's code byte for byte, which the demo checks).
+  Guidance: style-edit `references/kinetic.md` "Motion clips", motion `references/clip-brief-card.md`, visual-prep and
+  template-filler. Tests: route.py, motion.py and plan.py demos (a made-up take with a count, a list and a before and
+  after; a full budget; a clip before a count left out over the budget, and before a kept one; more candidates than
+  room, built and planned alike; kinetic titles off; a stray clip on a number card; a 50/50 layout; the cut's length).
 
 ## ai-editor 2.7.8-cooked.1 (fork, 2026-10-14)
 

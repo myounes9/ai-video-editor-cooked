@@ -906,14 +906,16 @@ def split(words, style, visuals=(), images=(), duration=None):
     kept: [(start, end, word, nth)] the beats the finder keeps (none with graphics.kinetic_auto false) and those written
           by hand (word None: visuals.json has them), as plan.py places them: no clip is up with one;
     units: the graphics the kept automatic beats are (a tracker one; hand-written ones count as the edit's own cards);
-    allowance: budget.allowance for the take.
+    cards: the kept automatic beats as budget.pick ranks them in plan.py (start, end, type and props, strength, hook);
+    allowance: budget.allowance for the take; duration: the length it is counted over.
     visuals: the edit's beats as written, a motion clip read as its template; the automatic beats are found again (as
-    route.py does), so a pick before plan.py ever ran sees the same beats."""
+    route.py does), so a pick before plan.py ever ran sees the same beats. duration: the cut's length, as plan.py
+    probes it (video_duration), else the last word's end."""
     if not ((style or {}).get("graphics") or {}).get("kinetic") or ((style or {}).get("layout") or {}).get("mode") in ("split", "board"):
         return None
     take = Take(words)
     if not take.w:
-        return {"said": [], "kept": [], "units": 0, "allowance": 0}
+        return {"said": [], "kept": [], "units": 0, "cards": [], "allowance": 0, "duration": 0}
     duration = duration or take.w[-1]["end"]
     view = [v.get("fallback") or v for v in visuals]
     kept, cands = find(words, style, [v for v in view if v.get("auto") != AUTO], images, duration)
@@ -924,8 +926,25 @@ def split(words, style, visuals=(), images=(), duration=None):
     for s, e, _, _ in real_cards(take, hand, (), style, duration):   # written by hand (or by a review note): the titles' too
         said.add(round(s + LEAD_S, 3))
         spans.append((s, e, None, None))   # its own beat in visuals.json times the clip before it
+    cards = [{"start": c.s, "end": c.e, "anim": {"type": b["type"], "props": b["props"]}, "strength": b["strength"],
+              "hook": bool(b.get("hook"))} for c in kept for b in [c.beat()]]
     return {"said": sorted(said), "kept": sorted(spans, key=lambda x: x[:2]), "units": len({unit(c) for c in kept}),
-            "allowance": budget.allowance(style, duration)}
+            "cards": cards, "allowance": budget.allowance(style, duration), "duration": duration}
+
+
+def video_duration(edit):
+    """The cut's length in seconds as plan.py reads it (ffprobe of cut.mp4 in the edit folder), or None without one, so
+    the budget and the beats found before the plan are counted over the same length as the plan's."""
+    import subprocess
+    video = Path(edit) / "cut.mp4"
+    if not video.exists():
+        return None
+    try:
+        out = subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", str(video)],
+                             capture_output=True, text=True, timeout=60).stdout.strip()
+        return float(out) if out else None
+    except (OSError, ValueError, subprocess.TimeoutExpired):
+        return None
 
 
 # ---------------------------------------------------------------- the edit

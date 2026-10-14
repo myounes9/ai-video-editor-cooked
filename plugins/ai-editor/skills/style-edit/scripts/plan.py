@@ -1038,58 +1038,47 @@ def thin_cards(cards, duration, cards_cfg):
     return [c for c in cards if id(c) in keep]
 
 
-def motion_clip(card):
-    """The motion skill's id for a card that is one of its clips (motion.py place: a video_card with props.motion)."""
-    return ((card.get("anim") or {}).get("props") or {}).get("motion")
-
-
 def budget_cards(cards, duration, style, titles=True):
     """With kinetic titles on (style.json graphics.kinetic) the video gets one count of graphics in all, kinetic and
     real-source cards together: graphics.kinetic_per_min a minute (default 8; lib/ai_editor/budget.py, which the beat
     finder reads too). The strongest are kept (budget.pick: the hook always, then each beat's "strength", spread out
-    so plain footage stays between them); each card left out is named on stderr. The motion skill's clips come last
-    (clips_in_room): the numbers are the titles' (titles False: the layout drops kinetic cards, so a clip may be up with
-    one). Kinetic off: thin_cards' rules, clips counted as any card."""
+    so plain footage stays between them); each card left out is named on stderr. A motion skill clip is ranked as the
+    template it replaced (references/kinetic.md "Motion clips": motion.py split_beats picks them the same way), and
+    one up while a kept kinetic card is goes, its slot to the next strongest (the number is the title's; titles False:
+    the layout drops kinetic cards, so a clip may be up with one). Kinetic off: thin_cards' rules."""
     sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "lib"))
     from ai_editor import budget
     n = budget.allowance(style, duration)
     if n is None:
         return thin_cards(cards, duration, style.get("cards"))
-    rest = [c for c in cards if not motion_clip(c)]
-    keep = budget.pick(rest, n)
-    gone = [c for c in rest if not any(c is k for k in keep)]
+    pool = list(cards)
+    while True:
+        keep = budget.pick(pool, n)
+        kin = [c for c in keep if kind_of(c) in KINETIC] if titles else []
+        up = [(c, k) for c in keep if motion_clip(c) for k in kin if c["start"] < k["end"] and k["start"] < c["end"]][:1]
+        if not up:
+            break
+        c, k = up[0]
+        print(f"warning: motion clip {motion_clip(c)} on '{c['trigger_word']}' dropped: it is up with the {kind_of(k)} on "
+              f"'{k['trigger_word']}' ({k['start']:.1f}-{k['end']:.1f} s), and the numbers are the kinetic titles' "
+              "(references/kinetic.md \"Motion clips\")", file=sys.stderr)
+        pool = [x for x in pool if x is not c]
+    gone = [c for c in pool if not any(c is k for k in keep)]
     if gone:
         print(f"note: {len(gone)} card{'s' if len(gone) != 1 else ''} left out (at most {n} graphics in "
               f"{duration:.0f} s: graphics.kinetic_per_min {budget.per_min(style):g}; the strongest kept): " +
               ", ".join(f"{c.get('trigger_word') or kind_of(c)}@{c['start']:.1f}s" for c in gone), file=sys.stderr)
-    keep = keep + clips_in_room([c for c in cards if motion_clip(c)], keep, n, titles)
+    clips = [c for c in gone if motion_clip(c)]
+    if clips:   # motion.py builds only what this keeps: one left out was built against another plan
+        print(f"warning: {len(clips)} motion clip{'s' if len(clips) != 1 else ''} left out by the graphics budget ({n}): " +
+              ", ".join(f"{motion_clip(c)}@{c['start']:.1f}s" for c in clips) + " (motion.py pick again after a change)",
+              file=sys.stderr)
     return [c for c in cards if any(c is k for k in keep)]
 
 
-def clips_in_room(clips, kept, n, titles=True):
-    """The motion skill's clips beside kinetic titles (references/kinetic.md "Motion clips"): they count in the same
-    budget, after the number beats and every other card kept. A clip up while a kept kinetic card is goes (the number is
-    the title's); the rest fill the room left, the longest first (as motion.py picks them). Each one dropped is named
-    in a warning."""
-    from ai_editor import budget
-    kin = [c for c in kept if kind_of(c) in KINETIC] if titles else []
-    out = []
-    for c in clips:
-        k = next((k for k in kin if c["start"] < k["end"] and k["start"] < c["end"]), None)
-        if k:
-            print(f"warning: motion clip {motion_clip(c)} on '{c['trigger_word']}' dropped: it is up with the {kind_of(k)} on "
-                  f"'{k['trigger_word']}' ({k['start']:.1f}-{k['end']:.1f} s), and the numbers are the kinetic titles' "
-                  "(references/kinetic.md \"Motion clips\")", file=sys.stderr)
-        else:
-            out.append(c)
-    room = max(0, n - len({budget.group(c) or id(c) for c in kept}))
-    fit = sorted(out, key=lambda c: (-(c["end"] - c["start"]), c["start"]))[:room]
-    over = [c for c in out if not any(c is f for f in fit)]
-    if over:
-        print(f"warning: {len(over)} motion clip{'s' if len(over) != 1 else ''} dropped: the graphics budget ({n}) is full "
-              f"after the number beats and the other cards, {room} left: " +
-              ", ".join(f"{motion_clip(c)}@{c['start']:.1f}s" for c in over), file=sys.stderr)
-    return [c for c in out if any(c is f for f in fit)]
+def motion_clip(card):
+    """The motion skill's id for a card that is one of its clips (motion.py place: a video_card with props.motion)."""
+    return ((card.get("anim") or {}).get("props") or {}).get("motion")
 
 
 def template_props(kind, props):
@@ -1130,6 +1119,8 @@ def anim_items(visuals, edit_dir=None, style=None):
             continue
         item = {k: v[k] for k in ("word", "nth", "box", "entrance", "hold_s", "layout", "transition_in", "transition_out", "focus", "heading",
                                   "strength", "hook") if k in v}
+        if "strength" not in item and (v.get("fallback") or {}).get("strength") is not None:   # a motion clip: its template's
+            item["strength"] = v["fallback"]["strength"]
         if "box" in v:
             item["_own_box"] = True
         if v["type"] in KINETIC:   # its own lane: it may share the frame with a capture (stat_stack beside a screenshot)
@@ -3573,16 +3564,24 @@ def demo():
     assert [c["trigger_word"] for c in kept] == ["hook", "stats", "menu", "money"], kept
     assert len(budget_cards(bg, 30.0, {"graphics": {"kinetic": True, "kinetic_per_min": 4}})) == 2
     assert len(budget_cards(bg, 30.0, {"cards": {"per_min": 4}})) == 2 and budget_cards(bg, 30.0, {}) == bg
-    # the motion skill's clips beside kinetic titles: last in the same budget; one up with a kept kinetic card goes,
-    # the rest fill the room the others leave, the longest first; kinetic titles off, a clip is any card (thin_cards)
-    clip = lambda a, b, i: {"start": a, "end": b, "trigger_word": i, "anim": {"type": "video_card", "props": {"motion": i}}}  # noqa: E731
+    # the motion skill's clips beside kinetic titles: in the same budget, each ranked as the template it replaced (a real
+    # card's strength unless the template had one); one up with a kept kinetic card goes and its slot goes to the next
+    # strongest; kinetic titles off, a clip is any card (thin_cards)
+    clip = lambda a, b, i, **x: {"start": a, "end": b, "trigger_word": i, "anim": {"type": "video_card", "props": {"motion": i}}, **x}  # noqa: E731
     cb = sorted(bg + [clip(1.0, 3.4, "01-on"), clip(15.0, 17.5, "02-free"), clip(27.0, 28.5, "03-short")], key=lambda c: c["start"])
     got = [c["trigger_word"] for c in budget_cards(cb, 30.0, {"graphics": {"kinetic": True, "kinetic_per_min": 14}})]   # 7
-    assert got == ["hook", "stats", "menu", "goal", "02-free", "title", "money"], got   # 6 others, room for 1: the longest
+    assert got == ["hook", "stats", "menu", "goal", "02-free", "money", "03-short"], got   # the weak title (0.2) goes
     assert [c["trigger_word"] for c in budget_cards(cb, 30.0, {"graphics": {"kinetic": True, "kinetic_per_min": 30}})] == \
         [c["trigger_word"] for c in cb if c["trigger_word"] != "01-on"]   # room for all: only the one on the hook goes
     assert "01-on" in [c["trigger_word"] for c in budget_cards(cb, 30.0, {"graphics": {"kinetic": True, "kinetic_per_min": 30}}, titles=False)]
-    assert not any(motion_clip(c) for c in budget_cards(cb, 30.0, {"graphics": {"kinetic": True}}))   # a full budget: none
+    # a clip keeps exactly the slots its template would: the same picks at every rate, clips or templates
+    as_tpl = lambda cs: [{**c, "anim": {"type": "notes", "props": {}}} if motion_clip(c) else c for c in cs]  # noqa: E731
+    cf = [c for c in cb if c["trigger_word"] != "01-on"]
+    for pm in (4, 8, 10, 14, 30):
+        st_ = {"graphics": {"kinetic": True, "kinetic_per_min": pm}}
+        assert [c["start"] for c in budget_cards(cf, 30.0, st_)] == [c["start"] for c in budget_cards(as_tpl(cf), 30.0, st_)], pm
+    weak = [clip(c["start"], c["end"], c["trigger_word"], _strength=0.3) if motion_clip(c) else c for c in cf]   # weak templates
+    assert not any(motion_clip(c) for c in budget_cards(weak, 30.0, {"graphics": {"kinetic": True}}))   # a full budget: none
     assert budget_cards(cb, 30.0, {}) == cb and budget_cards(cb, 30.0, {"cards": {"per_min": 4}}) == thin_cards(cb, 30.0, {"per_min": 4})
     # ... end to end: a stray clip (motion.py place) on the hook's figure goes, one on the list line stays
     import kinetic_beats
@@ -3598,6 +3597,12 @@ def demo():
     assert [motion_clip(c) for c in kp["cards"] if motion_clip(c)] == ["02-need"] and kind_of(kp["cards"][0]) == "kinetic_number", kp["cards"]
     assert [motion_clip(c) for c in build({"captions": {"words_per_caption": 3}}, kw, kmeta, visuals=kvis[-2:])["cards"]] == \
         ["01-loaves", "02-need"]   # kinetic titles off: upstream's plan keeps both
+    # ... a 50/50 layout drops kinetic cards, so nothing there is the titles': both clips stay
+    sl = build({**ks, "layout": {"mode": "split"}}, kw, kmeta, visuals=kvis)
+    assert [motion_clip(c) for c in sl["cards"] if motion_clip(c)] == ["01-loaves", "02-need"], sl["cards"]
+    # ... a clip's template's own strength is the clip's: a weak one loses its slot as the template would
+    assert anim_items([{**vc("need", "02-need"), "fallback": {"word": "need", "type": "notes", "strength": 0.3}}],
+                      None, ks)[0]["strength"] == 0.3
     # the face band: over the hair and forehead of the head while the card is up, under the Reels header, KIN_GAP above
     # the brows (BROW_SHARE down face.json's head box), the head as drawn when the zooms are given
     hb = lambda *bx: {"step_s": 0.5, "heads": [{"t": i / 2, "box": list(bx[min(len(bx) - 1, i // 10)])} for i in range(30)]}  # noqa: E731

@@ -248,7 +248,9 @@ The paths, and how each holds it:
 
 - `skills/style-edit/scripts/kinetic_beats.py`: `split()` (None when `graphics.kinetic` is off, or in a split or board
   layout, which drop kinetic cards): `said`, every time a number beat says a part, kept or left out, and the word of a
-  hand-written kinetic beat; `kept`, the kept beats' spans; `units`; `allowance`. `MOTION_KINDS` = list, flow,
+  hand-written kinetic beat; `kept`, the kept beats' spans; `units`; `cards`, the kept beats as budget.pick ranks
+  them; `allowance` and `duration` (the cut's length, `video_duration`, as plan.py probes cut.mp4, else the last
+  word's end; route.py and motion.py pass it). `MOTION_KINDS` = list, flow,
   before_after, ui_demo, curve (no counter, no logo cluster). `real_cards` reads a placed clip as its `fallback`, so
   placing one never changes the fingerprint or moves a number beat.
 - `route.py`: `motion_kind(text, numbers=True)` and `motion_hint(beat, split)`: with the split on, a line with a
@@ -256,27 +258,43 @@ The paths, and how each holds it:
   before.
 - `skills/motion/scripts/motion.py`: upstream's `beats_for` untouched (`BEATS_FOR_SHA`, checked by the demo: refresh it
   after an upstream change to `beats_for`, once `split_beats` still fits round it). `pick` calls it as upstream does
-  when `kinetic_split` is None; else `split_beats` wraps it: a beat on a covered line reaches it as a time only (so the
-  clip before it still ends in time), the kept beats' words too, the types lose `likes` and `logo_cluster`, a card on
-  a line whose only figure the titles would not draw ("twice") is a clip of the line's other kind, `split_veto` drops a
-  clip up with a kept beat, and the room (`allowance - units - real_cards of every non-candidate`) keeps the longest.
-  Each clip gets `beside_kinetic`, and its brief says to draw no figure. `place` keeps the template for a beat the
-  split now vetoes (`place_veto`). `motion_cfg` (the style page's Motion section, home.py) is unchanged.
-- `skills/style-edit/scripts/plan.py`: `budget_cards` keeps the others with `budget.pick`, then `clips_in_room`: a clip
-  (`motion_clip`: a video_card with props.motion) up with a kept kinetic card goes, the rest fill the room left, the
-  longest first, each dropped one in a warning. `titles=False` in a split or board layout. Kinetic off: `thin_cards`,
-  as before.
+  when `kinetic_split` is None; else `split_beats` wraps it: a beat on a covered line reaches it as a time only, as do
+  the first word of every covered line and the kept beats' words, so a clip before one ends before it (its WORDS never
+  hold a figure the titles own); the types lose `likes` and `logo_cluster`; a card on a line whose only figure the
+  titles would not draw ("twice") is a clip of the line's other kind; a clip ending under `GAP_S` before a kept beat
+  ends `GAP_S` before it when it still holds `MIN_S` (`fit_window`: plan.py `space_kinetic` would cut it there, before
+  its motion finished); `split_veto` drops a clip on a covered line, over a `said` time or up with a kept beat; and
+  `budget.pick` over the number beats (`cards`), every non-candidate card (`real_cards`) and the candidates, each
+  ranked as its template, keeps the clips plan.py will. Each clip gets `beside_kinetic`, and its brief says: no
+  counter, nothing counting up, no figure but those in its WORDS. `place` keeps the template for a beat the split now
+  vetoes (`place_veto`, with the cut's length too). `motion_cfg` (the style page's Motion section, home.py) is
+  unchanged.
+- `skills/style-edit/scripts/plan.py`: `budget_cards` picks every card with `budget.pick`, a clip (`motion_clip`: a
+  video_card with props.motion) in its template's place (`anim_items` gives it the template's `strength`); a kept clip
+  up with a kept kinetic card goes with a warning and the pick runs again, its slot to the next strongest; a clip the
+  budget leaves out is named in a warning. `titles=False` in a split or board layout. Kinetic off: `thin_cards`, as
+  before.
 - Guidance: style-edit `references/kinetic.md` "Motion clips" (and "For the AI steps"), SKILL.md step 5 (same line),
   motion `references/clip-brief-card.md` "Beside kinetic titles" with one sentence in its SKILL.md step 1,
   `agents/visual-prep.md` (steps 4 and 4b), `agents/template-filler.md` (rule 9). The clip-builder agent reads only
   its brief, which carries the rule.
 - Tests (made-up takes): route.py demo (a count, a list, a before and after: no hint on the count with the split on,
   upstream's `counter` off; a number left out over the budget still the titles'), motion.py demo (the same take: the
-  count to the titles, the list and before and after to clips; a stray counter never picked; a full budget picks none,
-  one free slot the longest; a hand-written number beat held long blocks a clip; kinetic off equal to upstream's
-  `beats_for` through `pick`, and the source hash; `place` keeps the template once the titles are turned on), plan.py
-  demo (`budget_cards` with clips; end to end, a stray clip on the hook's figure dropped, the list clip kept; off, both
-  kept).
+  count to the titles, the list and before and after to clips; a stray counter never picked, nor a `likes` on a
+  "twice" line; a full budget picks none, one free slot the one plan.py keeps; a hand-written number beat held long
+  blocks a clip; a placed clip leaves `real_cards` and the beats found unchanged; kinetic off equal to upstream's
+  `beats_for` through `pick`, and the source hash; `place` keeps the template once the titles are turned on; the
+  budget over a 30 s cut.mp4; `demo_windows`, end to end through plan.build: a clip before a count left out over the
+  budget ends before its line and a stale window over it is vetoed, a clip before a kept count ends `GAP_S` before it
+  and plan.py leaves it whole, and with more candidates than room plan.py keeps the clip pick built), plan.py demo
+  (`budget_cards` with clips: a clip keeps exactly its template's slots at every rate; end to end, a stray clip on the
+  hook's figure dropped, the list clip kept; off, both kept; a 50/50 layout keeps both).
+- Review fixes (second pass): a clip's window could run over the next number line when its beat was left out over the
+  budget (its brief then held the figure); pick's room counted none of the candidates it left as templates, so plan.py
+  dropped the clip it had built; a clip timed to end at a kept number card was cut 1 s short by `space_kinetic`;
+  route.py printed the motion rule in a 50/50 or board layout; the brief's "no figure" contradicted a list of
+  measures; motion and route counted the budget over the last word, plan.py over the cut. Each has a demo case;
+  19 targeted mutations of the split are all caught by the demos.
 
 Fork-only: upstream has no kinetic titles. Off unless a style opts in.
 

@@ -155,23 +155,27 @@ there), the motion skill runs as upstream's, unchanged.
 - **What the titles own**: every line a number beat says a part of, kept or left out (a count, money, a percent or a
   goal, a chain, a stat run, a counter or tally, a step tracker: whatever `kinetic_beats.py` finds there, or a kinetic
   beat written by hand). Such a line gets no motion hint in beats.json (route.py `motion_hint`), and `motion.py pick`
-  makes no clip on it, whatever visual-prep routed there (a `likes` card, a capture whose line says the figure).
+  makes no clip on it, whatever visual-prep routed there (a `likes` card, a capture whose line says the figure), nor
+  one that runs over it: a clip before a number line ends before that line starts, so its words never hold the figure.
 - **What the clips may take**: a list (`notes`), a flow (`flow`), a before and after (`side_by_side`) or a mechanism (an
   app at work: `progress`, `terminal`, `chat`, `toasts`; a `curve`), on a line no number beat says, never up while a
   kept number beat is. Never a counter (`likes`): route.py gives no `counter` hint, and a line that only says a figure
   the titles would not draw ("twice as fast, cheaper, smaller and quieter") is the clip of its other kind. A
-  `logo_cluster` stays its template card. The clip's brief says to draw no counter or figure of its own.
-- **One budget**: the clips count in `graphics.kinetic_per_min` with everything else. `pick` builds at most the room
-  left: the allowance less the number graphics and every card that is no candidate (captures, screenshots, posts,
-  logos, titles), the longest windows first; the budget full, it builds none and says so. A clip only ever replaces a
-  beat that was already a card (its template, kept under `fallback`), and the beat finder reads it as that beat, so
-  placing one never moves the number beats.
-- **plan.py** (`budget_cards`, `clips_in_room`) keeps the budget in one count: the number beats and the other cards
-  first (budget.pick), the clips after them, the longest first; a clip up with a kept kinetic card, or past the room,
-  is dropped with a warning naming it. `motion.py place` keeps a beat's template when the titles have since taken its
-  line (kinetic titles turned on after the pick).
+  `logo_cluster` stays its template card. The clip's brief says: no counter, nothing counting up, and no figure but
+  those said in its own words, as said. A clip that would end under 1 s before a kept number beat ends 1 s before it
+  when it still holds 1 s (plan.py would cut it there, before its motion finished).
+- **One budget**: the clips count in `graphics.kinetic_per_min` with everything else, over the cut's length (cut.mp4,
+  as plan.py probes it). A clip only ever replaces a beat that was already a card (its template, kept under
+  `fallback`): it is ranked as that template, and the beat finder reads it as that beat, so placing one never moves
+  the number beats. `pick` builds only the clips budget.pick keeps among the number beats, the other cards
+  (captures, screenshots, posts, logos, titles) and the candidates, as plan.py will; the budget full, none, and it
+  says so.
+- **plan.py** (`budget_cards`) keeps the budget in one count with budget.pick, each clip in its template's place; a
+  clip up with a kept kinetic card is dropped with a warning and its slot goes to the next strongest; a clip the
+  budget leaves out is named in a warning (pick again after a change). `motion.py place` keeps a beat's template when
+  the titles have since taken its line or its window (kinetic titles turned on after the pick).
 - By hand: `route.py beats` prints the rule and the room; `motion.py pick` prints how many lines the numbers own and
-  the room it built to.
+  how many candidate clips the budget keeps.
 
 ## From the user's rules (settings)
 

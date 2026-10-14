@@ -274,17 +274,24 @@ def demo():
     sp0 = kinetic_beats.split(mw, {"graphics": {"kinetic": True, "kinetic_per_min": 0}})
     assert sp0["kept"] == [] and motion_hint(mb[0], sp0) is None and motion_hint(mb[1], sp0) == "list"
     assert motion_hint({"text": "it is twice as fast, cheaper, smaller and quieter", "start": 90, "end": 92}, sp0) == "list"
+    # ... a number line that also lists things is still the titles' when the budget leaves its beat out: no list hint
+    lw = kinetic_beats.timed("Our bakery sold 340 loaves in one week. It took 3 weeks, 2 helpers and 900 dollars, flour, "
+                             "salt and time.")
+    lb = sentences(lw)
+    sl0 = kinetic_beats.split(lw, {"graphics": {"kinetic": True, "kinetic_per_min": 0}})
+    assert sl0["kept"] == [] and motion_kind(lb[1]["text"], numbers=False) == "list" and motion_hint(lb[1], sl0) is None, sl0
     print("route ok")
 
 
-def mark_kinetic(beats, words, style, visuals=(), images=()):
+def mark_kinetic(beats, words, style, visuals=(), images=(), duration=None):
     """With kinetic titles on (and graphics.kinetic_auto not false): each sentence kinetic_beats.py gives a number beat
     gets "kinetic": its type (plan.py places them itself, around the edit's own cards: visuals, images). Returns how
-    many graphics they are (a tracker's beats are one), or None when off."""
+    many graphics they are (a tracker's beats are one), or None when off. duration: the cut's length, as plan.py
+    counts the budget over it (kinetic_beats.video_duration), else the last word's end."""
     import kinetic_beats
     if not kinetic_beats.auto_on(style or {}):
         return None
-    kept = kinetic_beats.find(words, style, [v for v in visuals if v.get("auto") != kinetic_beats.AUTO], images)[0]
+    kept = kinetic_beats.find(words, style, [v for v in visuals if v.get("auto") != kinetic_beats.AUTO], images, duration)[0]
     for b in beats:
         b["kinetic"] = next((c.type for c in kept if b["start"] <= c.s + kinetic_beats.LEAD_S <= b["end"] + 0.05), None)
     return len({kinetic_beats.unit(c) for c in kept})
@@ -349,12 +356,16 @@ def main():
             print("the creator's mix: " + ", ".join(f"{k} {v:.0%}" for k, v in sorted(pref.items(), key=lambda kv: -kv[1])))
         load = lambda n: json.loads((edit / n).read_text(encoding="utf-8")) if (edit / n).exists() else []  # noqa: E731
         vis, imgs = load("visuals.json"), load("images.json")
-        nk = mark_kinetic(beats, words, style, vis, imgs)
+        vdur = None
+        if kinetic_on(style):   # the cut's length, as plan.py counts the budget over it
+            import kinetic_beats
+            vdur = kinetic_beats.video_duration(edit)
+        nk = mark_kinetic(beats, words, style, vis, imgs, vdur)
         room = None
         if nk is not None:   # one graphics budget: the number beats and the user's own cards first (budget.py)
             import kinetic_beats
             from ai_editor import budget
-            dur = words[-1]["end"] if words else 0
+            dur = vdur or (words[-1]["end"] if words else 0)
             mine = len(kinetic_beats.real_cards(kinetic_beats.Take(words), [v for v in vis if v.get("auto") != kinetic_beats.AUTO],
                                                 imgs, style, dur))
             room = budget.remaining(style, dur, nk + mine)
@@ -367,10 +378,11 @@ def main():
         split = None
         if kinetic_on(style):   # the numbers are the titles': motion hints only on the lines they leave (motion_hint)
             import kinetic_beats
-            split = kinetic_beats.split(words, style, vis, imgs)
-            print("motion clips (the motion skill): only a list, a flow, a before and after or a mechanism, on a line no "
-                  "number beat says, never a counter, and they count in the same budget; they take no more than its room "
-                  "(references/kinetic.md \"Motion clips\")")
+            split = kinetic_beats.split(words, style, vis, imgs, vdur)
+            if split is not None:   # a 50/50 or board layout drops kinetic cards: upstream's hints there
+                print("motion clips (the motion skill): only a list, a flow, a before and after or a mechanism, on a line "
+                      "no number beat says, never a counter, and they count in the same budget, each in its template's "
+                      "place (references/kinetic.md \"Motion clips\")")
         n, pm = want(beats, style, room)
         if n and room is None:
             print(f"the creator's rate: {pm:g} cards a minute, so {n} in this video; \"want\" marks the sentences to give one"
