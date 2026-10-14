@@ -18,6 +18,10 @@ check_composition.py (advisory), a 1 fps contact sheet and a 10 fps strip of the
 place: a clip whose last check passed replaces its beat with a video_card of the render, `start_s` set from
 clip_motion.py so the motion finishes 0.25 s before the card leaves; the template beat is kept under "fallback"
 and comes back for a clip that did not pass. Never edits anything but visuals.json and images/motion-*.mp4.
+Beside kinetic titles (style.json graphics.kinetic, the fork): the number beats are the titles', so pick takes only a
+list, a flow, a before and after or a mechanism on a line no number beat says, never up with one, and no more clips
+than the graphics budget's room (split_beats; style-edit references/kinetic.md "Motion clips"); place keeps a beat's
+template when the titles have since taken its line. Kinetic titles off: upstream's picks, beats_for unchanged.
 """
 import argparse
 import json
@@ -200,6 +204,89 @@ def beats_for(visuals, words, aspect="9:16", max_n=8, images=(), types=MOTION_TY
     return out
 
 
+# beats_for exactly as upstream ai-editor 2.7.8 ships it: with kinetic titles off pick calls it as upstream does, and
+# split_beats only wraps it. The demo checks this hash; when an upstream merge changes beats_for, check split_beats
+# still fits round it, then put the new hash here.
+BEATS_FOR_SHA = "e8bf4d2f053be04fc716c6de1858937e7e17b00bd41924d9bc4e10420b212e46"
+
+
+def kinetic_split(style, words, visuals, images=()):
+    """What kinetic titles leave to the clips (style-edit kinetic_beats.split), or None when they are off."""
+    if not (((style or {}).get("graphics") or {}).get("kinetic")):
+        return None
+    sys.path[:0] = [str(SKILL.parent / "style-edit" / "scripts"), str(PLUGIN / "lib")]
+    import kinetic_beats
+    return kinetic_beats.split(words, style, visuals, images)
+
+
+def split_types(types):
+    """The template formats a clip may replace beside kinetic titles: kinetic_beats.MOTION_KINDS' (a list, a flow, a
+    before and after, a mechanism), never a counter's ("likes") or a logo cluster's."""
+    sys.path.insert(0, str(SKILL.parent / "style-edit" / "scripts"))
+    import kinetic_beats
+    return tuple(t for t in types if any(t in KINDS[k] for k in kinetic_beats.MOTION_KINDS))
+
+
+def split_veto(b, split, sents, types):
+    """Why beat b (beats.json) is no clip beside kinetic titles, or None: a type the titles own, its line says a number
+    beat, or it is up with one."""
+    if b["type"] not in types:
+        return "the numbers are the kinetic titles'"
+    si = next((k for k, s in enumerate(sents) if s["start"] <= b["start"] + CARD_LEAD_S <= s["end"] + 0.05), None)
+    if si is not None and any(sents[si]["start"] <= t <= sents[si]["end"] + 0.05 for t in split["said"]):
+        return "its line says a number beat (the kinetic titles')"
+    k = next((x for x in split["kept"] if x[0] - 1e-6 <= b["start"] < x[1]), None)
+    if k:
+        return f"up with the kinetic title at {k[0]:.2f}-{k[1]:.2f} s"
+    return None
+
+
+def split_beats(visuals, words, aspect="9:16", max_n=8, images=(), types=MOTION_TYPES, amount=1.0, face=None,
+                split=None, style=None):
+    """beats_for beside kinetic titles (split: kinetic_split). The number beats are the titles' (style-edit
+    references/kinetic.md "Motion clips"): a beat whose line a number beat says a part of (kept or not) is no clip, and
+    reaches beats_for as a time only (images), so a clip before it still ends in time, as do the kept beats; types
+    lose the counter and the logo cluster (split_types); a beat routed elsewhere on a line that only says a figure the
+    titles would not draw ("twice") is a clip of the line's other kind; none is up with a kept beat (split_veto); and
+    at most the graphics budget's room: budget.allowance less the number beats and every card that is no candidate
+    here (kinetic_beats.real_cards), the longest windows kept. Returns (beats, {"room", "lines"})."""
+    sys.path[:0] = [str(SKILL.parent / "style-edit" / "scripts"), str(PLUGIN / "lib")]
+    import kinetic_beats
+    import route
+    types = split_types(types)
+    sents = sentences(words)
+    sent_of = lambda t: next((k for k, s in enumerate(sents) if s["start"] <= t <= s["end"] + 0.05), None)   # noqa: E731
+    covered = {k for k, s in enumerate(sents) if any(s["start"] <= t <= s["end"] + 0.05 for t in split["said"])}
+    times = list(images) + [{"word": w, "nth": n} for _, _, w, n in split["kept"] if w]
+    animated = {sent_of(t) for v in visuals if v.get("kind") == "anim" and v.get("word")
+                for t in [word_time(words, v["word"], v.get("nth", 1))] if t is not None}
+    view = []
+    for v in visuals:
+        t = word_time(words, v["word"], v.get("nth", 1)) if v.get("word") else None
+        si = sent_of(t) if t is not None else None
+        if si in covered:   # the titles' line: a time only
+            times.append({"word": v["word"], "nth": v.get("nth")})
+            v = {**v, "word": None}
+        elif si is not None and v.get("kind") != "anim" and si not in animated and promote_type(sents[si]["text"]) == "likes":
+            pt = promote_type(route.NUM.sub(" ", sents[si]["text"]))
+            if pt in types:
+                v = {**v, "kind": "anim", "type": pt, "props": {}, "promoted": v.get("kind")}
+                animated.add(si)
+        view.append(v)
+    out = [b for b in beats_for(view, words, aspect, max_n, times, types, amount, face) if not split_veto(b, split, sents, types)]
+    cand = {b["i"] for b in out}
+    take = kinetic_beats.Take(words)
+    others = kinetic_beats.real_cards(take, [v for k, v in enumerate(visuals) if k not in cand], images, style or {},
+                                      take.w[-1]["end"] if take.w else 0)
+    room = max(0, (split["allowance"] or 0) - split["units"] - len(others))
+    if len(out) > room:   # the longest windows, as beats_for keeps them
+        keep = {b["id"] for b in sorted(out, key=lambda b: -b["dur"])[:room]}
+        out = [b for b in out if b["id"] in keep]
+    for b in out:
+        b["beside_kinetic"] = True   # the brief: this edit's figures are its kinetic titles
+    return out, {"room": room, "lines": len(covered)}
+
+
 def card_size(face, start, end, aspect="9:16"):
     """The card canvas for a clip up from start to end: 1200 wide, as tall as the band above the head lets a
     800 px card be (plan.py: the band runs from the safe top, 13.1%, to 2% over the head, and a card may tuck its
@@ -298,7 +385,16 @@ def pick(edit, max_n=8):
     types = allowed_types(cfg)
     if board_size(style):   # Motion design: logos and flows land as tiles on the canvas, never as clips
         types = tuple(t for t in types if t not in ("logo_cluster", "flow"))
-    beats = beats_for([v.get("fallback") or v for v in visuals], words, aspect, max_n, images, types, cfg["amount"], face)
+    view = [v.get("fallback") or v for v in visuals]
+    split = kinetic_split(style, words, view, images)
+    if split is None:   # upstream's picks, unchanged
+        beats = beats_for(view, words, aspect, max_n, images, types, cfg["amount"], face)
+    else:
+        beats, how = split_beats(view, words, aspect, max_n, images, types, cfg["amount"], face, split, style)
+        print(f"kinetic titles on: the numbers are theirs ({how['lines']} line(s) a number beat says, no clip there, never a "
+              f"counter); clips only for a list, a flow, a before and after or a mechanism, in the graphics budget's room: "
+              f"{how['room']} of {split['allowance']} ({split['units']} number graphic(s) and the edit's other cards first)"
+              + ("" if how["room"] else ": the budget is full, no clip") + " (style-edit references/kinetic.md \"Motion clips\")")
     pj = edit / "plan.json"
     if pj.exists() and pj.stat().st_mtime >= (edit / "visuals.json").stat().st_mtime:   # the plan dropped some beats
         kept = {(c.get("trigger_word") or "").lower() for c in json.loads(pj.read_text(encoding="utf-8")).get("cards", [])}
@@ -355,10 +451,12 @@ def pick(edit, max_n=8):
             before=b["before"], after=b["after"], words=json.dumps(b["words"]), type=b["type"], props=json.dumps(b["props"]),
             images=", ".join(str((edit / "images" / p).resolve()) for p in pics) or "none", motion=Path(__file__).resolve(), rounds=ROUNDS,
             env=f'AI_EDITOR_HOME="{os.environ["AI_EDITOR_HOME"]}" ' if os.environ.get("AI_EDITOR_HOME") else "",
-            start="- A clip the user approved before is in `start.html` (same kind of beat). You may start from its design, "
+            start=("- This edit's figures are its kinetic titles (words over the footage, on their own words): draw no counter "
+                   "and no figure of your own.\n" if b.get("beside_kinetic") else "") +
+                  ("- A clip the user approved before is in `start.html` (same kind of beat). You may start from its design, "
                   "but re-time every part to this clip's `WORDS` and change it for this line: an unchanged copy fails "
                   "`check`.\n- Notes on this clip, if any: `notes.md` beside this brief. Do what they say.\n\n"
-                  if b.get("start_from") else "- Notes on this clip, if any: `notes.md` beside this brief. Do what they say.\n\n"),
+                  if b.get("start_from") else "- Notes on this clip, if any: `notes.md` beside this brief. Do what they say.\n\n")),
             encoding="utf-8")
     (root / "beats.json").write_text(json.dumps({"clock": "cut", "look": look, "beats": beats}, indent=1), encoding="utf-8")
     if not gsap.exists():
@@ -529,6 +627,7 @@ def place(edit):
     doc = json.loads((edit / "motion" / "beats.json").read_text(encoding="utf-8"))
     by_id = {v.get("motion"): i for i, v in enumerate(visuals) if v.get("motion")}
     placed, back = [], []
+    veto = place_veto(edit, visuals)
     for b in doc["beats"]:
         d = edit / "motion" / b["id"]
         gates = json.loads((d / "gates.json").read_text(encoding="utf-8")) if (d / "gates.json").exists() else {}
@@ -540,7 +639,11 @@ def place(edit):
             continue
         orig = visuals[i].get("fallback") or visuals[i]
         render = d / "renders" / "clip.mp4"
-        if gates.get("pass") and render.exists() and not gates.get("rejected"):
+        why = veto(b)
+        if why:   # kinetic titles turned on, or their beats moved, since pick: the template stays
+            visuals[i] = orig
+            back.append(f"{b['id']} -> {b['type']} template ({why})")
+        elif gates.get("pass") and render.exists() and not gates.get("rejected"):
             (edit / "images").mkdir(exist_ok=True)
             import hashlib   # the name changes with the render, so edit.py patch re-renders only this clip's span
             tag = hashlib.sha256(render.read_bytes()).hexdigest()[:8]
@@ -559,6 +662,22 @@ def place(edit):
     if back:
         print(f"template {len(back)}: " + "; ".join(back))
     return placed, back
+
+
+def place_veto(edit, visuals):
+    """For place: beat -> why it stays its template beside kinetic titles (split_veto), else None. Kinetic titles off,
+    or no captions.json and style.json to read them from: never."""
+    edit = Path(edit)
+    if not ((edit / "style.json").exists() and (edit / "captions.json").exists()):
+        return lambda b: None
+    style = effective(edit)
+    words = [w for w in json.loads((edit / "captions.json").read_text(encoding="utf-8")) if w.get("type", "word") == "word"]
+    images = json.loads((edit / "images.json").read_text(encoding="utf-8")) if (edit / "images.json").exists() else []
+    split = kinetic_split(style, words, [v.get("fallback") or v for v in visuals], images)
+    if split is None:
+        return lambda b: None
+    sents, types = sentences(words), split_types(allowed_types(motion_cfg(style)))
+    return lambda b: split_veto(b, split, sents, types)
 
 
 def status(edit):
@@ -817,7 +936,82 @@ def demo():
                 os.environ.pop("AI_EDITOR_HOME", None)
             else:
                 os.environ["AI_EDITOR_HOME"] = keep
+    demo_kinetic()
     print("demo ok")
+
+
+def demo_kinetic():
+    """Beside kinetic titles (the fork's split): a made-up take with a count, a list and a before and after."""
+    import hashlib
+    import inspect
+    sys.path.insert(0, str(SKILL.parent / "style-edit" / "scripts"))
+    import kinetic_beats
+    # kinetic titles off: upstream's beats_for, byte for byte, and pick calls it as upstream does
+    assert hashlib.sha256(inspect.getsource(beats_for).encode()).hexdigest() == BEATS_FOR_SHA, \
+        "beats_for is no longer upstream 2.7.8's: check split_beats still wraps it, then update BEATS_FOR_SHA"
+    words = kinetic_beats.timed("Our bakery sold 340 loaves in one week. It was a long and happy week for every one of us "
+                                "at the shop. You need flour, water, salt and time. Before we kneaded every loaf by hand, "
+                                "now the mixer does it.")
+    lst = {"word": "need", "nth": 1, "kind": "card", "text": "flour"}   # visual-prep sent the list to a card
+    ba = {"word": "Before", "nth": 1, "kind": "anim", "type": "side_by_side", "hold_s": 3.0, "props": {"a": "hand", "b": "mixer"}}
+    stray = {"word": "sold", "nth": 1, "kind": "anim", "type": "likes", "hold_s": 2.5, "props": {"counts": [{"n": 340}]}}
+    on = {"graphics": {"kinetic": True, "kinetic_per_min": 30}}
+
+    def picked(visuals, style, images=()):
+        sp = kinetic_split(style, words, visuals, images)
+        if sp is None:
+            return [(b["type"], b["word"]) for b in beats_for(visuals, words, images=images)]
+        return [(b["type"], b["word"]) for b in split_beats(visuals, words, images=images, split=sp, style=style)[0]]
+    # the count is the titles' (a hook here); the list and the before and after are the clips'
+    sp = kinetic_split(on, words, [lst, ba])
+    assert [k[2] for k in sp["kept"]] == ["340"] and sp["units"] == 1, sp
+    assert picked([lst, ba], on) == [("notes", "need"), ("side_by_side", "Before")], picked([lst, ba], on)
+    # a counter visual-prep put on the count line anyway (or a card there a figure promotes): never a clip beside them;
+    # with kinetic titles off, upstream's counter clip
+    assert picked([stray, lst, ba], on) == picked([{**stray, "kind": "card"}, lst, ba], on) == [("notes", "need"), ("side_by_side", "Before")]
+    assert picked([stray, lst, ba], {}) == [("likes", "sold"), ("notes", "need"), ("side_by_side", "Before")]
+    assert picked([{**stray, "kind": "card"}, lst, ba], {"graphics": {"kinetic": False}})[0] == ("likes", "sold")
+    # a full budget: the number beat and two real screenshots fill 12 a minute over this take (3), so no clip
+    twelve = {"graphics": {"kinetic": True, "kinetic_per_min": 12}}
+    shots = [{"src": "images/a.png", "word": "every", "nth": 1}, {"src": "images/b.png", "word": "shop.", "nth": 1}]
+    sp = kinetic_split(twelve, words, [lst, ba], shots)
+    assert (sp["allowance"], sp["units"]) == (3, 1) and picked([lst, ba], twelve, shots) == [], sp
+    # ... one screenshot leaves room for one: the longest window (the before and after, 3 s)
+    assert picked([lst, ba], twelve, shots[:1]) == [("side_by_side", "Before")]
+    # a clip is never up with a number beat (one written by hand, held long); without the titles it is upstream's clip
+    held = {"word": "340", "nth": 1, "kind": "anim", "type": "kinetic_number", "hold_s": 6.0, "props": {"num": "340", "word": "340"}}
+    near = {"word": "It", "nth": 1, "kind": "anim", "type": "notes", "hold_s": 3.0}
+    assert picked([held, near, lst], on) == [("notes", "need")], picked([held, near, lst], on)
+    assert picked([near, lst], {})[0] == ("notes", "It")
+    with tempfile.TemporaryDirectory() as t:   # pick and place on an edit folder, the test home's own taste
+        keep = os.environ.get("AI_EDITOR_HOME")
+        os.environ["AI_EDITOR_HOME"] = str(Path(t) / "home")
+        try:
+            e = Path(t) / "ed"
+            e.mkdir()
+            (e / "captions.json").write_text(json.dumps(words), encoding="utf-8")
+            vis = [stray, lst, ba]
+            (e / "visuals.json").write_text(json.dumps(vis), encoding="utf-8")
+            (e / "style.json").write_text(json.dumps({"aspect": "9:16"}), encoding="utf-8")
+            off = pick(e)   # kinetic titles off: exactly upstream's beats_for, as upstream's pick called it
+            assert json.dumps(off) == json.dumps(beats_for(vis, words, "9:16", 8, [], MOTION_TYPES, 1.0, None)), off
+            assert "kinetic titles" not in (e / "motion" / off[0]["id"] / "brief.md").read_text(encoding="utf-8")
+            stale = json.loads((e / "motion" / "beats.json").read_text(encoding="utf-8"))
+            (e / "style.json").write_text(json.dumps({"aspect": "9:16", **on}), encoding="utf-8")
+            for b in off:   # every clip passed, but the style has since turned kinetic titles on
+                (e / "motion" / b["id"] / "gates.json").write_text(json.dumps({"pass": True}), encoding="utf-8")
+            _, back = place(e)
+            assert any(x.startswith(off[0]["id"]) and "kinetic titles'" in x for x in back), back
+            shutil.rmtree(e / "motion")
+            got = pick(e)
+            assert [(b["type"], b["word"]) for b in got] == [("notes", "need"), ("side_by_side", "Before")], got
+            assert all(b["beside_kinetic"] for b in got) and len(stale["beats"]) == 3
+            assert "draw no counter" in (e / "motion" / got[0]["id"] / "brief.md").read_text(encoding="utf-8")
+        finally:
+            if keep is None:
+                os.environ.pop("AI_EDITOR_HOME", None)
+            else:
+                os.environ["AI_EDITOR_HOME"] = keep
 
 
 def main():

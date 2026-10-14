@@ -46,7 +46,8 @@ Rules:
    `kinetic_title`, `cta_follow`) come from the beat finder: plan.py places the number beats itself from the words
    (`scripts/kinetic_beats.py`). Never write one unless the caller hands it to you as a pick, never a `kinetic_title`
    on your own, and never change one you find. A pick of yours sits around them, within the style's
-   `graphics.kinetic_per_min` (style-edit `references/kinetic.md` "For the AI steps").
+   `graphics.kinetic_per_min` (style-edit `references/kinetic.md` "For the AI steps"). With them on, a moving format
+   goes only on a line route.py gave a `motion` hint, never a `likes` (kinetic.md "Motion clips").
 
 Write the entries to the file the caller names (default `edits/<name>/visuals.fill.json`) as a JSON
 list, then return only that path and the number of entries. Do not edit any other file.

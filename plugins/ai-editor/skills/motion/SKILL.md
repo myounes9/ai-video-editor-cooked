@@ -40,7 +40,8 @@ Reads visuals.json (written by style-edit step 3 or the visual-prep agent) and s
 `logo_cluster`) with at least 1 s of room becomes a clip, up to `amount` of them. So does a beat routed anywhere
 else (a card, a capture, a sticker) whose sentence is a natural list (four or more items: `notes`), a number
 (`likes`), steps (first... then...: `flow`) or a before and after (`side_by_side`), one per sentence with no
-animation in it already, if that kind is on; a clip that fails its checks falls back to the original beat. Each gets
+animation in it already, if that kind is on; a clip that fails its checks falls back to the original beat. Beside
+kinetic titles the numbers are theirs (`references/clip-brief-card.md` "Beside kinetic titles"). Each gets
 `edits/<name>/motion/<id>/`: the template with its size, duration, look and the said words' times filled,
 `beat.json` (cut clock) and `brief.md`. The look: `references/looks.md` (`default`, or the style's palette
 and font). A user asking in chat ("animate the part where I say X"): add or change that beat in

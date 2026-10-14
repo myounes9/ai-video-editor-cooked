@@ -55,7 +55,8 @@ local, so they are made now and made again if the cut changes.
    plan.py's (`kinetic_beats.py`, route.py marks those lines `[kinetic]`), placed around your real cards when plan.py
    runs. Write no kinetic beat (no `kinetic_title` either) and no `title` over the hook, never change one you find,
    and give a `[kinetic]` line no card (no `likes` or `progress` for its `counter`) unless a real page shows the
-   figure; that page takes its place. Keep all your cards together with them at about `graphics.kinetic_per_min` a
+   figure; that page takes its place. Its `motion` hints then skip every line a number beat says (never `counter`):
+   a moving format only where one is left (kinetic.md "Motion clips"). Keep all your cards together with them at about `graphics.kinetic_per_min` a
    minute, 1 s of plain footage between cards: `<ROOT>/skills/style-edit/references/kinetic.md` "For the AI steps".
    Decide it all yourself: the caller must not have to ask the user what to show.
    When `EDIT/logos.json` exists (the logo-pack skill), use its `brand` for each `logo` beat (beats.json
@@ -65,7 +66,8 @@ local, so they are made now and made again if the cut changes.
 4b. **Motion briefs:** `python3 "<ROOT>/skills/motion/scripts/motion.py" pick EDIT`. It turns the beats that need
    motion into clip folders under `EDIT/motion/` and prints each id. Return every `EDIT/motion/<id>/brief.md`
    in `motion_briefs` (the caller launches the clip-builders; you never build clips). It prints `not installed`:
-   return `[]`, the template cards stay.
+   return `[]`, the template cards stay. With kinetic titles on it leaves the number lines to them and builds no more
+   clips than the graphics budget's room (it prints both): never move or add a beat to get a clip.
 5. **Fetch, face, plan and sheet**, one Bash call (face.py does not need the captures, so it runs beside them;
    `edit.py stills` runs `check.py plan` itself and stops on a FAIL):
 

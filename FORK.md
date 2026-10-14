@@ -9,7 +9,7 @@ Upstream merged since: ai-editor 2.7.8 (upstream `871cabe`), on branch `p3-base`
 Fork work so far: Phase 1, merged on branch `phase1` from four branches (`p1-numbers`, `p1-render`,
 `p1-lottie`, `p1-determinism`), Phase 2 (kinetic titles), merged on branch `phase2`, and Phase 3 (the kinetic
 titles placed automatically), merged on branch `phase3` from `p3-beats`, `p3-place` and `p3-rules`, with the review's
-fixes on top (section 9). Each change has
+fixes on top (section 9), and the split with upstream's motion skill (section 10, `p31`). Each change has
 its own entry under "## Unreleased" in CHANGELOG.md.
 
 ## What the fork changes, and why
@@ -236,6 +236,49 @@ cards of clock times, years, dates, prices and ranges.
 - Migration: upstream once documented `captions.emphasis_scale` and retired it in 2.7.8; the fork reads it as the
   opt-in, so an older style.json that still holds it gets the fork's emphasis captions. Remove the key to keep
   upstream's.
+
+### 10. Kinetic titles and motion clips split the work (`p31`)
+
+Why: upstream 2.7.x added its own motion skill (HyperFrames + GSAP clips for a count, a list, a flow, a before and
+after, a run, a mechanism). Beside the fork's kinetic titles it would have built a counter clip on the same number
+line, and counted its clips outside the one graphics budget. The fork owner's decision: with kinetic titles on, the
+numbers are the titles' and the clips take only what they leave, in the same budget; off, upstream's skill unchanged.
+
+The paths, and how each holds it:
+
+- `skills/style-edit/scripts/kinetic_beats.py`: `split()` (None when `graphics.kinetic` is off, or in a split or board
+  layout, which drop kinetic cards): `said`, every time a number beat says a part, kept or left out, and the word of a
+  hand-written kinetic beat; `kept`, the kept beats' spans; `units`; `allowance`. `MOTION_KINDS` = list, flow,
+  before_after, ui_demo, curve (no counter, no logo cluster). `real_cards` reads a placed clip as its `fallback`, so
+  placing one never changes the fingerprint or moves a number beat.
+- `route.py`: `motion_kind(text, numbers=True)` and `motion_hint(beat, split)`: with the split on, a line with a
+  `said` time gets no hint and none is `counter`; one more line in the budget print. Off: `motion_kind(text)`, as
+  before.
+- `skills/motion/scripts/motion.py`: upstream's `beats_for` untouched (`BEATS_FOR_SHA`, checked by the demo: refresh it
+  after an upstream change to `beats_for`, once `split_beats` still fits round it). `pick` calls it as upstream does
+  when `kinetic_split` is None; else `split_beats` wraps it: a beat on a covered line reaches it as a time only (so the
+  clip before it still ends in time), the kept beats' words too, the types lose `likes` and `logo_cluster`, a card on
+  a line whose only figure the titles would not draw ("twice") is a clip of the line's other kind, `split_veto` drops a
+  clip up with a kept beat, and the room (`allowance - units - real_cards of every non-candidate`) keeps the longest.
+  Each clip gets `beside_kinetic`, and its brief says to draw no figure. `place` keeps the template for a beat the
+  split now vetoes (`place_veto`). `motion_cfg` (the style page's Motion section, home.py) is unchanged.
+- `skills/style-edit/scripts/plan.py`: `budget_cards` keeps the others with `budget.pick`, then `clips_in_room`: a clip
+  (`motion_clip`: a video_card with props.motion) up with a kept kinetic card goes, the rest fill the room left, the
+  longest first, each dropped one in a warning. `titles=False` in a split or board layout. Kinetic off: `thin_cards`,
+  as before.
+- Guidance: style-edit `references/kinetic.md` "Motion clips" (and "For the AI steps"), SKILL.md step 5 (same line),
+  motion `references/clip-brief-card.md` "Beside kinetic titles" with one sentence in its SKILL.md step 1,
+  `agents/visual-prep.md` (steps 4 and 4b), `agents/template-filler.md` (rule 9). The clip-builder agent reads only
+  its brief, which carries the rule.
+- Tests (made-up takes): route.py demo (a count, a list, a before and after: no hint on the count with the split on,
+  upstream's `counter` off; a number left out over the budget still the titles'), motion.py demo (the same take: the
+  count to the titles, the list and before and after to clips; a stray counter never picked; a full budget picks none,
+  one free slot the longest; a hand-written number beat held long blocks a clip; kinetic off equal to upstream's
+  `beats_for` through `pick`, and the source hash; `place` keeps the template once the titles are turned on), plan.py
+  demo (`budget_cards` with clips; end to end, a stray clip on the hook's figure dropped, the list clip kept; off, both
+  kept).
+
+Fork-only: upstream has no kinetic titles. Off unless a style opts in.
 
 ## What to offer upstream, and what stays here
 

@@ -44,6 +44,11 @@ what the line says, landing each part on the word that names it.
 
 Numbers only as the speaker said them. A counter counts up to the said number.
 
+**Beside kinetic titles** (a style with `graphics.kinetic` on; style-edit `references/kinetic.md` "Motion clips"): the
+numbers are the titles'. `pick` makes a clip only of a list, a flow, a before and after or a mechanism, on a line no
+number beat says, never up with one, and no more clips than the shared graphics budget's room (none when it is full).
+Its brief then says so: draw no counter and no figure of your own; the titles set the figures on their words.
+
 ## Approved values
 
 | what | value |

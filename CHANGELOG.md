@@ -4,6 +4,22 @@ What changed for every user, newest first.
 
 ## Unreleased
 
+- Kinetic titles and motion clips split the work (fork, opt-in). With kinetic titles on (`graphics.kinetic`), every
+  number beat is theirs: a line the beat finder says a number on (a count, money, a percent or goal, a chain, a stat
+  run, a tracker; kept or left out over the budget), or a kinetic beat written by hand, gets no motion hint in
+  beats.json and no motion clip, whatever card visual-prep put there, and route.py gives no `counter` hint at all. The
+  motion skill's clips take only a list, a flow, a before and after or a mechanism (an app at work, a curve) on the
+  lines left, never while a number card is up, and they share the one graphics budget (`graphics.kinetic_per_min`,
+  real screenshots included): `motion.py pick` builds no more than the room the number beats and the other cards
+  leave, none when it is full, and tells each clip-builder to draw no figure; plan.py counts the clips last in the same
+  budget and drops, with a warning, a clip past it or up with a kinetic card; `motion.py place` keeps a beat's template
+  when the titles have since taken its line. The beat finder reads a placed clip as the beat it replaced, so building
+  one never moves the number beats. Kinetic titles off, or a split or board layout, the motion skill is upstream's,
+  unchanged (its picker is upstream's code byte for byte, which the demo checks). Guidance: style-edit
+  `references/kinetic.md` "Motion clips", motion `references/clip-brief-card.md`, visual-prep and template-filler.
+  Tests: route.py, motion.py and plan.py demos (a made-up take with a count, a list and a before and after; a full
+  budget; kinetic titles off; a stray clip on a number card).
+
 ## ai-editor 2.7.8-cooked.1 (fork, 2026-10-14)
 
 Fork release on upstream ai-editor 2.7.8: kinetic number titles placed automatically (opt-in, graphics.kinetic), emphasis captions, and the rules that turn a user's feedback into those settings. See FORK.md.

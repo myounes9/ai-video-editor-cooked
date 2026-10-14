@@ -734,7 +734,8 @@ def candidates(take):
 
 def real_cards(take, visuals, images, style, duration):
     """[(start, end, kind, is_picture)]: every card the edit already has (images.json, visuals.json captures, posts,
-    logos, anims, titles and ctas, and kinetic beats written by hand), at its word, for the budget and the gaps."""
+    logos, anims, titles and ctas, and kinetic beats written by hand), at its word, for the budget and the gaps. A
+    motion skill clip counts as the beat it replaced (its "fallback"), so placing one never moves the number beats."""
     try:
         from plan import card_defaults
         hold = card_defaults(style or {})[0]
@@ -747,7 +748,7 @@ def real_cards(take, visuals, images, style, duration):
         hits = hits[nth - 1:nth] if nth else [i for i in hits if take.t(i) > after]
         return take.t(hits[0]) if hits else None
     after = -1.0
-    for v in list(visuals) + list(images):
+    for v in [x.get("fallback") or x for x in visuals] + list(images):
         if v.get("auto") == AUTO or not v.get("word") and v.get("kind") != "title":
             continue
         k = (key_of(str(v.get("word", ""))), v.get("nth") or 1)
@@ -886,6 +887,45 @@ def find(words, style=None, visuals=(), images=(), duration=None):
 def beats(words, style=None, visuals=(), images=(), duration=None):
     """The visuals.json beats for a take, in spoken order."""
     return [c.beat() for c in find(words, style, visuals, images, duration)[0]]
+
+
+# ---------------------------------------------------------------- beside the motion skill
+
+# The motion skill's kinds (motion.py KINDS) a clip may take beside kinetic titles: what the number beats do not
+# cover, a list, a flow, a before and after, a mechanism (an app at work, a curve). Never a "counter": the numbers are
+# the titles'. Nor a "logo" cluster: a real-source card, kept as its template.
+MOTION_KINDS = ("list", "flow", "before_after", "ui_demo", "curve")
+
+
+def split(words, style, visuals=(), images=(), duration=None):
+    """With kinetic titles on (graphics.kinetic), what the number beats leave to the motion skill (references/kinetic.md
+    "Motion clips"); None when off, or in a split or board layout (plan.py drops kinetic cards there), so route.py and
+    motion.py run upstream's way. Else a dict:
+    said: every time a number beat says a part, kept or not (the finder would cover that line: it is the titles'), and
+          the word of each kinetic beat written by hand;
+    kept: [(start, end, word, nth)] the beats the finder keeps (none with graphics.kinetic_auto false) and those written
+          by hand (word None: visuals.json has them), as plan.py places them: no clip is up with one;
+    units: the graphics the kept automatic beats are (a tracker one; hand-written ones count as the edit's own cards);
+    allowance: budget.allowance for the take.
+    visuals: the edit's beats as written, a motion clip read as its template; the automatic beats are found again (as
+    route.py does), so a pick before plan.py ever ran sees the same beats."""
+    if not ((style or {}).get("graphics") or {}).get("kinetic") or ((style or {}).get("layout") or {}).get("mode") in ("split", "board"):
+        return None
+    take = Take(words)
+    if not take.w:
+        return {"said": [], "kept": [], "units": 0, "allowance": 0}
+    duration = duration or take.w[-1]["end"]
+    view = [v.get("fallback") or v for v in visuals]
+    kept, cands = find(words, style, [v for v in view if v.get("auto") != AUTO], images, duration)
+    kept = kept if auto_on(style) else []
+    said = {round(c.s + LEAD_S, 3) for c in cands} | {round(take.t(i), 3) for c in cands for i in c.parts}
+    spans = [(c.s, c.e, b["word"], b["nth"]) for c in kept for b in [c.beat()]]
+    hand = [v for v in view if v.get("auto") != AUTO and v.get("type") in budget.KINETIC_TYPES]
+    for s, e, _, _ in real_cards(take, hand, (), style, duration):   # written by hand (or by a review note): the titles' too
+        said.add(round(s + LEAD_S, 3))
+        spans.append((s, e, None, None))   # its own beat in visuals.json times the clip before it
+    return {"said": sorted(said), "kept": sorted(spans, key=lambda x: x[:2]), "units": len({unit(c) for c in kept}),
+            "allowance": budget.allowance(style, duration)}
 
 
 # ---------------------------------------------------------------- the edit

@@ -94,7 +94,7 @@ rules, then the default look and motion (built animations over captures, big in 
 3. **Fill the overlays:** for the overlay picks, write only the props (`references/shapes.md`). Hand it to the `template-filler` agent (haiku) with the full path of `references/shapes.md` when available, else write them. Only
    words and numbers the speaker said. There are no type cards.
 4. **Fetch:** `node "$S/capture.mjs" edits/<name>` fetches captures, logos, posts into `images/`, marks measured.
-5. **Motion:** moving-template beats become bespoke clips (motion skill); a failed clip keeps its card.
+5. **Motion:** moving-template beats become bespoke clips (motion skill); a failed clip keeps its card. Kinetic titles on: not on a number line, in the budget (`references/kinetic.md` "Motion clips").
 
 Pacing: a copied creator's rate wins. route.py prints her cards a minute, kinds and place in the frame,
 and marks that many sentences `want` (named ones first). Give each a card of her kind with a `box` at her

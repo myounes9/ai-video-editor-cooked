@@ -17,6 +17,8 @@ kinetic titles (style.json graphics.kinetic): the sentences kinetic_beats.py giv
 printed [kinetic]; plan.py places those beats itself, so Claude leaves those lines to them. Her card rate then gives
 way to the graphics budget (lib/ai_editor/budget.py, graphics.kinetic_per_min): "want" marks only the room it leaves
 once the number beats and the user's own cards (images.json, visuals.json) are counted, never a [kinetic] line.
+The motion hint ("motion") then goes only to a line no number beat says, and is never "counter" (motion_hint): the
+motion skill's clips take the lists, flows, before-and-afters and mechanisms the titles leave, in the same budget.
 
 logo-pack: when edits/NAME/logos.json exists, its names count as named things and each sentence gets "logos"
 (the brands whose files logo-pack checked, for a `logo` beat's "brand"); two or more in one sentence print a
@@ -164,12 +166,13 @@ FLOWS = re.compile(r"\b(?:sends?|goes to|passes|hands?|from \w+ to|into|pipeline
 UI = re.compile(r"\b(?:drag|click|type|upload|render(?:s|ing)?|cut(?:s|ting)?|open|install|run(?:s|ning)?|press)\b", re.I)
 
 
-def motion_kind(text):
+def motion_kind(text, numbers=True):
     """What a sentence is doing, for the motion skill (style.json "motion" kinds): a number said, steps or a list of
-    three or more, a comparison, things handing work along, an app being used. None: nothing to animate."""
+    three or more, a comparison, things handing work along, an app being used. None: nothing to animate.
+    numbers False (kinetic titles on): never a "counter", the numbers are the titles'; the line's other kind instead."""
     if VERSUS.search(text):
         return "before_after"
-    if NUM.search(text):
+    if numbers and NUM.search(text):
         return "counter"
     if len(STEPS.findall(text)) >= 2 or text.count(",") >= 2:
         return "list"
@@ -178,6 +181,17 @@ def motion_kind(text):
     if UI.search(text):
         return "ui_demo"
     return None
+
+
+def motion_hint(beat, split=None):
+    """beats.json "motion": what a sentence is doing (motion_kind), a hint for the motion skill. With kinetic titles on
+    (split: kinetic_beats.split), a line a number beat says a part of (kept or not) gets none and no line is a
+    "counter": the numbers are the titles', the clips take only what they leave (references/kinetic.md "Motion clips")."""
+    if split is None:
+        return motion_kind(beat["text"])
+    if any(beat["start"] <= t <= beat["end"] + 0.05 for t in split["said"]):
+        return None
+    return motion_kind(beat["text"], numbers=False)
 
 
 def demo():
@@ -243,6 +257,23 @@ def demo():
     wb[3]["kinetic"] = "kinetic_number"
     assert want(wb, ks, room=2) == (2, 8.0) and not wb[3]["want"] and sum(b["want"] for b in wb) == 2, wb
     assert want(wb, ks, room=0) == (0, 8.0) and not any(b["want"] for b in wb)
+    # the split with the motion skill: a count, a list and a before and after. Kinetic titles on, the count is theirs
+    # (no hint), the list and the before and after are the clips'; off, upstream's hints, the count a "counter"
+    import kinetic_beats
+    mw = kinetic_beats.timed("Our bakery sold 340 loaves in one week. You need flour, water, salt and time. "
+                             "Before we kneaded by hand, now the mixer does it.")
+    mb = sentences(mw)
+    on = {"graphics": {"kinetic": True}}
+    sp = kinetic_beats.split(mw, on)
+    assert [motion_hint(b, sp) for b in mb] == [None, "list", "before_after"], [motion_hint(b, sp) for b in mb]
+    assert kinetic_beats.split(mw, {**on, "layout": {"mode": "board"}}) is None   # no kinetic cards there: upstream's
+    assert kinetic_beats.split(mw, {}) is None and [motion_hint(b) for b in mb] == [motion_kind(b["text"]) for b in mb] \
+        == ["counter", "list", "before_after"]
+    # a number line the finder covers but leaves out (over the budget) is still the titles'; a figure it would not draw
+    # ("twice") leaves the line's own kind
+    sp0 = kinetic_beats.split(mw, {"graphics": {"kinetic": True, "kinetic_per_min": 0}})
+    assert sp0["kept"] == [] and motion_hint(mb[0], sp0) is None and motion_hint(mb[1], sp0) == "list"
+    assert motion_hint({"text": "it is twice as fast, cheaper, smaller and quieter", "start": 90, "end": 92}, sp0) == "list"
     print("route ok")
 
 
@@ -307,7 +338,7 @@ def main():
         st = edit / "style.json"
         from plan import effective_style   # the style the plan will use: the user's choices over the creator's
         style = effective_style(st, prof, edit, count=False) if st.exists() else {}
-        from plan import pictures_only
+        from plan import kinetic_on, pictures_only
         if pictures_only(style):
             print(f"this style's cards ({', '.join(style['card_kinds'])}): mostly animations of what is said (likes, "
                   "progress, notes, terminal, chat, toasts, curve, side_by_side with arrow, flow), a capture of a real page "
@@ -333,6 +364,13 @@ def main():
             print(f"the graphics budget: {budget.per_min(style):g} a minute in all (graphics.kinetic_per_min), "
                   f"{budget.allowance(style, dur)} here: {nk} number graphics and {mine} of the edit's own cards, so room for "
                   f"{room} more" + (" (\"want\" marks them)" if room else ": add no other card"))
+        split = None
+        if kinetic_on(style):   # the numbers are the titles': motion hints only on the lines they leave (motion_hint)
+            import kinetic_beats
+            split = kinetic_beats.split(words, style, vis, imgs)
+            print("motion clips (the motion skill): only a list, a flow, a before and after or a mechanism, on a line no "
+                  "number beat says, never a counter, and they count in the same budget; they take no more than its room "
+                  "(references/kinetic.md \"Motion clips\")")
         n, pm = want(beats, style, room)
         if n and room is None:
             print(f"the creator's rate: {pm:g} cards a minute, so {n} in this video; \"want\" marks the sentences to give one"
@@ -341,7 +379,7 @@ def main():
             print(line)
         for b in beats:
             b["pick"] = None   # Claude routes each sentence
-            b["motion"] = motion_kind(b["text"])   # a hint: the motion skill builds a clip where the pick is a moving format
+            b["motion"] = motion_hint(b, split)   # a hint: the motion skill builds a clip where the pick is a moving format
         (edit / "beats.json").write_text(json.dumps(beats, indent=1), encoding="utf-8")
         for b in beats:
             print(f"{b['start']:6.2f} {'*' if b.get('want') else ' '} {str(b.get('motion') or ''):12}  {b['text']}"
