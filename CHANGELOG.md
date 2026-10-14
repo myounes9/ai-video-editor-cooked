@@ -6,6 +6,22 @@ What changed for every user, newest first.
 
 Fork base: upstream ai-editor 2.7.8 (the manifests read 2.7.8-cooked.1). The entries below are the fork's own, not released yet.
 
+- Kinetic titles find their own number beats (fork, opt-in). With `graphics.kinetic` on, nobody writes the beats any
+  more: plan.py runs the new `kinetic_beats.py` before it reads visuals.json, and it adds the number beats from the
+  cut's words (numbers.py spans, by sentence and clause): the hook figure with its duration as the sub-line, a chain
+  of counts that narrows, a percent of a goal, a run of stats, a counter (with a stamp on rejected, ignored ...), a
+  tally, a money figure, and a step tracker when the speaker counts what they are about to list ("two main kinds",
+  "step one"), with a "?" slot on "another". Labels are the speaker's own words next to each number. The strongest
+  are kept, `graphics.kinetic_per_min` (default 8) graphics a minute in all, the real captures and pictures counted
+  first, the hook always; 1 s of plain footage between kinetic cards, none over a real card except stats beside the
+  capture of them. The beats are marked `"auto": "kinetic"` and kept while the words, the real cards and the rate stay
+  the same, so a review note's change to one survives the next plan; `graphics.kinetic_auto: false` turns it off.
+  route.py marks those sentences `[kinetic]` so the agent leaves them alone, and the style check no longer counts a
+  style's own kinetic cards as a kind its creator hardly uses (nor as off the top of the frame).
+  `kinetic_beats.py find|write|words` lists, writes or reads any word-timed transcript. Tests: its demo (four made-up
+  takes: every kind, the ranking, the budget, the gaps, grounding, plan.py reading the beats, the keep-or-redo rule),
+  route.py and style_check.py demo asserts.
+
 - Kinetic titles with upstream 2.7.8 (fork, opt-in). A style whose creator is off screen half the time turns her
   picture cards into full-frame scenes: a kinetic card is no longer one of them, it stays over the footage. The board
   layout drops kinetic cards with a warning, as the split layout does (it made each one a side overlay). A card

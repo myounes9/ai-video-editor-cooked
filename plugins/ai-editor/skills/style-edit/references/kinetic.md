@@ -7,10 +7,50 @@ the footage, so the default style never draws them (PRINCIPLES.md "Looking real"
 warning, and check.py and ai_tells.py treat a kinetic card in a plan as a text card (FAIL / type-card).
 
 When one fits: a number or a short claim the speaker says and no page shows (their own results, a count, a goal,
-where they are in a plan). When a real page, post or product shows it, show that instead (visuals.md).
+where they are in a plan). When a real page, post or product shows it, show that instead (visuals.md). The number
+beats are placed automatically ("Automatic beats" below).
 
 Renderer: `remotion/src/kinetic/` (one file per format, the shared design system in `tokens.ts`, `type.ts`,
 `time.ts`, `fit.ts`, `primitives.tsx`). Each format is a floating template (Templates.tsx): no card under it.
+
+## Automatic beats (kinetic_beats.py)
+
+With the opt-in on, nobody writes the number beats: plan.py runs `scripts/kinetic_beats.py` before it reads
+visuals.json, and it adds them there from the cut's words (`"auto": "kinetic"` on each). Only number beats:
+`kinetic_title` and `cta_follow` are never placed automatically, and the word captions carry every other line.
+
+- **Candidates**, from numbers.py spans over the punctuated words, by sentence and clause: the **hook** (the first
+  money, count or percent figure in the first 3 s or the first sentence, its sub-line a duration said there, "in 3.5
+  weeks"); a **chain** (2-4 counts, each in its own clause and smaller than the last, within 8 s: a funnel); a **goal**
+  (a percent with "goal", "target" or "of the way" and a scaled figure in its sentence); a **stat run** (2-4 labelled
+  figures in one sentence that count different things, a `stat_stack`); a **counter** (a count of 50 or more, with a
+  stamp when rejected, ignored, failed, ghosted, lost ... follows in the sentence); a **tally** (5-30 of a plural
+  thing); a lone **money** figure; a lone percent or a count of 31-49; a **step tracker** ("two main kinds of bread",
+  "three layers", then "one is", "the other is", "layer two is", "step three," ...; or "step one, step two" with no
+  count), one beat for the count, one per item filled on its label, and a "?" slot on "another <the same noun>".
+  Left out: a duration (only a sub-line), a year, a name's number ("Planner 3", "GPT-4"), an ordinal ("step one"), a
+  lone "one" (only a chain's last figure), and a tracker whose items have no plain label (a filled slot needs one).
+- **Words**: each label is 1-2 of the speaker's own words next to the number (the noun after it, its currency word and
+  an "of" passed over; else the verb before it: "sign one"), as said, set in capitals by the renderer. A figure is
+  written from what was said: "4.5k dollars" -> "$4.5K", "three hundred and forty" -> "340", K/M/B only when one was said.
+  A chain or tracker whose labels would not fit (check.py `kinetic_fit`) keeps one word each, else it is left out.
+- **Ranking**: hook > chain = goal > stat run > counter > money > lone figure = tally > tracker beats (an item's
+  fill before the count's empty wells, which are kept only with a fill), plus clarity (labels, a stamp, more items).
+- **Density** (`graphics.kinetic_per_min`, default 8): at most round(rate x minutes) graphics in all; the real cards
+  already there (images.json, visuals.json captures, posts, logos, titles, ctas, kinetic beats written by hand) count
+  first, the strongest candidates take the rest, and the hook is kept even past it. The user's `cards.per_min` caps
+  the rate (plan.py `thin_cards` would cut evenly past it); `cards.on` false places none. 1 s of plain footage between
+  two kinetic cards (the next beat of the same tracker joins instead) and 0.5 s at the least beside a real card, which
+  a kinetic card never covers, except a `stat_stack` beside the capture of its figures. Each card holds 2 s after its
+  last word, cut to leave the gap, never under 1.5 s.
+- **Kept until something changes**: `kinetic.auto.json` holds a fingerprint of the cut's words, the real cards and the
+  rate. While it matches, plan.py keeps the beats as they are, so a review note's change to one (`plan.py beat`)
+  survives the next plan; when any changes they are found again. `graphics.kinetic_auto: false` turns the finder off
+  (hand-written beats only).
+- **By hand**: `kinetic_beats.py find edits/NAME` lists every candidate, kept or why not; `write edits/NAME [--force]`
+  writes them now; `words FILE.json [--per-min N] [--json]` reads any word-timed transcript (words.json, a
+  transcriber's `{"words": [...]}`). `route.py beats` marks the sentences that get one `[kinetic]`: give those lines
+  no other card unless a real page shows the figure.
 
 ## Every kinetic beat
 

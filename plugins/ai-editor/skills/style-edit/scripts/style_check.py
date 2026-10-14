@@ -17,7 +17,7 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
-from plan import SAFE, card_rate, graphics, off_screen, took  # noqa: E402
+from plan import KINETIC, SAFE, card_rate, graphics, off_screen, took  # noqa: E402
 from route import OFF_SCENE_S  # noqa: E402
 
 # a plan card -> the creator-teardown graphics.kinds it counts as
@@ -39,6 +39,8 @@ def card_kind(c):
 def zone(c):
     if c.get("layout") == "scene":
         return "full"
+    if (c.get("anim") or {}).get("type") in KINETIC:   # the whole frame as its box; it sets its type in the band over the hair
+        return "top"
     x, y, w, h = c.get("box") or [0, 0, 100, 100]
     mid = y + h / 2
     return "top" if mid < 100 / 3 else "bottom" if mid > 200 / 3 else "middle"
@@ -109,7 +111,9 @@ def check(plan, style):
         if miss:
             out.append((f"no {' or '.join(miss)} cards; {h}: " + ", ".join(f"{k} {v}%" for k, v in kinds.items()),
                         "show those kinds: the user's own photos (images.json) or a capture shot of the real thing said"))
-        alien = sorted({card_kind(c) for c in cards if not any(kinds.get(k, 0) >= 5 for k in CARD_KIND.get(card_kind(c), ()))})
+        own = KINETIC if plan.get("kinetic") else ()   # kinetic titles the style opted into are its own kind, not hers to match
+        alien = sorted({card_kind(c) for c in cards if card_kind(c) not in own
+                        and not any(kinds.get(k, 0) >= 5 for k in CARD_KIND.get(card_kind(c), ()))})
         if alien:
             out.append((f"{', '.join(alien)} cards, a kind {h} hardly uses", "swap them for her kinds where a real source exists"))
     zp = (graphics(style, "layout").get("layout") or {}).get("zones_pct") or {}
@@ -165,6 +169,10 @@ def demo():
     assert check({**plan, "cards": []}, {**style, "blend": {"take": ["captions"]}}) == []
     plan["captions"]["chunks"] = [{"text": "a b c", "treat": "backing"}] * 8
     assert "plain" in check(plan, style)[0][0], check(plan, style)
+    kin = {**plan, "kinetic": True, "cards": plan["cards"] + [{"anim": {"type": "goal_bar"}, "box": [0, 0, 100, 100]}]}
+    assert not any("hardly uses" in w for w, _ in check(kin, style)), "a style's own kinetic titles are no alien kind"
+    assert zone(kin["cards"][-1]) == "top"
+    assert any("goal_bar cards, a kind" in w for w, _ in check({**kin, "kinetic": False}, style))
     assert "matches @h" in report([], style) and "default style" in report([], {"handle": "default"})
     print("style_check ok")
 

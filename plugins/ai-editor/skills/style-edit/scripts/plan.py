@@ -3844,7 +3844,6 @@ def main():
     img = Path(a.images) if a.images else edit_dir / "images.json"
     images = json.loads(img.read_text(encoding="utf-8")) if img.exists() else []
     vis = edit_dir / "visuals.json"
-    visuals = json.loads(vis.read_text(encoding="utf-8")) if vis.exists() else []
     # The user's own settings (taste skill) win over the creator's measured style; corrections saved on this
     # style (its style.overrides.json) win over the every-video ones (taste.load_json, styleskill.py).
     sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "lib"))
@@ -3853,6 +3852,10 @@ def main():
     prof = profile.load()   # the start skill's answers: brand kit, what to avoid, sound
     sp = Path(a.style)
     style = effective_style(sp, prof, edit_dir)
+    if kinetic_on(style):   # the number beats, found from the words into visuals.json (references/kinetic.md "Automatic beats")
+        import kinetic_beats
+        kinetic_beats.refresh(edit_dir, style, a.words, probe(video)["duration"])
+    visuals = json.loads(vis.read_text(encoding="utf-8")) if vis.exists() else []
     plan = build(style, json.loads(Path(a.words).read_text(encoding="utf-8")),
                  probe(video), images, a.aspect, cut_points(edit_dir), visuals, edit_dir,
                  {k: v for k, v in (("mode", a.layout), ("title", a.title)) if v} or None, prof, None if a.behind is None else a.behind == "on")

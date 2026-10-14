@@ -13,6 +13,9 @@ creator's graphics.kinds, her mix is printed for Claude to lean towards. With he
 under the user's own cards cap), her count for this length is printed and that many sentences get "want": true
 (want()): named ones first, then the longest, spread out. Claude gives each a real card at her place in the frame.
 
+kinetic titles (style.json graphics.kinetic): the sentences kinetic_beats.py gives a number beat get "kinetic": <type>,
+printed [kinetic]; plan.py places those beats itself, so Claude leaves those lines to them.
+
 logo-pack: when edits/NAME/logos.json exists, its names count as named things and each sentence gets "logos"
 (the brands whose files logo-pack checked, for a `logo` beat's "brand"); two or more in one sentence print a
 `logo_cluster` hint.
@@ -220,7 +223,25 @@ def demo():
     assert len(hs) == 2 and "title" in hs[0] and "56%" in hs[1], hs
     assert style_hints({"hook": {"title_on_screen_pct": 20}, "face": {"present_pct": 95}}) == []
     assert style_hints({"hook": {"title_on_screen_pct": 80}, "blend": {"take": ["captions"]}}) == []
+    # kinetic titles on: the sentence with a number beat is marked, so the agent leaves it to plan.py
+    kw = [{"text": t, "start": i * 0.4, "end": i * 0.4 + 0.3} for i, t in enumerate(
+        "We sold 4.5k dollars of bread in two weeks. Then we rested. Follow us.".split())]
+    kb = sentences(kw)
+    assert mark_kinetic(kb, kw, {"graphics": {"kinetic": True}}) == 1 and [b["kinetic"] for b in kb] == ["kinetic_number", None, None]
+    assert mark_kinetic(kb, kw, {"graphics": {"kinetic": True, "kinetic_auto": False}}) is None
     print("route ok")
+
+
+def mark_kinetic(beats, words, style):
+    """With kinetic titles on (and graphics.kinetic_auto not false): each sentence kinetic_beats.py gives a number beat
+    gets "kinetic": its type (plan.py places them itself). Returns how many, or None when off."""
+    import kinetic_beats
+    if not kinetic_beats.auto_on(style or {}):
+        return None
+    kept = kinetic_beats.find(words, style)[0]
+    for b in beats:
+        b["kinetic"] = next((c.type for c in kept if b["start"] <= c.s + kinetic_beats.LEAD_S <= b["end"] + 0.05), None)
+    return len(kept)
 
 
 def style_hints(style):
@@ -285,6 +306,11 @@ def main():
                   + (f", placed at the {where(style)}" if where(style) else "") + " (SKILL.md step 3, \"Pacing\")")
         for line in style_hints(style):
             print(line)
+        nk = mark_kinetic(beats, words, style)
+        if nk is not None:
+            print(f"kinetic titles: plan.py places the number beats itself (kinetic_beats.py): {nk} here, marked "
+                  "[kinetic] below. Give those lines no card of your own unless a real page shows the figure (it then takes "
+                  "the beat's place); never write kinetic beats by hand")
         for b in beats:
             b["pick"] = None   # Claude routes each sentence
             b["motion"] = motion_kind(b["text"])   # a hint: the motion skill builds a clip where the pick is a moving format
@@ -292,6 +318,7 @@ def main():
         for b in beats:
             print(f"{b['start']:6.2f} {'*' if b.get('want') else ' '} {str(b.get('motion') or ''):12}  {b['text']}"
                   + (f"   [{', '.join(b['names'])}]" if b["names"] else "")
+                  + (f"   [kinetic: {b['kinetic']}]" if b.get("kinetic") else "")
                   + (f"   logo_cluster? {', '.join(b['logos'])}" if len(b.get("logos") or []) > 1 else ""))
         print(f"-> {edit / 'beats.json'}")
     elif len(a) == 4 and a[0] == "highlight":
