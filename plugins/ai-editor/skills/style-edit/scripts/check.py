@@ -363,9 +363,10 @@ MOTION_KEYS = {"enter", "exit", "ambient", "ease", "stagger", "duration", "dur",
 # What a motion key holds when it is not words: an ease ("power2.out", "back.out(1.7)", "steps(12)"), a colour
 # ("#ff3300", "rgba(0,0,0,.5)"), a length, an angle or a time ("48px", "-3deg", "0.3s", "1.2").
 # A kinetic card (plan.KINETIC) shows its figures under these keys, a number as well as a string ("pct": 50); its part
-# times are "<part>_at" / "at_<part>" and its "band" is where it sits. Its "target" is a shown figure, not quoted content.
+# times are "<part>_at" / "at_<part>" and its "band" is where it sits ("beside": the capture it keeps clear of; a step
+# slot's "state" and a stat_stack's "layout": how it draws). Its "target" is a shown figure, not quoted content.
 FIGURE_KEYS = {"num", "value", "pct", "target", "figure"}
-KINETIC_MOTION = {"band", "label_at", "out_at", "hide_captions", "variant"}
+KINETIC_MOTION = {"band", "label_at", "out_at", "hide_captions", "variant", "beside", "state", "layout", "join_in", "join_out"}
 MOTION_TEXT = re.compile(r"(?i)\s*(#[0-9a-f]{3,8}|rgba?\([^)]*\)|[a-z]+\d?(\.(in|out|inout))?(\([^)]*\))?"
                          r"|-?\d*\.?\d+(px|%|deg|s|ms|em|rem|vh|vw|x)?)\s*")
 
@@ -377,7 +378,7 @@ def shown_texts(props, kinetic=False):
     card's props, where a figure may be a bare number (FIGURE_KEYS), "target" is shown and each part's spoken word
     ("label_word", "word_goal") and time ("label_at", "at_goal") are not."""
     from ai_tells import SKIP_KEYS
-    skip = SKIP_KEYS - {"target", "mark"} if kinetic else SKIP_KEYS
+    skip = (SKIP_KEYS - {"target", "mark"}) | {"id"} if kinetic else SKIP_KEYS   # "id": a step tracker's name
     out = []
 
     def walk(node, motion, key=None):
@@ -633,6 +634,12 @@ def check_render(edit, plan, video):
                 y1 = min(y1, int((c["box"][1] + c["box"][3]) / 100 * H))
             mask = np.zeros_like(ink)
             mask[y0:y1, x0:x1] = ink[y0:y1, x0:x1]
+            if (c.get("anim") or {}).get("type") in KINETIC:
+                # its box is the whole frame: what another card up with it draws (a stat_stack's capture) is not its ink
+                for j in up:
+                    if j != i and cards[j].get("layout") != "scene" and (cards[j].get("anim") or {}).get("type") not in KINETIC:
+                        a0, b0, a1, b1 = pix(cards[j]["box"], 2)
+                        mask[b0:b1, a0:a1] = 0
             for hb in heads:
                 if plan.get("kinetic") and (c.get("anim") or {}).get("type") in KINETIC:
                     # a kinetic title sits on the hair and forehead by design: on the face is from the brows down
@@ -964,6 +971,9 @@ def demo():
     assert any("kinetic title" in f["what"] and f["level"] == "FAIL" for f in check_plan(kp, face)), check_plan(kp, face)
     kp["kinetic"] = True
     assert not any("kinetic title" in f["what"] or "nobody says" in f["what"] for f in check_plan(kp, face)) and unsaid_numbers(kp) == []
+    # a tracker's id, a slot's state, a stat_stack's layout and the capture box it keeps clear of are not on screen
+    assert shown_texts({"id": "q3-plan", "join_in": True, "slots": [{"label": "flour", "state": "question", "at": 0.4}]}, kinetic=True) == ["flour"]
+    assert shown_texts({"layout": "row", "beside": [14, 14, 72, 34], "stats": [{"num": "12", "label": "regulars"}]}, kinetic=True) == ["12", "regulars"]
     bad = {**kp, "cards": kin(55, "30K", chain=(37, "6"))}
     assert sorted(n for _, n, near in unsaid_numbers(bad) if near is None) == ["30K", "37", "55", "6"], unsaid_numbers(bad)
     # an unsaid number anywhere a card shows words: after a dot ("No.1", "...37"), a Lottie's texts, words under a

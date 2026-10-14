@@ -99,6 +99,7 @@ LEGACY = ("logo", "flow")
 # their spoken words, in their own lane, the whole frame as their box (they fit themselves to props.band, over the hair
 # and under the Reels header). Words on the footage, so only when the style opts in: style.json graphics.kinetic.
 KINETIC = ("kinetic_number", "number_chain", "goal_bar", "step_build", "stat_stack", "kinetic_title", "cta_follow")
+KINETIC_JOIN_S = 1.0   # two beats of one step tracker closer than this are joined: it carries on, never leaves and comes back
 ANIMS = tuple(dict.fromkeys(TEMPLATES + OVERLAYS + LEGACY + KINETIC))
 # Where each card sits (references/motion.md "Layout per template"). "scene": a full-frame cut-away on
 # the look's ground. "split": the split layout's top panel. "box": a card over the footage, only for these.
@@ -573,6 +574,29 @@ def hides_captions(card):
     a = card.get("anim") or {}
     v = (a.get("props") or {}).get("hide_captions")
     return v if isinstance(v, bool) else a.get("type") in KINETIC
+
+
+def kinetic_links(cards):
+    """Kinetic cards that read their neighbours (remotion/src/kinetic). A step_build beat followed in the kinetic lane
+    within KINETIC_JOIN_S by the next beat of the same tracker (props.id, else the same slot labels) holds until it
+    ("join_out") and the next carries on from it ("join_in"): one tracker on screen, never a sweep out and back in.
+    A stat_stack with no "beside" gets the box of the card up with it longest (a capture of the same numbers), and keeps
+    to the part of the face band that box leaves free."""
+    is_ = lambda c, t: (c.get("anim") or {}).get("type") == t
+    who = lambda c: c["anim"]["props"].get("id") or [str(x.get("label", "")).lower() for x in c["anim"]["props"].get("slots") or []]
+    lane = sorted((c for c in cards if c.get("lane") == "kinetic"), key=lambda c: c["start"])
+    for a, b in zip(lane, lane[1:]):
+        if is_(a, "step_build") and is_(b, "step_build") and who(a) == who(b) and 0 <= b["start"] - a["end"] < KINETIC_JOIN_S:
+            a["end"] = b["start"]
+            a["anim"]["props"]["join_out"] = True
+            b["anim"]["props"]["join_in"] = True
+    for c in cards:
+        if is_(c, "stat_stack") and "beside" not in c["anim"]["props"]:
+            up = lambda o: min(c["end"], o["end"]) - max(c["start"], o["start"])
+            near = [o for o in cards if o.get("layout") != "scene" and kind_of(o) not in KINETIC and o.get("box") and up(o) > 0]
+            if near:
+                c["anim"]["props"]["beside"] = list(max(near, key=up)["box"])
+    return cards
 
 
 def pictures_only(style):
@@ -1921,6 +1945,7 @@ def build(style, words, meta, images=(), aspect="auto", cuts=(), visuals=(), edi
             rest = tuck_behind(rest, face, aspect)
         out = dict(head)
     cards = clear_caption_paths(creator_motion(sorted(rest + scenes + kinetic, key=lambda c: c["start"]), style, aspect), cap["y_pct"], aspect)
+    cards = kinetic_links(cards)
     for c in cards:
         px = c.get("layout") != "scene" and c.get("size") and capture_xh(c, aspect)
         if px and px < READ_XH and (aspect == "9:16" or c.get("format") == "sticker") and not pictures_only(style):
@@ -2394,6 +2419,18 @@ def demo():
     assert not set(KINETIC) & set(TYPE_ONLY) and all(t in ANIMS for t in KINETIC)
     assert hides_captions(kc) and not hides_captions({"anim": {"type": "number_chain", "props": {"hide_captions": False}}}) \
         and hides_captions({"anim": {"type": "flow", "props": {"hide_captions": True}}}) and not hides_captions({"src": "images/c.png"})
+    # two beats of one step tracker close together are joined (one tracker carries on); a stat_stack keeps clear of the
+    # card up with it longest
+    sb = lambda a, b, **p: {"start": a, "end": b, "lane": "kinetic", "box": [0, 0, 100, 100],
+                            "anim": {"type": "step_build", "props": {"id": "t", "slots": [{"label": "a"}, {"label": "b"}], **p}}}
+    st = {"start": 5.0, "end": 8.0, "lane": "kinetic", "box": [0, 0, 100, 100], "anim": {"type": "stat_stack", "props": {"stats": []}}}
+    ln = kinetic_links([sb(1.0, 2.5), sb(2.9, 4.0), st, sb(8.4, 10.0), {"src": "images/c.png", "start": 6.0, "end": 9.5, "box": [14, 14, 72, 34]},
+                        {"src": "images/d.png", "start": 7.5, "end": 8.5, "box": [10, 60, 80, 20]}])
+    jp = [c["anim"]["props"] for c in ln[:4]]
+    assert ln[0]["end"] == 2.9 and jp[0].get("join_out") and jp[1].get("join_in") and not jp[1].get("join_out"), ln[:2]
+    assert not jp[3].get("join_in") and jp[2]["beside"] == [14, 14, 72, 34], (jp[2], jp[3])   # the stat_stack sits between
+    other = kinetic_links([sb(1.0, 2.0), sb(2.2, 3.0, id="u")])
+    assert not any(k in c["anim"]["props"] for c in other for k in ("join_in", "join_out")) and other[0]["end"] == 2.0, other
     # an overlay goes to the free region its picture fills best; on vertical only the band above the head is centred
     # (check.py plan FAILs a card beside the head), so a tall one goes there too
     hd_face = {"step_s": 0.5, "heads": [{"t": float(i) / 2, "box": [32, 34, 28, 23]} for i in range(30)]}

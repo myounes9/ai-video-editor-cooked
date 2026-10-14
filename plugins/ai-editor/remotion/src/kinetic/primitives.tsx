@@ -236,13 +236,16 @@ export const Scaled: React.FC<{ s: number; ox: number; oy: number; children: Rea
  *  a bright wall), the held lockup's slow push (TIME.push over its life, about (ox, oy): the grid's centre unless a
  *  format hangs from an edge), and the
  *  exit: one feathered edge (240 px at 1080) sweeping left to right, so a glyph fades as it passes, never cut in two.
- *  t0: the first landing; out: when the sweep starts. Nothing is drawn once it has passed. */
-export const Lockup: React.FC<{ t: number; t0: number; out: number; box: Box; oy: number; ox?: number; w: number; h: number;
-  children: React.ReactNode }> = ({ t, t0, out, box, oy, ox = box.left + box.width / 2, w, h, children }) => {
-    const pe = prog(t, out, TIME.exit, EASE.exit);
-    if (pe >= 1 || t < t0 - TIME.scrim - 0.5) return null;
-    const scrimA = prog(t, t0 - TIME.scrim, TIME.scrim, EASE.scrimIn) * (1 - prog(t, out, TIME.exit + 0.1, EASE.scrimOut));
-    const push = 1 + TIME.push * clamp01((t - t0) / Math.max(0.5, out - t0));
+ *  t0: the first landing; out: when the sweep starts (Infinity: it never leaves, the next beat of the same lockup
+ *  takes over, and it holds still: no push). joined: it carries on from the beat before (the scrim is already up). Nothing
+ *  is drawn once the sweep has passed. */
+export const Lockup: React.FC<{ t: number; t0: number; out: number; box: Box; oy: number; ox?: number; w: number; h: number; joined?: boolean;
+  children: React.ReactNode }> = ({ t, t0, out, box, oy, ox = box.left + box.width / 2, w, h, joined = false, children }) => {
+    const stays = !Number.isFinite(out);
+    const pe = stays ? 0 : prog(t, out, TIME.exit, EASE.exit);
+    if (pe >= 1 || (!joined && t < t0 - TIME.scrim - 0.5)) return null;
+    const scrimA = (joined ? 1 : prog(t, t0 - TIME.scrim, TIME.scrim, EASE.scrimIn)) * (stays ? 1 : 1 - prog(t, out, TIME.exit + 0.1, EASE.scrimOut));
+    const push = stays ? 1 : 1 + TIME.push * clamp01((t - t0) / Math.max(0.5, out - t0));
     const FE = 240 * box.k, ex = lerp(box.left - FE - 30, w + 30, pe);
     const mask = pe > 0 ? `linear-gradient(90deg, rgba(0,0,0,0) ${f2(ex)}px, #000 ${f2(ex + FE)}px)` : undefined;
     return (

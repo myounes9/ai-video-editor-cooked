@@ -52,6 +52,22 @@ What changed for every user, newest first.
   over the whole frame, and under a punch zoom the whole frame read as a "panel" whose edges the card ran into
   (a false WARN). Tests: made-up cases in `remotion/test/kinetic/goal_bar.json` (one in `test/determinism.mjs`:
   0 of 120 frames differ across 6 tabs).
+- Kinetic titles: `step_build` and `stat_stack` (fork, opt-in). `step_build` is a tracker of 2-4 slots that comes
+  back at several beats of one video with the same slots and identity (`id`): an empty slot is a smoked glass well
+  with its number, a filled one gets its label pulled on by the marker on its word and handed to the foil with a gold
+  edge, a "?" slot pops in on its word with the slots already up making room first; the columns are solved once
+  from every label, so each beat lays out the same. Two beats of one tracker less than 1 s apart are joined by
+  plan.py (`join_out` / `join_in`): one tracker stays up instead of sweeping out and back in. `stat_stack` lands
+  2-4 stats one by one in a row or a stack (the figure on the marker, then the foil; its label beside it on the
+  figure's baseline, wrapping onto two lines that span the figure's caps). It may share its beat with a capture:
+  plan.py gives it that card's box (`beside`) and the stats keep 24 px clear of it in the part of the face band it
+  leaves free. Two renderer fixes for the family: a kinetic card no longer gets the lane's swap wipe (it enters and
+  leaves on its own) and hands the frame to the next card in its lane at that card's start. check.py no longer reads
+  a tracker's `id`, a slot's `state` or a stat_stack's `layout` as words on screen, and check.py render no longer
+  counts a capture up beside a kinetic card as that card's ink on the face. Measured on a real take at
+  1080x1920: about +0.01 s a frame with a stat_stack up, under that with a tracker. Docs: `references/kinetic.md`.
+  Tests: made-up cases in `remotion/test/kinetic/step_build.json` and `stat_stack.json` (one of each in
+  `test/determinism.mjs`), plan.py and check.py demo asserts.
 
 ## ai-editor 2.6.2-cooked.1 (fork, 2026-10-13)
 
