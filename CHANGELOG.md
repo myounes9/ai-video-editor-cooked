@@ -22,6 +22,21 @@ What changed for every user, newest first.
   template-filler. Tests: route.py, motion.py and plan.py demos (a made-up take with a count, a list and a before and
   after; a full budget; a clip before a count left out over the budget, and before a kept one; more candidates than
   room, built and planned alike; kinetic titles off; a stray clip on a number card; a 50/50 layout; the cut's length).
+- Kinetic titles and motion clips: the graphics budget fills in the user's order (fork, opt-in). The beat finder
+  counted every visuals.json card as the user's own, a moving template visual-prep put on a list line included, so in
+  a short video (5.6 s, room for one graphic) that template, built as a motion clip, took the only slot and kept the
+  hook's figure away; with a real screenshot there too, the clip even took the screenshot's slot. Now the user's real
+  cards (screenshots, captures, images, posts, logos) come first, then the number beats, then the moving templates a
+  clip may replace (`notes`, `flow`, `side_by_side`, `progress`, `terminal`, `chat`, `toasts`, `curve`) and their
+  clips, in the slots left, alike in the beat finder (`kinetic_beats.own_cards`: a moving template neither takes the
+  number beats' room nor keeps them away), `motion.py pick` and plan.py `budget_cards` (`budget.settle`). The hook's
+  figure is always kept: when the real cards fill the budget it comes on top of them, never in one's place, and plan.py
+  and the beat finder say so. A moving template up with a kept number card is dropped with a warning, as a clip was (one
+  that starts before it and still holds 2 s ends 1 s before it instead). Edits whose number beats were found before are
+  found again once (kinetic_beats VERSION 3). Kinetic titles off, nothing changes. Guidance: style-edit
+  `references/kinetic.md` "Density", "How many" and "Motion clips". Tests: budget.py, kinetic_beats.py, plan.py and
+  motion.py demos (the 5.6 s take: the hook kept, no clip; the same with a real screenshot: both kept, the overflow
+  said; a normal-length take unchanged; kinetic titles off unchanged).
 
 ## ai-editor 2.7.8-cooked.1 (fork, 2026-10-14)
 

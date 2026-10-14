@@ -55,7 +55,9 @@ visuals.json, and it adds them there from the cut's words (`"auto": "kinetic"` o
 - **Density** (`graphics.kinetic_per_min`, default 8; the count is `budget.py`'s, "How many" below): at most rate x
   minutes graphics in all, a tracker's beats one graphic; the real cards already there (images.json, visuals.json
   captures, posts, logos, titles, ctas, kinetic beats written by hand) count first, the strongest candidates take the
-  rest, and the hook is kept even past it. Each beat carries its `strength` (its score, a tracker's beats sharing their
+  rest, and the hook is kept even past it. A moving template the motion skill may build as a clip (a `notes`, `flow`,
+  `side_by_side`, `progress`, `terminal`, `chat`, `toasts` or `curve` anim, or its placed clip) is not counted here
+  and keeps no beat away: it comes after the number beats ("Motion clips" below). Each beat carries its `strength` (its score, a tracker's beats sharing their
   best) and the hook `"hook": true`, so plan.py `budget_cards` keeps the same ones. The style page's `cards.per_min`
   does not cap it; `cards.on` false places none. 1 s of plain footage between any two cards, kinetic or real (the next
   beat of the same tracker joins instead); a kinetic card never covers a real one, except a `stat_stack` beside the
@@ -138,12 +140,14 @@ One count for every graphic a viewer sees, kinetic and real-source together (cap
 `graphics.kinetic_per_min` a minute (default 8; it wins over the style page's `cards.per_min`, and `cards.on` false
 still means none). `lib/ai_editor/budget.py` holds it, so the beat finder and plan.py pick against the same number:
 `allowance(style, duration_s)`, `remaining(style, duration_s, taken)`, `pick(items, n)`. plan.py `budget_cards` keeps
-the strongest: the hook always (a beat with `"hook": true`, else the first graphic in the opening 3 s), then by each
-beat's `strength` (0-1; a real source with none counts 0.75, a kinetic beat 0.5), a beat that would leave under 1 s
-of plain footage beside one already kept counting 0.2 less, so the picks spread out (the beats of one tracker
-are one graphic coming back: counted once, kept or left out together, never penalised beside each other). Each card
-left out is named on
-stderr. plan.json records `graphics_budget`; style_check.py and quality.py compare the cards a minute with it, and do
+the strongest: the hook always (a beat with `"hook": true`, else the first graphic in the opening 3 s that is no
+moving template), then by each beat's `strength` (0-1; a real source with none counts 0.75, a kinetic beat 0.5), a
+beat that would leave under 1 s of plain footage beside one already kept counting 0.2 less, so the picks spread out
+(the beats of one tracker are one graphic coming back: counted once, kept or left out together, never penalised
+beside each other). The order: the user's real cards (screenshots, captures, images, posts, logos) first, then the
+number beats, then the moving templates (`budget.CLIP_TEMPLATES`) and their clips, which take only the slots the
+rest leave. When the real cards fill the budget the hook's figure is kept on top of them, never in one's place: the
+plan has one graphic over the budget, and plan.py says so on stderr. Each card left out is named on stderr. plan.json records `graphics_budget`; style_check.py and quality.py compare the cards a minute with it, and do
 not flag a kinetic kind the copied creator hardly uses, or a soft push under a kinetic card, as hers to match.
 
 ## Motion clips (the motion skill, beside kinetic titles)
@@ -164,15 +168,21 @@ there), the motion skill runs as upstream's, unchanged.
   `logo_cluster` stays its template card. The clip's brief says: no counter, nothing counting up, and no figure but
   those said in its own words, as said. A clip that would end under 1 s before a kept number beat ends 1 s before it
   when it still holds 1 s (plan.py would cut it there, before its motion finished).
-- **One budget**: the clips count in `graphics.kinetic_per_min` with everything else, over the cut's length (cut.mp4,
-  as plan.py probes it). A clip only ever replaces a beat that was already a card (its template, kept under
-  `fallback`): it is ranked as that template, and the beat finder reads it as that beat, so placing one never moves
-  the number beats. `pick` builds only the clips budget.pick keeps among the number beats, the other cards
-  (captures, screenshots, posts, logos, titles) and the candidates, as plan.py will; the budget full, none, and it
-  says so.
-- **plan.py** (`budget_cards`) keeps the budget in one count with budget.pick, each clip in its template's place; a
-  clip up with a kept kinetic card is dropped with a warning and its slot goes to the next strongest; a clip the
-  budget leaves out is named in a warning (pick again after a change). `motion.py place` keeps a beat's template when
+- **One budget, in this order**: the clips count in `graphics.kinetic_per_min` with everything else, over the cut's
+  length (cut.mp4, as plan.py probes it). The user's real cards (screenshots, captures, images, posts, logos) come
+  first; then the number beats, the hook always (over the budget when the real cards fill it, and said so); then the
+  moving templates a clip may replace (`notes`, `flow`, `side_by_side`, `progress`, `terminal`, `chat`, `toasts`,
+  `curve`: `budget.CLIP_TEMPLATES`), in the slots left. So in a short cut with room for one graphic, the hook's figure
+  gets it, not the list's template, and no clip is built. A clip only ever replaces a beat that was already a card
+  (its template, kept under `fallback`): it is ranked as that template (a clip of a capture as that capture, first),
+  and the beat finder reads it as that beat, so placing one never moves the number beats. The beat finder counts a
+  moving template neither against the number beats' room nor as a card they keep clear of (`kinetic_beats.own_cards`);
+  `pick` builds only the clips `budget.settle` keeps among the number beats, the other cards and the candidates, as
+  plan.py will; the budget full, none, and it says so.
+- **plan.py** (`budget_cards`, `budget.settle`) keeps the budget in one count in that order, each clip in its
+  template's place; a moving template or a clip up with a kept kinetic card is dropped with a warning and its slot
+  goes to the next strongest (a template that starts before the kinetic card and still holds 2 s is ended 1 s before
+  it instead, `space_kinetic`); a clip the budget leaves out is named in a warning (pick again after a change). `motion.py place` keeps a beat's template when
   the titles have since taken its line or its window (kinetic titles turned on after the pick).
 - By hand: `route.py beats` prints the rule and the room; `motion.py pick` prints how many lines the numbers own and
   how many candidate clips the budget keeps.
@@ -218,7 +228,8 @@ there), the motion skill runs as upstream's, unchanged.
   captures together stay at about that many a minute, with at least 1 s of plain footage between two cards (punch
   zooms land there). Over it, leave out your weakest card, never the hook's figure.
 - Moving formats (the motion skill's clips): only on a line with a `motion` hint, never a `likes` or `progress` on a
-  `[kinetic]` line; they count in the same budget ("Motion clips" above).
+  `[kinetic]` line; they count in the same budget after the number beats, so in a short video they may get no slot
+  ("Motion clips" above).
 - Not opted in (`graphics.kinetic` unset or false): no kinetic beat at all.
 
 ## The look (tokens.ts)

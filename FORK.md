@@ -284,8 +284,8 @@ The paths, and how each holds it:
   "twice" line; a full budget picks none, one free slot the one plan.py keeps; a hand-written number beat held long
   blocks a clip; a placed clip leaves `real_cards` and the beats found unchanged; kinetic off equal to upstream's
   `beats_for` through `pick`, and the source hash; `place` keeps the template once the titles are turned on; the
-  budget over a 30 s cut.mp4; `demo_windows`, end to end through plan.build: a clip before a count left out over the
-  budget ends before its line and a stale window over it is vetoed, a clip before a kept count ends `GAP_S` before it
+  budget over a 30 s cut.mp4; `demo_windows`, end to end through plan.build: a clip before a count left out (next to
+  a real screenshot) ends before its line and a stale window over it is vetoed, a clip before a kept count ends `GAP_S` before it
   and plan.py leaves it whole, and with more candidates than room plan.py keeps the clip pick built), plan.py demo
   (`budget_cards` with clips: a clip keeps exactly its template's slots at every rate; end to end, a stray clip on the
   hook's figure dropped, the list clip kept; off, both kept; a 50/50 layout keeps both).
@@ -295,6 +295,21 @@ The paths, and how each holds it:
   route.py printed the motion rule in a 50/50 or board layout; the brief's "no figure" contradicted a list of
   measures; motion and route counted the budget over the last word, plan.py over the cut. Each has a demo case;
   19 targeted mutations of the split are all caught by the demos.
+- Review fixes (third pass): the budget fills in the owner's order. The beat finder counted a moving template
+  visual-prep put on a list line as the user's own card, so in a 5.6 s take (room for one) that template, built as a
+  clip, took the only slot and the hook's figure got no title (with a real screenshot there, the clip took its slot
+  too). `lib/ai_editor/budget.py`: `CLIP_TEMPLATES` (the formats motion builds beside the titles) and `later()` (a
+  template, or a clip ranked as one through `_template`, picked only in the slots the rest leave); `own()` and
+  `REAL_SOURCES` (when the real cards fill the budget the hook comes on top, never in one's place); `settle()` (pick,
+  then drop a later card or a clip up with a kept kinetic one, after `space_kinetic`'s cut, and pick again).
+  `kinetic_beats.own_cards`: `find` counts no moving template, in the room or the gaps (VERSION 3); a hook kept over
+  the budget says so. `motion.py split_beats` ranks each clip as the beat it replaces (`_template`) with
+  `budget.settle`; plan.py `budget_cards` uses `budget.settle` and says when the hook takes the plan over the budget;
+  `anim_items` gives a clip its template's type. route.py counts a template after the numbers in its room line.
+  Tests: budget.py demo (the order, the hook's overflow, settle), kinetic_beats.py demo (a template takes no room; the
+  hook over full own cards), plan.py demo (a template up with a kept kinetic card goes; a clip of a capture ranks as
+  the capture), motion.py `demo_order` (the 5.6 s take: the hook, no clip; with a screenshot: both, the overflow said;
+  a normal-length take and kinetic titles off unchanged).
 
 Fork-only: upstream has no kinetic titles. Off unless a style opts in.
 

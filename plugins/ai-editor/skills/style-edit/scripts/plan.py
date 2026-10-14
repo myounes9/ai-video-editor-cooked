@@ -1042,38 +1042,49 @@ def budget_cards(cards, duration, style, titles=True):
     """With kinetic titles on (style.json graphics.kinetic) the video gets one count of graphics in all, kinetic and
     real-source cards together: graphics.kinetic_per_min a minute (default 8; lib/ai_editor/budget.py, which the beat
     finder reads too). The strongest are kept (budget.pick: the hook always, then each beat's "strength", spread out
-    so plain footage stays between them); each card left out is named on stderr. A motion skill clip is ranked as the
-    template it replaced (references/kinetic.md "Motion clips": motion.py split_beats picks them the same way), and
-    one up while a kept kinetic card is goes, its slot to the next strongest (the number is the title's; titles False:
-    the layout drops kinetic cards, so a clip may be up with one). Kinetic off: thin_cards' rules."""
+    so plain footage stays between them); each card left out is named on stderr. The user's own cards come first: when
+    they fill the budget the hook's figure is kept on top of it, and that is said on stderr. A moving template the
+    motion skill may build as a clip (budget.CLIP_TEMPLATES), and a clip of one (ranked as the template it replaced,
+    references/kinetic.md "Motion clips": motion.py split_beats picks them the same way), comes after the number beats:
+    it takes only the slots they leave, and one up while a kept kinetic card is goes, its slot to the next strongest
+    (budget.settle: the number is the title's; titles False: the layout drops kinetic cards, so it may be up with one).
+    Kinetic off: thin_cards' rules."""
     sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "lib"))
     from ai_editor import budget
     n = budget.allowance(style, duration)
     if n is None:
         return thin_cards(cards, duration, style.get("cards"))
-    pool = list(cards)
-    while True:
-        keep = budget.pick(pool, n)
-        kin = [c for c in keep if kind_of(c) in KINETIC] if titles else []
-        up = [(c, k) for c in keep if motion_clip(c) for k in kin if c["start"] < k["end"] and k["start"] < c["end"]][:1]
-        if not up:
-            break
-        c, k = up[0]
-        print(f"warning: motion clip {motion_clip(c)} on '{c['trigger_word']}' dropped: it is up with the {kind_of(k)} on "
-              f"'{k['trigger_word']}' ({k['start']:.1f}-{k['end']:.1f} s), and the numbers are the kinetic titles' "
-              "(references/kinetic.md \"Motion clips\")", file=sys.stderr)
-        pool = [x for x in pool if x is not c]
+    keep, up = budget.settle(cards, n, (lambda c: kind_of(c) in KINETIC) if titles else (lambda c: False))
+    for c, k in up:
+        what = f"motion clip {motion_clip(c)}" if motion_clip(c) else f"{kind_of(c)} card"
+        print(f"warning: {what} on '{c['trigger_word']}' dropped: it is up with the {kind_of(k)} on '{k['trigger_word']}' "
+              f"({k['start']:.1f}-{k['end']:.1f} s), and the numbers are the kinetic titles' (references/kinetic.md \"Motion clips\")",
+              file=sys.stderr)
+    pool = [c for c in cards if not any(c is x for x, _ in up)]
     gone = [c for c in pool if not any(c is k for k in keep)]
     if gone:
         print(f"note: {len(gone)} card{'s' if len(gone) != 1 else ''} left out (at most {n} graphics in "
               f"{duration:.0f} s: graphics.kinetic_per_min {budget.per_min(style):g}; the strongest kept): " +
               ", ".join(f"{c.get('trigger_word') or kind_of(c)}@{c['start']:.1f}s" for c in gone), file=sys.stderr)
+    units = len({budget.group(c) or id(c) for c in keep})
+    if units > n:   # budget.pick: the user's own cards fill it, and the hook is always kept
+        hook = next((c for c in keep if c.get("_hook") or c.get("hook")), None)
+        print(f"note: {units} graphics, over the budget of {n}: the user's own cards fill it and the hook's figure"
+              + (f" ('{hook['trigger_word']}')" if hook else "") + " is always kept (references/kinetic.md \"Motion clips\")",
+              file=sys.stderr)
     clips = [c for c in gone if motion_clip(c)]
     if clips:   # motion.py builds only what this keeps: one left out was built against another plan
         print(f"warning: {len(clips)} motion clip{'s' if len(clips) != 1 else ''} left out by the graphics budget ({n}): " +
               ", ".join(f"{motion_clip(c)}@{c['start']:.1f}s" for c in clips) + " (motion.py pick again after a change)",
               file=sys.stderr)
     return [c for c in cards if any(c is k for k in keep)]
+
+
+def budget_kind(v):
+    """A visuals.json beat's type as budget.py reads it (budget.kind): a clip's template, for budget.later."""
+    sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "lib"))
+    from ai_editor import budget
+    return budget.kind(v)
 
 
 def motion_clip(card):
@@ -1119,8 +1130,10 @@ def anim_items(visuals, edit_dir=None, style=None):
             continue
         item = {k: v[k] for k in ("word", "nth", "box", "entrance", "hold_s", "layout", "transition_in", "transition_out", "focus", "heading",
                                   "strength", "hook") if k in v}
-        if "strength" not in item and (v.get("fallback") or {}).get("strength") is not None:   # a motion clip: its template's
-            item["strength"] = v["fallback"]["strength"]
+        if v.get("fallback"):   # a motion clip: ranked as its template (budget.later), with that one's strength
+            item["template"] = budget_kind(v["fallback"])
+            if "strength" not in item and v["fallback"].get("strength") is not None:
+                item["strength"] = v["fallback"]["strength"]
         if "box" in v:
             item["_own_box"] = True
         if v["type"] in KINETIC:   # its own lane: it may share the frame with a capture (stat_stack beside a screenshot)
@@ -1284,7 +1297,7 @@ def _place(images, words, duration, hold, ent, box, aspect):
                 card[k] = im[k]
         if im.get("marks"):
             card["marks"] = json.loads(json.dumps(im["marks"]))
-        for k in ("strength", "hook"):   # the beat finder's score and hook flag, for budget_cards (popped before the plan)
+        for k in ("strength", "hook", "template"):   # the beat finder's score and hook flag, a clip's template, for budget_cards (popped before the plan)
             if im.get(k) is not None:
                 card["_" + k] = im[k]
         kind = im.get("format") or (im.get("anim") or {}).get("type") or ("shot" if "src" in im else None)
@@ -2938,7 +2951,7 @@ def build(style, words, meta, images=(), aspect="auto", cuts=(), visuals=(), edi
             print(f"warning: '{c['trigger_word']}' capture text renders at {px:.0f} px x-height (under {READ_XH}: "
                   "too small on a phone; check.py plan FAILs it on vertical). Cut it to a shorter sentence, a smaller \"fit\", "
                   "or a \"crop\" round the evidence in visuals.json", file=sys.stderr)
-        for k in ("_f", "_own_box", "_strength", "_hook"):
+        for k in ("_f", "_own_box", "_strength", "_hook", "_template"):
             c.pop(k, None)
     for c in cards:   # logos sit round the head as drawn: grown by a zoom up while they are
         hd = ((c.get("anim") or {}).get("props") or {}).get("head") if (c.get("anim") or {}).get("type") == "logo_cluster" else None
@@ -3565,12 +3578,26 @@ def demo():
     assert len(budget_cards(bg, 30.0, {"graphics": {"kinetic": True, "kinetic_per_min": 4}})) == 2
     assert len(budget_cards(bg, 30.0, {"cards": {"per_min": 4}})) == 2 and budget_cards(bg, 30.0, {}) == bg
     # the motion skill's clips beside kinetic titles: in the same budget, each ranked as the template it replaced (a real
-    # card's strength unless the template had one); one up with a kept kinetic card goes and its slot goes to the next
-    # strongest; kinetic titles off, a clip is any card (thin_cards)
-    clip = lambda a, b, i, **x: {"start": a, "end": b, "trigger_word": i, "anim": {"type": "video_card", "props": {"motion": i}}, **x}  # noqa: E731
+    # card's strength unless the template had one), a moving template's after the kinetic cards; one up with a kept
+    # kinetic card goes and its slot goes to the next strongest; kinetic titles off, a clip is any card (thin_cards)
+    clip = lambda a, b, i, **x: {"start": a, "end": b, "trigger_word": i, "anim": {"type": "video_card", "props": {"motion": i}},  # noqa: E731
+                                 "_template": "notes", **x}
     cb = sorted(bg + [clip(1.0, 3.4, "01-on"), clip(15.0, 17.5, "02-free"), clip(27.0, 28.5, "03-short")], key=lambda c: c["start"])
     got = [c["trigger_word"] for c in budget_cards(cb, 30.0, {"graphics": {"kinetic": True, "kinetic_per_min": 14}})]   # 7
-    assert got == ["hook", "stats", "menu", "goal", "02-free", "money", "03-short"], got   # the weak title (0.2) goes
+    assert got == ["hook", "stats", "menu", "goal", "title", "money", "03-short"], got   # the clip takes what the rest leave
+    # ... a moving template (no clip built) the same: after the kinetic cards, and one up with a kept one goes, said so
+    import contextlib
+    import io
+    tc = lambda a, b, i: {"start": a, "end": b, "trigger_word": i, "anim": {"type": "notes", "props": {}}}  # noqa: E731
+    tb = sorted(bg + [tc(1.0, 3.4, "on"), tc(26.5, 29.0, "after")], key=lambda c: c["start"])
+    said = io.StringIO()
+    with contextlib.redirect_stderr(said):
+        got = [c["trigger_word"] for c in budget_cards(tb, 30.0, {"graphics": {"kinetic": True, "kinetic_per_min": 30}})]
+    assert got == [c["trigger_word"] for c in tb if c["trigger_word"] != "on"] and "notes card on 'on' dropped" in said.getvalue(), got
+    # ... a clip of a real source (a capture visual-prep put on a list line) is ranked as that capture: the weak title goes
+    cr = [{k: v for k, v in c.items() if k != "_template"} for c in cb]
+    got = [c["trigger_word"] for c in budget_cards(cr, 30.0, {"graphics": {"kinetic": True, "kinetic_per_min": 14}})]
+    assert got == ["hook", "stats", "menu", "goal", "02-free", "money", "03-short"], got
     assert [c["trigger_word"] for c in budget_cards(cb, 30.0, {"graphics": {"kinetic": True, "kinetic_per_min": 30}})] == \
         [c["trigger_word"] for c in cb if c["trigger_word"] != "01-on"]   # room for all: only the one on the hook goes
     assert "01-on" in [c["trigger_word"] for c in budget_cards(cb, 30.0, {"graphics": {"kinetic": True, "kinetic_per_min": 30}}, titles=False)]

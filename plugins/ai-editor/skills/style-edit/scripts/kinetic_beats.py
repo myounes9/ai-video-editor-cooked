@@ -39,10 +39,13 @@ before it reads visuals.json, so every new video gets its number beats with nobo
    fill before the count's empty wells, kept only with a fill), adjusted for clarity (labels, a stamp, more items).
    The strongest are kept, at most round(per_min x minutes) graphics in all (a tracker's beats are one graphic), the
    real cards already placed (images.json, visuals.json captures, posts, logos, titles, hand-written kinetic beats)
-   counted first. The hook is always kept. Between any two cards GAP_S of plain footage: a hold is cut to HOLD_TIGHT_S
-   for it, a real card before a beat ends sooner (plan.py space_kinetic), and a strong beat blocked only by the hold of
-   the one before bridges from it (BRIDGE_*); the next beat of the same tracker joins instead. Never over a real card,
-   except a stat_stack beside a capture. No card ends on the first words of a number said after it (whole()).
+   counted first. The hook is always kept, over the budget when those fill it. A moving template the motion skill may
+   build as a clip (budget.CLIP_TEMPLATES: a list, a flow, a before and after, a mechanism; or its placed clip) counts
+   after the number beats: it neither takes their room nor keeps them away (own_cards); plan.py fits it round them.
+   Between any two cards GAP_S of plain footage: a hold is cut to HOLD_TIGHT_S for it, a real card before a beat ends
+   sooner (plan.py space_kinetic), and a strong beat blocked only by the hold of the one before bridges from it
+   (BRIDGE_*); the next beat of the same tracker joins instead. Never over a real card, except a stat_stack beside a
+   capture. No card ends on the first words of a number said after it (whole()).
 
 Settings (style.json, taste.json): graphics.kinetic (on), graphics.kinetic_per_min (KINETIC_PER_MIN, every graphic a
 minute, real ones included), graphics.kinetic_auto (false: only hand-written kinetic beats). The rate and the count
@@ -67,7 +70,7 @@ sys.path.insert(0, str(HERE))
 sys.path.insert(1, str(HERE.parents[2] / "lib"))
 from ai_editor import budget, numbers  # noqa: E402
 
-VERSION = 2            # bump when the rules change: the fingerprint changes and every edit's beats are found again
+VERSION = 3            # bump when the rules change: the fingerprint changes and every edit's beats are found again
 KINETIC_PER_MIN = budget.DEFAULT_PER_MIN   # graphics a minute in all (real ones included), graphics.kinetic_per_min
 GAP_S = 1.0            # plain footage kept between two cards, kinetic or real (plan.py bridges kinetic ones closer than 1 s)
 REAL_MIN_S = 2.0       # a real card before a kinetic one ends GAP_S before it when it still holds this (plan.py space_kinetic)
@@ -352,6 +355,7 @@ class Card:
         self.e = self.e_want
         self.parts = parts
         self.drop = None
+        self.note = None   # why a kept card is kept anyway (the hook over the budget)
 
     @property
     def type(self):
@@ -389,7 +393,8 @@ class Card:
 
     def line(self):
         said = " ".join(self.take.w[i]["text"] for i in range(self.i0, min(len(self.take.w), self.i0 + 8)))
-        return f"{self.s:6.2f}-{self.e:6.2f}  {self.cls:8} {self.type:14} {self.score:5.1f}  {said[:60]}"
+        note = f"  ({self.note})" if self.note and not self.drop else ""
+        return f"{self.s:6.2f}-{self.e:6.2f}  {self.cls:8} {self.type:14} {self.score:5.1f}  {said[:60]}{note}"
 
 
 def label_parts(take, f, key="label", word="_label_word"):
@@ -770,6 +775,14 @@ def real_cards(take, visuals, images, style, duration):
     return sorted(out)
 
 
+def own_cards(real):
+    """The real_cards counted before the number beats: all but a moving template the motion skill may build as a clip
+    (budget.CLIP_TEMPLATES, or the clip that replaced one: real_cards reads it as its template). Those come after the
+    numbers (references/kinetic.md "Motion clips"): plan.py budget_cards keeps them only in the room the number beats
+    leave, and drops one up with a kept number beat."""
+    return [r for r in real if r[2] not in budget.CLIP_TEMPLATES]
+
+
 def rate(style):
     """Graphics a minute in all: budget.per_min, graphics.kinetic_per_min (KINETIC_PER_MIN unset), over the style
     page's cards.per_min; 0 with cards off. Read as on: this runs only once the style opted in."""
@@ -815,7 +828,9 @@ def select(cands, real, duration, per_min, take=None):
     paired = set()
     for c in sorted(cands, key=lambda c: (-c.score, c.s, c.cls)):
         new = not (c.tracker and any(o.tracker == c.tracker for o in kept))
-        if c.cls != "hook" and new and len({unit(o) for o in kept}) >= room:
+        if c.cls == "hook" and len({unit(o) for o in kept}) >= room:
+            c.note = f"the hook, kept over the budget of {total}: the edit's own cards ({len(real)}) fill it"
+        elif new and len({unit(o) for o in kept}) >= room:
             c.drop = f"over the budget ({total} graphics at {per_min:g} a minute, {len(real)} already placed)"
             continue
         if c.cls == "tracker" and not any(o.tracker == c.tracker and o.cls == "fill" for o in kept):
@@ -880,7 +895,7 @@ def find(words, style=None, visuals=(), images=(), duration=None):
         return [], []
     duration = duration or take.w[-1]["end"]
     cands = candidates(take)
-    real = real_cards(take, visuals, images, style or {}, duration)
+    real = own_cards(real_cards(take, visuals, images, style or {}, duration))
     return select(cands, real, duration, rate(style or {}), take), cands
 
 
@@ -1245,6 +1260,17 @@ def demo():
     kg = find(gym, many, visuals=cap)[0]
     assert {"stat", "counter"} <= {c.cls for c in kg}, [c.line() for c in kg]
     assert "tally" not in {c.cls for c in find(gym, many, visuals=[{**cap[0], "word": "eighteen"}])[0]}
+    # a moving template the motion skill may build as a clip counts after the number beats: where the photo above took
+    # the chain's place and a share, the same list template (or its placed clip) takes neither
+    tp = [{"word": "flyers", "nth": 1, "kind": "anim", "type": "notes", "hold_s": 3}]
+    clip = [{"word": "flyers", "nth": 1, "kind": "anim", "type": "video_card", "motion": "01-flyers", "fallback": tp[0]}]
+    alone = [c.line() for c in find(bake, {"graphics": {"kinetic": True}})[0]]
+    assert [c.line() for c in find(bake, {"graphics": {"kinetic": True}}, visuals=tp)[0]] == alone
+    assert [c.line() for c in find(bake, {"graphics": {"kinetic": True}}, visuals=clip)[0]] == alone
+    # ... and the hook is kept when the edit's own cards fill the budget, saying so (2 photos, 1 graphic at 4 a minute)
+    two = [{"src": f"images/{w}.png", "word": w, "nth": 1} for w in ("record", "post")]
+    kh = find(timed(PODCAST), {"graphics": {"kinetic": True, "kinetic_per_min": 4}}, images=two)[0]
+    assert [c.cls for c in kh] == ["hook"] and "kept over the budget" in kh[0].line(), [c.line() for c in kh]
     demo_plan(bake)
     demo_refresh(bake)
     n = sum(len(find(timed(t), {"graphics": {"kinetic": True}})[1]) for t in (BAKERY, GYM, PODCAST, GARDEN, STALL))

@@ -13,10 +13,14 @@ Settings, style.json (or the user's taste.json) "graphics":
 
 allowance(style, duration_s): the most graphics for that length, or None when kinetic titles are off.
 pick(items, n): the n strongest graphics, in their own order (a step tracker's beats, one props "id", are one). The hook (an item with "hook": true, else the first one starting
-in the opening HOOK_S) is always kept. Strength is an item's "strength" (0-1, the beat finder's score), else
-REAL_STRENGTH for a real source (a capture, post, logo) and KINETIC_STRENGTH for a kinetic beat. One that would
-leave under MIN_PLAIN_S of plain footage beside one already kept counts TOUCH_PENALTY less, so the picks spread out
-and the speaker's own zooms happen between them; a much stronger beat still wins.
+in the opening HOOK_S) is always kept, even over n when the user's own cards fill it. Strength is an item's
+"strength" (0-1, the beat finder's score), else REAL_STRENGTH for a real source (a capture, post, logo) and
+KINETIC_STRENGTH for a kinetic beat. One that would leave under MIN_PLAIN_S of plain footage beside one already kept
+counts TOUCH_PENALTY less, so the picks spread out and the speaker's own zooms happen between them; a much stronger
+beat still wins. A moving template the motion skill may build as a clip (CLIP_TEMPLATES), and a clip of one, comes
+after: it takes only the slots the rest leave (later()).
+settle(items, n, kinetic): pick, and a moving template or a motion clip up with a kept kinetic graphic goes, its slot
+to the next (the number is the kinetic title's): what plan.py budget_cards keeps, and motion.py split_beats with it.
 """
 import math
 import sys
@@ -28,6 +32,15 @@ TOUCH_PENALTY = 0.2    # strength a beat loses for leaving less than that beside
 REAL_STRENGTH = 0.75   # a real source with no score: what is said, shown as it is (PRINCIPLES.md "Looking real")
 KINETIC_STRENGTH = 0.5
 KINETIC_TYPES = ("kinetic_number", "number_chain", "goal_bar", "step_build", "stat_stack", "kinetic_title", "cta_follow")
+# The moving templates the motion skill may turn into a clip beside kinetic titles (motion.py KINDS for kinetic_beats
+# MOTION_KINDS: a list, a flow, a before and after, a mechanism, a curve). They count after the number beats: the
+# user's real cards first, then the numbers (the kinetic titles'), then these (references/kinetic.md "Motion clips").
+CLIP_TEMPLATES = ("notes", "flow", "side_by_side", "progress", "terminal", "chat", "toasts", "curve")
+# The user's real cards: what kind() reads for a picture or screenshot ("src"), and the types a capture, post or logo
+# takes in visuals.json, kinetic_beats.real_cards and a plan.
+REAL_SOURCES = ("src", "image", "capture", "post", "logo", "social_post", "logo_cluster")
+GAP_S = 1.0            # plan.py space_kinetic: a card before a kinetic one ends this long before it ...
+REAL_MIN_S = 2.0       # ... when it still holds this (kinetic_beats.GAP_S, REAL_MIN_S)
 
 
 def per_min(style):
@@ -78,6 +91,26 @@ def is_hook(item):
     return bool(item.get("hook", item.get("_hook")))
 
 
+def later(item):
+    """True for a moving template the motion skill may build as a clip (CLIP_TEMPLATES), or a clip that replaced one:
+    it is ranked as its template ("_template": the beat it replaced, plan.py and motion.py set it), after the number
+    beats. A clip of a real source (a capture on a list line) is ranked as that capture: not later."""
+    t = item.get("_template", item.get("template"))
+    return (t if t is not None else kind(item)) in CLIP_TEMPLATES
+
+
+def is_clip(item):
+    """A motion skill clip: plan.py's video_card with props "motion", or motion.py's candidate ("_clip")."""
+    return bool(item.get("_clip") or ((item.get("anim") or {}).get("props") or {}).get("motion"))
+
+
+def own(item):
+    """One of the user's real cards (REAL_SOURCES: a screenshot, capture, image, post or logo, or a clip that replaced
+    one): when they fill the budget the hook's figure is kept on top of them (pick)."""
+    t = item.get("_template", item.get("template"))
+    return (t if t is not None else kind(item)) in REAL_SOURCES
+
+
 def group(item):
     """The beats of one step_build tracker (its props "id") are one graphic coming back: they count once, are kept or
     left out together, and are never spaced apart."""
@@ -88,7 +121,8 @@ def group(item):
 def pick(items, n, start=lambda i: i["start"], end=lambda i: i.get("end", i["start"])):
     """The items to keep for n graphics (None: all), in their own order: the hook, then one graphic at a time the
     strongest (a tracker's beats are one graphic, its strength their best), one that would leave under MIN_PLAIN_S
-    beside one already kept counting TOUCH_PENALTY less (ties: the earlier)."""
+    beside one already kept counting TOUCH_PENALTY less (ties: the earlier); a later() one only once no other is
+    left. When the user's real cards (own()) fill n, the hook is kept on top of them: n of those and the hook."""
     items = list(items)
     order = sorted(range(len(items)), key=lambda i: start(items[i]))
     units = {}
@@ -99,16 +133,47 @@ def pick(items, n, start=lambda i: i["start"], end=lambda i: i.get("end", i["sta
         return items
     if n <= 0:
         return []
+    late = lambda u: all(later(items[i]) for i in u)   # noqa: E731
     hook = next((u for u in units if any(is_hook(items[i]) for i in u)), None)
     if hook is None:
-        hook = next((u for u in sorted(units, key=lambda u: start(items[u[0]])) if start(items[u[0]]) < HOOK_S), None)
+        hook = next((u for u in sorted(units, key=lambda u: start(items[u[0]])) if start(items[u[0]]) < HOOK_S and not late(u)), None)
     keep = [] if hook is None else [hook]
+    pool = [u for u in units if u is not hook]
+    if hook is not None and not all(own(items[i]) for i in hook) and sum(all(own(items[i]) for i in u) for u in pool) >= n:
+        pool = [u for u in pool if all(own(items[i]) for i in u)]   # the user's own cards fill n: the hook comes on top
+        n += 1
     touches = lambda u: any(start(items[i]) - end(items[k]) < MIN_PLAIN_S and start(items[k]) - end(items[i]) < MIN_PLAIN_S  # noqa: E731
                             for i in u for v in keep for k in v)
     while len(keep) < n:
-        rest = [u for u in units if u not in keep]
+        rest = [u for u in pool if u not in keep and not late(u)] or [u for u in pool if u not in keep]
+        if not rest:
+            break
         keep.append(max(rest, key=lambda u: (max(strength(items[i]) for i in u) - TOUCH_PENALTY * touches(u), -start(items[u[0]]))))
     return [items[i] for i in sorted(i for u in keep for i in u)]
+
+
+def up_with(c, k, start=lambda i: i["start"], end=lambda i: i.get("end", i["start"])):
+    """Whether c is up while kinetic graphic k is, once plan.py space_kinetic has cut it: a card that starts before k
+    ends GAP_S before it when it still holds REAL_MIN_S; a motion clip is never cut there (its motion must finish)."""
+    e = end(c)
+    if not is_clip(c) and start(c) < start(k) and start(k) - GAP_S - start(c) >= REAL_MIN_S:
+        e = min(e, start(k) - GAP_S)
+    return start(c) < end(k) and start(k) < e
+
+
+def settle(items, n, kinetic=lambda i: kind(i) in KINETIC_TYPES, start=lambda i: i["start"], end=lambda i: i.get("end", i["start"])):
+    """(kept, gone): pick(items, n), then a moving template or a motion clip (later, is_clip) up with a kept kinetic
+    graphic (kinetic: which items are) leaves the pool and the rest is picked again, its slot to the next strongest.
+    gone: those, in the order they went, each with the kinetic item it was up with."""
+    pool, gone = list(items), []
+    while True:
+        keep = pick(pool, n, start, end)
+        kin = [k for k in keep if kinetic(k)]
+        up = next(((c, k) for c in keep if (later(c) or is_clip(c)) and not kinetic(c) for k in kin if up_with(c, k, start, end)), None)
+        if up is None:
+            return keep, gone
+        gone.append(up)
+        pool = [x for x in pool if x is not up[0]]
 
 
 def demo():
@@ -143,6 +208,28 @@ def demo():
     # ... and a tracker that comes back later is still one graphic: kept or left out whole
     tb = [c(0.4, 2.0), tk(5.0, 7.0, strength=0.7), c(10.0, 12.0, strength=0.6), tk(20.0, 22.0, strength=0.7), c(25.0, 27.0, strength=0.4)]
     assert pick(tb, 3) == tb[:4] and pick(tb, 2) == [tb[0], tb[1], tb[3]], [x["start"] for x in pick(tb, 2)]
+    # the order beside kinetic titles: the user's real cards, then the number beats (the hook always), then a moving
+    # template the motion skill may build as a clip (or that clip, ranked as its template), in what is left
+    tpl = lambda s, e, t="notes", **x: {"start": s, "end": e, "type": t, **x}  # noqa: E731
+    clip = lambda s, e, t, **x: {"start": s, "end": e, "anim": {"type": "video_card", "props": {"motion": "m"}}, "_template": t, **x}  # noqa: E731
+    assert later(tpl(0, 1)) and later(clip(0, 1, "side_by_side")) and not later(clip(0, 1, "src")) and not later(c(0, 1))
+    assert own({"src": "images/a.png"}) and own(clip(0, 1, "src")) and not own(tpl(0, 1)) and not own(c(0, 1, "kinetic_title"))
+    assert not later({"type": "likes"}) and not own({"kind": "title", "word": "x"})   # neither: ranked with the numbers
+    od = [c(0.4, 2.0, hook=True), tpl(2.6, 5.0, strength=0.95), c(8.0, 10.0, strength=0.3)]
+    assert pick(od, 2) == [od[0], od[2]] and pick(od, 3) == od   # a weak number beat before a strong template
+    assert pick([tpl(0.2, 2.0), c(5.0, 7.0)], 1) == [c(5.0, 7.0)]   # an opening template is no hook
+    # real cards fill the budget: the hook comes on top of them, never in a real card's place; a template gets none
+    sh = [c(0.4, 2.0, hook=True), {"src": "images/a.png", "start": 4.0, "end": 6.0}, tpl(7.0, 9.0, strength=0.9), c(10.0, 12.0, strength=0.6)]
+    assert pick(sh, 1) == sh[:2] and pick(sh, 2) == sh[:2] and pick(sh, 3) == [sh[0], sh[1], sh[3]] and pick(sh, 0) == []
+    assert pick(sh[1:], 1) == [sh[1]]   # no hook: the budget as it is
+    # settle: a moving template up with a kept kinetic graphic goes and the next takes its slot; one before it that
+    # plan.py space_kinetic can end GAP_S sooner (REAL_MIN_S still held) stays; a clip is never cut so it goes
+    st_ = [c(0.4, 3.0, hook=True), tpl(2.0, 4.5, strength=1.0), tpl(8.0, 10.0), c(12.0, 14.0, strength=0.6), tpl(9.0, 13.0)]
+    keep, gone = settle(st_, 3)
+    assert keep == [st_[0], st_[2], st_[3]] and [g[0] for g in gone] == [st_[1]], (keep, gone)
+    assert settle(st_, 5)[0] == [st_[0], st_[2], st_[3], st_[4]]   # 9.0-13.0 ends 11.0 before the 12.0 beat: kept
+    assert settle([c(0.4, 3.0, hook=True), clip(9.0, 13.0, "notes"), c(12.0, 14.0)], 3)[0] == [c(0.4, 3.0, hook=True), c(12.0, 14.0)]
+    assert settle(st_, 5, kinetic=lambda i: False)[0] == st_   # no kinetic titles (a split layout): nothing is up with one
     print("budget demo ok")
 
 
