@@ -40,9 +40,14 @@ running: leave it.
 Every job remembers the session that took it (`CLAUDE_CODE_SESSION_ID`). `status` from another session
 never writes to it, `status` never takes a queued job (only `wait` does), and each session makes one
 video at a time. A taken job with no report for 15 minutes belonged to a session that stopped: the next
-`status` or `wait --job` from another session adopts it and prints `adopted <id>`. When the user presses Make my video while
-this session is making another, the page offers "Open a new Claude for this video": a new Terminal window
-starts Claude Code in the library with the prompt `/ai-editor:start take job <id>`. On that prompt run
+`status` or `wait --job` from another session adopts it and prints `adopted <id>`. Every video gets a Claude of its
+own: when the user presses Make my video, each new video job (one per clip for "Separate videos") opens a new
+Terminal window running Claude Code in the library with the prompt `/ai-editor:start take job <id>`, unless an idle
+listening Claude can take it right now (then that one does, and the rest still get their own). A listening Claude is
+idle only with no active job: none it holds (a creator, a skill, a video's cut) and no video whose edit it is still on
+(that editor's `wait` listening, or a review command there in the last 15 minutes). Setup and the sample stay with
+the listening Claude; a creator's analysis is queued for it like any job. Where no terminal can
+open (Linux without x-terminal-emulator), the editor shows that command to run instead. On that prompt run
 `python3 "$H" serve --no-open` and `python3 "$H" wait --job <id>` (both in the background): it prints that
 job's line (or `GONE` when it is done or another session has it), then do the job as below. Do not start a
 plain `wait` afterwards unless the user asks for more.
@@ -50,9 +55,15 @@ plain `wait` afterwards unless the user asks for more.
 ## Questions
 
 Ask with AskUserQuestion as usual. When the home page or a review page is open and showing, a hook
-(`lib/ai_editor/askhook.py`) puts the question on that page: the options, an Other box, and "Answer in
-Claude Code instead". The answer comes back as the tool's result, the same as a terminal answer. No page
-showing, "Answer in Claude Code instead", or 10 minutes with no answer: the terminal box shows. Never ask
+(`lib/ai_editor/askhook.py`) puts the question on that page. A question about a video goes to that video's editor
+only: the hook takes the video your latest command named (its edit folder), so run a command on that edit (any
+`review.py <edit> ...` or script on it) before asking about it. On the page: the options, an Other box with a paperclip (an image
+can also be pasted or dropped on the card), and "Answer in Claude Code instead". Images are saved on this
+computer (the review page: `<edit>/review/`; the home page: `<edit>/asks/`, or `$AI_EDITOR_HOME/asks` with no
+edit folder yet) and the answer ends with `Attached images: /abs/a.png (Read each one to see it)`: Read every
+listed image before acting on the answer. The answer comes back as the tool's result, the same as a terminal answer. No page
+showing, "Answer in Claude Code instead", or every page that had it closed: the terminal box shows (an open page
+waits for the answer however long it takes). Never ask
 a question in plain chat text when AskUserQuestion fits: only the tool reaches the page. A question only
 reaches pages this session works on (the home page while it holds a job there or listens, the review page
 of an edit it ran `review.py` on), with the job's name on the card. Another session's questions stay in its
@@ -77,7 +88,7 @@ same words as the newest step update that row, never a second one. A new `--step
 `--failed "<plain sentence>"` ends the job:
 
 ```bash
-python3 "$H" status <teardown|skill|video|modal|setup|update> --step "..." [--detail "video 3 of 7"] [--progress 0.4]
+python3 "$H" status <teardown|skill|video|setup|update> --step "..." [--detail "video 3 of 7"] [--progress 0.4]
 python3 "$H" status <job> --result '<json>' --done
 ```
 
@@ -104,7 +115,9 @@ The page reads every number itself from `creator-teardowns/<handle>/style.json` 
 so it fills in as each script writes. `report.py build` also prints the style's skill
 (`skill edit-like-<handle> -> <path>`). Then read `look.md` and end the job with what not to copy,
 one plain sentence per BAN-level AI tell and per move the teardown rejects:
-`--result '{"reject": ["..."]}' --done`. Do not open `teardown.html`: the page links it.
+`--result '{"reject": ["..."]}' --done`. Do not open `teardown.html`: the page links it. The style's
+`warnings` (report.py: not one format, graphics on the face) show on the finished analysis and the style page by
+themselves; say them in chat as well, and never say something is on the page that the page does not show.
 
 A step that stops: say why with `--failed`, in the words of the skill's "If a script stops" table.
 
@@ -139,7 +152,7 @@ Five prompts, each one the user can paste into Claude Code as it is. Every numbe
 
 ### `JOB video <path> as=<mine|@handle|defaults> aspect=<9:16|16:9> edit=<dir> root=<dir>`
 ### `JOB video takes=<dir>/takes.txt as=... aspect=... edit=<dir> root=<dir>`
-### either one with ` script=<edit>/script.md` and/or ` skill=<skill>` before `root=`
+### either one with ` script=<edit>/script.md`, ` skill=<skill>`, ` chain=<steps>`, ` sample=1` and/or ` assets=<edit>/assets.json` before `root=`
 
 The user picked clips and a style and pressed "Make my video" (or "Start the cut" on a first run).
 `edit=` is the edit folder the page already made and listed in the library: use it, never make
@@ -147,38 +160,82 @@ another. `takes=` lists several clips, one path per line, in the order the user 
 video, so join them first (`cut/references/takes.md`, `join.py <edit>/joined.mp4 <the paths in order>`,
 no question: the page asked it). "Separate videos" arrives as one JOB per clip; take them one by one.
 
-`as=mine`: keep the profile as it is. `as=defaults`: `profile.py set creators=[]`. `as=@handle`:
-`profile.py set 'creators=[{"handle":"<h>","take":["captions","pace","visuals"]}]'`. When
+`as=` is this video's style only: never `profile.py set creators` for it (only the page's Make default changes the
+saved style). The page already wrote `<edit>/style.json` from it (when the job was made, and again when `wait`
+handed it to you): skip start step 3's blend, never run `profile.py style` on this edit without `--as <the job's
+value>`. `check.py plan` fails when the edit's style is not the one `as=` names. When
 `creator-teardowns/<h>/style.json` is not there yet, that creator is still being copied: cut now
 (the cut needs no style) and start the styled pass once the teardown job is done.
 `aspect`: `profile.py set aspect=<a>`.
+The clip's transcription started when the user added it on New video (before Make); `transcribe.py` reuses it.
 `script=`: the user added their script on the page. The page wrote it to `<edit>/script.md` (copy it
 there if the path is elsewhere). Pass `--script <edit>/script.md` to `transcribe.py`; the cut then runs
 `script_match.py` before deciding spans (cut skill step 2).
 `skill=`: a skill style (its `style.json` has `"skill"`), see Skill style below.
+`chain=`: the style page's "What runs" when it is not the default. With no `chain=`, run logo-pack as usual (after
+the cut's approve, before the edit, when the video names two or more products). `chain=none`: never run
+logo-pack on this video. `chain=logo-pack,motion` or `chain=motion` (a skill style only): see Skill style below.
+`assets=`: images and links the user added on the page ("Add images or links"; more can come from the editor's
+"Anything to add?", and review.py `wait` then prints an `assets:` line). Images are in `<edit>/assets/`. Hand the
+file to visual-prep and style-edit: each item goes in first, as a card on its `say` words (else the line it is
+about), before anything is searched for.
 
-The window turns into the review page as soon as it has a URL, so open it FIRST, on the raw clip
-(after the join for `takes=`), before transcribing:
+The page already opened the editor on the raw clip when the user pressed Make my video (round 0, "Your
+clip, before the cut", `review.json` is there) and lists every step of the cut beside it, ticked as the
+scripts report them (review.py `CUT_STEPS`). Serve it and report its URL before transcribing; for `takes=`,
+swap in the joined clip after the join:
 
 ```bash
 R="${CLAUDE_PLUGIN_ROOT}/lib/ai_editor/review.py"
-python3 "$R" <edit> start --raw --video <the clip or joined.mp4> --stage cut   # round 0: "Your clip, before the cut"
-python3 "$R" <edit> serve --no-open                                            # background; prints the URL
+python3 "$R" <edit> start --raw --video <edit>/joined.mp4 --stage cut   # takes= only, after join.py; no review.json: the clip
+python3 "$R" <edit> serve --no-open                                     # background; prints the URL
 python3 "$H" status video --result '{"review_url": "<that URL>"}'
 ```
 
 `serve` opens no browser tab while the home window is showing this job: the home window goes to the
 review page in its own tab. Otherwise (no home window, or Claude Code alone) it opens a tab. Round 0 has no Approve; notes left on it wait for the cut. Then the start skill from step 2 on, with
 this file (or joined.mp4) as the video. The steps
-`Joined your clips in order` (takes only), `Wrote down every word you said`, `Cutting out the mistakes`
-reach the home page by themselves (join.py, transcribe.py, build_timeline.py, render.py); put each on the
-review page with `python3 "$R" <edit> status "<step>"`. After the cut's approve the style-edit scripts
+`Joining your clips` (takes only), `Writing down every word`, `Finding retakes and pauses`, `Cutting out
+the mistakes`, `Rendering the cut`, `Checking the cut` reach the home page and the editor by themselves
+(join.py, transcribe.py, build_timeline.py, render.py, verify_cut.py): never report them yourself. After the cut's approve the style-edit scripts
 put their own `--step` on the page's Making the edit card (style-edit `references/review.md`). The cut's
 own `start` (cut skill step 6) then opens round 1 on the same page, with the round 0 notes moved onto
 the cut: run `wait` and carry on there. `status video --done` once round 1 is up. When that `wait` prints
 `EDITS <n> transcript edits applied to spans.json`, the user restored or cut words in the transcript beside the player:
 run `build_timeline.py`, `render.py`, `verify_cut.py`, then `review.py <edit> round --video <edit>/cut.mp4`
 (`../../style-edit/references/review.md`, Transcript edits).
+
+#### Sample video (`sample=1`)
+
+The user pressed "Try it with a sample video" to see the whole flow before using their own footage. The page
+downloaded the repo's public sample take and put its decisions in `edit=`: `words.raw.json`, `spans.json`,
+`style.json` (the Card edit sample, cards not behind the head) and `visuals.json`. Do these steps instead of
+the start skill's steps 2-4, fast and exact:
+ask nothing, never change the profile or the taste, and skip transcribe, `retakes.py propose`, the judge,
+verify, visual-prep, logo-pack, the motion skill, music, the render and loudness questions. Notes the user
+sends are handled as usual. `C="${CLAUDE_PLUGIN_ROOT}/skills/cut/scripts"`, `SE="${CLAUDE_PLUGIN_ROOT}/skills/style-edit/scripts"`.
+
+1. Serve the review page and report its URL, as above.
+2. The cut, then `status video --done` and review.py `wait` in the background:
+
+```bash
+python3 "$C/build_timeline.py" <path> <edit> && python3 "$C/render.py" <path> <edit> && \
+cp <edit>/words.json <edit>/cut.transcript.json && \
+python3 "$R" <edit> start --video <edit>/cut.mp4 --stage cut --transcript <edit>/words.json
+```
+
+3. On the cut's `APPROVE`: the stills, then `wait`:
+
+```bash
+python3 "$C/retakes.py" captions <edit> && node "$SE/capture.mjs" <edit> && \
+python3 "${CLAUDE_PLUGIN_ROOT}/lib/ai_editor/run.py" "$SE/face.py" <edit> && \
+python3 "$SE/plan.py" <edit>/style.json <edit>/captions.json --aspect 9:16 && python3 "$SE/edit.py" stills <edit> && \
+python3 "$R" <edit> round --stage edit --stills --video <edit>/stills/stills.mp4 --plan <edit>/plan.json
+```
+
+4. On the stills' `APPROVE`: `python3 "$SE/edit.py" render <edit>` on the laptop, then
+   `python3 "$R" <edit> round --stage edit --video <edit>/render.mp4` and `wait`. Say in one line that the
+   sample is done and they can drop their own clip on Home next.
 
 #### Skill style
 
@@ -187,6 +244,12 @@ steps 2-4: the profile, blend and cut still run, so the fallback has the style's
 cut's approve run `/<skill>` on `<edit>/cut.mp4`: it makes its own captions, visuals and render. Then
 hand its render back as the edit round, as style-edit step 8 does:
 `python3 "$R" <edit> round --stage edit --video <its render>`, then `wait` on the page as usual.
+
+`chain=` with `motion` (the user switched Animations on for this skill style): before running `/<skill>`, run the
+visual-prep agent on the cut (style-edit steps 1-3), then the motion skill (`motion.py pick`, one clip-builder per
+clip, `motion.py check`). Hand `/<skill>` the checked clips: each `motion/<id>/` render with its `beat.json`
+times, to lay over the cut on those words. With `logo-pack` in the chain, run logo-pack first and tell `/<skill>`
+the logos are in `<edit>/images/` (`logos.json`). Say each step on the page (`review.py status`).
 
 When `<skill>` is not in this session's skill list, never switch silently:
 `python3 "$R" <edit> status "This style needs the <skill> skill, which this Claude session doesn't have"`,
@@ -214,10 +277,28 @@ The same change said in the chat goes through the same `taste.py add`, so both l
 The page's own controls (sliders, zooms, cut, sound effects) save through `styleskill.learn` directly
 and need no job.
 
-### `JOB modal`
+### `JOB skill-change <skill> path=<its SKILL.md> text=<the user's words>`
 
-The user pressed "Log in with your browser". Follow the setup skill's step 6 (Modal), reporting
-each of its steps with `status modal --step "..."`, and `status modal --done` when it works.
+The user pressed "Improve with feedback" on the Skills page and typed what to change in that skill. Run the
+skill-improver skill on the words (no video): one short rule per thing they asked, checked with
+`skillrules.py similar` (sharpen a twin with `--replace`, ask in the question box when one conflicts), show the
+exact lines and ask `Save these (Recommended)` / `Change one` / `Don't save` (the question reaches the page).
+After the yes: `skillrules.py add <path> "<rule>" --why "you said: <their words>"`. Then
+`status skill-change --result '{"changed": ["<rule>", ...]}' --done` (or `--done` with `{"changed": []}` on
+Don't save). The page shows `changed`; the style pages of every style using the skill list the rules.
+
+### `JOB skill-new [text=<what it should do>]`
+
+The user pressed "Make a new skill" on the Skills page. Run the skill-maker skill, with `text` as the answer to
+its first interview question when given. Its questions go in the question box (they reach the page). Report
+each step with `status skill-new --step "..."`, and at the end
+`status skill-new --result '{"summary": "Made /<name>. It is on the Skills page."}' --done`. The new skill
+shows on the Skills page, where "Use as a style" makes it a style.
+
+### Connect Modal and Test render (no job for Claude)
+
+The window runs these itself (`setup.py modal-connect` and `modal-test`), as jobs `modal` and `modal-test`
+owned by `home`. `wait` never hands them out and `status` never writes to them.
 
 ### `JOB setup`
 
@@ -236,8 +317,9 @@ python3 "${CLAUDE_PLUGIN_ROOT}/skills/update/scripts/update.py" market
 
 Exit 0: `status update --done`, then tell the user to type `/reload-plugins`. Exit 1 (no `claude`
 command, or it failed): `status update --failed "Type /plugin marketplace update nextwork, then /plugin update
-ai-editor@nextwork, then /reload-plugins."` and say the same lines. A git clone instead of the marketplace
-plugin: `git pull` in the plugin folder, then `--done`. Keep your background `wait` running afterwards: the
+ai-editor@nextwork, then /reload-plugins."` and say the same lines. Exit 2 (a git checkout, a developer copy):
+`status update --failed "This is a developer copy; update it with git yourself."`, say the same, and run no git
+command in that folder (no pull, checkout or merge). Keep your background `wait` running afterwards: the
 update never ends listening.
 
 ### `JOB cancel teardown`

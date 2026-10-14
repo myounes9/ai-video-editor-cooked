@@ -5,6 +5,7 @@ layout, conventions and tests, and adds its own changes on top. The goal: graphi
 video, made automatically, with free tools only, rendered at the best quality the renderer gives.
 
 Fork base: upstream commit `4d48b2e` (ai-editor 2.4.0, creator-teardown 2.6.0).
+Upstream merged since: ai-editor 2.7.8 (upstream `871cabe`), on branch `p3-base`.
 Fork work so far: Phase 1, merged on branch `phase1` from four branches (`p1-numbers`, `p1-render`,
 `p1-lottie`, `p1-determinism`), and Phase 2 (kinetic titles), merged on branch `phase2`. Each change has its
 own entry under "## Unreleased" in CHANGELOG.md.

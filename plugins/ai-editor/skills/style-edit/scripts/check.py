@@ -9,8 +9,9 @@ plan: every card inside the app's safe zones, vertical cards centred, no card on
 it is up (face.json, moved by the zooms or the split window), captions inside the safe zone and
 never held long past their words, no stretch with nothing changing on screen, not more text cards
 than picture cards, text cards' text at least 34 px, no number on a built card the speaker does not say
-(read as people say them: "two hundred and fifty" is 250, "7.5k" is "€7.5K"; lib/ai_editor/numbers.py).
-render: on the rendered mp4 (4 samples a second), where the card's drawn pixels are: on the face
+(read as people say them: "two hundred and fifty" is 250, "7.5k" is "€7.5K"; lib/ai_editor/numbers.py), a music
+bed when the style runs one.
+render: the planned music bed is in the render's audio, not silent. On the rendered mp4 (4 samples a second), where the card's drawn pixels are: on the face
 (YuNet, face.py), off centre, or not moving. On cut.mp4's audio: silences inside the speech, and
 kept spans too short to read as anything but a glitch. Caption words that differ from what the
 cut's own transcript heard are listed for a person to look at. Then quality.py: every frame
@@ -87,14 +88,15 @@ def zoom_state(t, zooms):
     for i, z in enumerate(zs):
         nxt = zs[i + 1]["start"] if i + 1 < len(zs) else float("inf")
         push = z.get("kind") == "push" and z.get("ease_s", 0) > 0
-        tail = 0 if push else min(PUNCH_S, max(0, nxt - z["end"]))
+        travel = z.get("travel_s") or PUNCH_S
+        tail = 0 if push else min(travel, max(0, nxt - z["end"]))
         if not z["start"] <= t < z["end"] + tail:
             continue
         if push:
             e = min(max(PUSH_MIN_S, z["ease_s"]), (z["end"] - z["start"]) / 2)
             p = sine((t - z["start"]) / e) if t < z["start"] + e else sine((z["end"] - t) / e) if t > z["end"] - e else 1
         else:
-            p = out2(min(1, (t - z["start"]) / PUNCH_S)) if t < z["end"] else 1 - out2(min(1, (t - z["end"]) / PUNCH_S))
+            p = out2(min(1, (t - z["start"]) / travel)) if t < z["end"] else 1 - out2(min(1, (t - z["end"]) / travel))
         return z["scale"] ** max(0.0, min(1.0, p)), tuple(z.get("origin") or ZOOM_ORIGIN)
     return 1.0, ZOOM_ORIGIN
 
@@ -124,6 +126,18 @@ def footage_affine(t, plan, W, H):
     return [[s, 0, ox * (1 - s) + px / 100 * W], [0, s, oy * (1 - s)]]
 
 
+def board_frame(t, lay):
+    """The speaker's (zoom, side) at t from the board layout's face keyframes (Board.tsx keyed; smoothstep for its ease)."""
+    z, sd = lay["face"][0][1], lay["face"][0][2]
+    for at, kz, ks, d in lay["face"]:
+        if t < at:
+            break
+        u = min(1.0, max(0.0, (t - at) / max(0.01, d)))
+        p = u * u * (3 - 2 * u)
+        z, sd = z + (kz - z) * p, sd + (ks - sd) * p
+    return z, sd
+
+
 def on_screen(box, t, plan):
     """A head box on cut.mp4 (percent) -> where it is drawn on the output while a card is up:
     grown by the zoom (and moved by a pan), and in split moved into the speaker's window under the seam."""
@@ -133,6 +147,12 @@ def on_screen(box, t, plan):
     if lay.get("mode") == "letterbox":   # the cut sits unmoved in the band
         _, by, _, bh = lay["band"]
         return [x, by + y * bh / 100, w, h * bh / 100]
+    if lay.get("mode") == "board":   # Board.tsx faceRect: zoomed about the top edge, the head moved left or right
+        z, sd = board_frame(t, lay)
+        slack = 100 * (1 - 1 / z)
+        c0 = min(slack, max(0, lay.get("head_x", 50) - 50 / z))
+        start = c0 + (0 - c0) * sd if sd >= 0 else c0 + (slack - c0) * -sd
+        return [(x - start) * z, y * z, w * z, h * z]
     if not lay:
         ox, oy = zoom_state(t, plan["zooms"])[1]
         px, pk = pan_at(t, plan.get("pans"))
@@ -200,7 +220,7 @@ def check_plan(plan, face=None, cuts=(), static_s=STATIC_S, visuals=None, brand=
         if (c.get("anim") or {}).get("type") in KINETIC:
             out += kinetic_fit(c, name, aspect)
             out += kinetic_over_scene(c, name, cards, aspect)
-        if c.get("layout") == "scene" and beats is not None and not any(
+        if c.get("layout") == "scene" and beats is not None and c.get("scene_by") != "creator" and not any(
                 b.get("layout") in ("scene", "split") and re.sub(r"[^\w'-]+", "", b.get("word") or "").lower() == word for b in beats):
             out.append(finding("FAIL", c["start"], f"{name} is a full-frame scene nobody asked for: the speaker leaves the frame",
                                "make it an overlay: plan again with no \"layout\": \"scene\" on that beat (a scene only when "
@@ -293,18 +313,22 @@ def check_plan(plan, face=None, cuts=(), static_s=STATIC_S, visuals=None, brand=
                                "plan again with the current plan.py (it caps the tail at 0.3 s)"))
     # Stretches with nothing changing: no card up, no zoom starting or ending, no jump cut.
     dur = plan["durationInFrames"] / plan["fps"]
+    shown, lay = list(cards), plan.get("layout") or {}
+    if lay.get("mode") == "board":   # the canvas and the centred questions are visuals too; each reframe moves the camera
+        shown += [{"start": a, "end": b} for a, b in lay["views"]] + [{"start": q["start"], "end": q["end"]} for q in lay["questions"]]
+        cuts = list(cuts) + [k[0] for k in lay["face"]]
     marks = sorted([0.0, dur] + [z[k] for z in plan["zooms"] for k in ("start", "end")] + list(cuts)
-                   + [c[k] for c in cards for k in ("start", "end")])
+                   + [c[k] for c in shown for k in ("start", "end")])
     # an audio clip's cover moves throughout; a letterbox holds still on purpose
     for a, b in zip(marks, marks[1:]) if not plan.get("cover") and (plan.get("layout") or {}).get("mode") != "letterbox" else ():
-        if b - a > static_s and not any(c["start"] <= a and c["end"] >= b for c in cards):
+        if b - a > static_s and not any(c["start"] <= a and c["end"] >= b for c in shown):
             out.append(finding("WARN", a, f"static for {b - a:.1f} s ({a:.1f}-{b:.1f} s): no card, zoom or cut",
                                "add a visual beat or a zoom in that stretch"))
     # pacing (SKILL.md step 3): a stretch with no card longer than the plan's card_gap_s is fine only when nothing
     # in it is named and the frame still changes (a zoom or a cut) at least every QUIET_HOLD_S
     gap_s = plan.get("card_gap_s") or GAP_S
     moves = sorted([z[k] for z in plan["zooms"] for k in ("start", "end")] + list(cuts))
-    for a, b in card_gaps(cards, dur):
+    for a, b in card_gaps(shown, dur):
         if b - a <= gap_s + 0.01:
             continue
         said = [f"'{n}' at {t:.1f} s" for t, n in named if a <= t < b]
@@ -351,9 +375,51 @@ def check_plan(plan, face=None, cuts=(), static_s=STATIC_S, visuals=None, brand=
                                "show the number as it is said (its K/M, its %), or show the page that published it"))
     # the AI-made look (references/ai-tells.md): BAN -> FAIL, WARN -> WARN
     from ai_tells import check_plan as ai_tells, for_brand
-    for f in for_brand(ai_tells(plan, visuals), brand):
+    for f in for_brand(ai_tells(plan, visuals), brand, plan.get("allow_tells")):
         out.append(finding("FAIL" if f["level"] == "BAN" else "WARN", None, f"AI tell '{f['tell']}': {f['where']}", f["fix"]))
     return out
+
+
+def user_assets(edit, plan, visuals=()):
+    """What the user added on the page (assets.json, lib/ai_editor/assets.py) must be in the edit: an image as a card
+    of the plan (its file name, copied into images/), a link as a visuals.json beat (its url, or a github beat's repo)."""
+    try:
+        items = json.loads((Path(edit) / "assets.json").read_text(encoding="utf-8")).get("items") or []
+    except (OSError, ValueError, AttributeError):
+        return []
+    srcs = {Path(str(c.get("src") or "")).name for c in plan.get("cards") or []}
+    urls = {str(v.get("url") or "").rstrip("/") for v in visuals or []} | \
+        {"https://github.com/" + str(v["repo"]) for v in visuals or [] if v.get("repo")}
+    out = []
+    for x in items:
+        miss = Path(x.get("src") or "").name not in srcs if x.get("kind") == "image" else \
+            str(x.get("url") or "").rstrip("/") not in urls
+        if miss:
+            what = x.get("name") if x.get("kind") == "image" else x.get("url")
+            out.append(finding("FAIL", None, f"the user added {what} on the page and it is not in the edit",
+                               f"put it in first, on its words ({x.get('say') or 'the line it is about'}): "
+                               + ("copy it into images/ with an images.json entry" if x.get("kind") == "image"
+                                  else f"a {x.get('site', 'web')} beat in visuals.json") + ", then plan.py again"))
+    return out
+
+
+def no_cards(plan, style, picks=(), wanted=0, edit="edits/<name>"):
+    """A plan with no cards while the style shows them (its measured rate, plan.card_rate): a card edit with nothing
+    on screen must never reach the user. The fix says where the cards went missing: none picked in visuals.json /
+    images.json, or picked and dropped by capture.mjs or plan.py. A skill style makes its own visuals: not here."""
+    from plan import card_rate
+    rate = None if style.get("skill") else card_rate(style)
+    if plan.get("cards") or not rate:
+        return []
+    dur = plan["durationInFrames"] / plan["fps"]
+    want = wanted or max(1, round(dur / 60 * rate))
+    if not picks:
+        fix = (f"visuals.json and images.json pick no card: give each `want` beat in beats.json ({want}) the real thing its line "
+               f"is about (a capture, post or logo, or the user's own photo; SKILL.md step 3), run capture.mjs, then plan.py")
+    else:
+        fix = (f"{len(picks)} pick(s) in visuals.json / images.json, none placed: run `node capture.mjs {edit}` if images/ is "
+               f"missing them, plan.py again, and fix each card its 'skipped' / 'dropped' warnings name")
+    return [finding("FAIL", None, f"no cards at all, and this style shows {rate:g} a minute (about {want} in {dur:.0f} s)", fix)]
 
 
 REAL_ANIMS = ("social_post", "video_card", "terminal")   # a real post or clip (fetched), a command line: not a statistic
@@ -523,6 +589,7 @@ def unsaid_numbers(plan, heard=None):
             continue
         texts = (shown_texts((c.get("props") or {}).get("texts")) if str(c.get("src", "")).endswith(".json")
                  else shown_texts(a.get("props"), kinetic=a.get("type") in KINETIC))
+        texts = [t for t in texts if not re.match(r"(images/|https?:)", t)]   # a file the card draws, a link: not on screen
         seen = set()
         for w in (w for t in texts for w in numbers.written(t)):
             v, raw, n = numbers.norm(w["value"]), numbers.norm(w["raw"]), w["text"]
@@ -814,6 +881,44 @@ def check_audio(edit, words):
     return out, {"noise_db": round(noise, 1), "threshold": how}
 
 
+BED_GAIN = 0.5   # how much of the planned bed the render must carry (1.0: all of it, at its own level)
+
+
+def pcm(f):
+    """A file's audio as mono float32 at 16 kHz (numpy), empty when it has none."""
+    import numpy as np
+    b = subprocess.run(["ffmpeg", "-v", "error", "-i", str(f), "-vn", "-ac", "1", "-ar", "16000", "-f", "f32le", "-"],
+                       capture_output=True).stdout
+    return np.frombuffer(b, np.float32)
+
+
+def bed_gain(video, bed):
+    """How much of the bed is in the video's audio: its projection onto the bed (the voice and the cues do not
+    correlate with it). About 1 when the render carries it at its level, about 0 when it rendered without it."""
+    import numpy as np
+    r, b = pcm(video), pcm(bed)
+    n = min(len(r), len(b))
+    e = float(np.dot(b[:n], b[:n]))
+    return float(np.dot(r[:n], b[:n]) / e) if n and e > 0 else 0.0
+
+
+def music_findings(edit, plan, style, prof, video=None):
+    """A style that runs a music bed (plan.music_wanted) must plan one and render it audibly: never silent."""
+    from plan import music_wanted
+    if not music_wanted(style or {}, prof or {}):
+        return []
+    if not plan.get("music"):
+        return [finding("FAIL", None, "this style runs a music bed and the plan has none",
+                        f"sfx.py music {edit} (a generated bed at the creator's level), then plan.py again")]
+    bed = Path(edit) / plan["music"]["src"]
+    if video is not None and bed.is_file():
+        g = bed_gain(video, bed)
+        if g < BED_GAIN:
+            return [finding("FAIL", None, f"the plan has a music bed and the render carries {100 * g:.0f}% of it (silent bed)",
+                            f"check {bed} has sound and reached the renderer (edit.py copies plan.music.src), then render again")]
+    return []
+
+
 def google_fonts(remotion=None):
     """The families the installed @remotion/google-fonts can load (look.tsx loadFamily), or None when it is not installed."""
     if remotion is None:
@@ -893,6 +998,17 @@ def demo():
                             "g = check.stream(sys.argv[2], 'null', 64, 64); next(g); g.close()", str(Path(__file__).parent),
                             str(v)], capture_output=True, text=True)
         assert r.returncode == 0 and "Broken pipe" not in r.stderr and not r.stderr.strip(), r.stderr
+    import os   # the style the user picked (the home job's as=) is the edit's style.json, or the plan check fails
+    with tempfile.TemporaryDirectory() as d:
+        old = os.environ.get("AI_EDITOR_HOME")
+        os.environ["AI_EDITOR_HOME"] = d
+        (Path(d) / "home").mkdir()
+        (Path(d) / "home" / "state.json").write_text(json.dumps({"jobs": [{"type": "video", "args": {
+            "edit": str(Path(d) / "e"), "as": "@sample-motion-design"}}]}), encoding="utf-8")
+        bad = style_pick(Path(d) / "e", {"handle": "default"})
+        assert len(bad) == 1 and bad[0]["level"] == "FAIL" and "@sample-motion-design" in bad[0]["fix"], bad
+        assert style_pick(Path(d) / "e", {"handle": "sample-motion-design"}) == [] and style_pick(Path(d) / "x", {}) == []
+        os.environ.pop("AI_EDITOR_HOME") if old is None else os.environ.__setitem__("AI_EDITOR_HOME", old)
     fp = {"captions": {"style": {"font_match": "TikTok Sans"}, "chunks": [{}]}, "look": {"font": "Proxima Nova"}}
     got = font_findings(fp, {"TikTok Sans", "Inter"})
     assert len(got) == 1 and got[0]["what"].startswith("look font 'Proxima Nova'"), got
@@ -911,8 +1027,36 @@ def demo():
     assert lottie_findings({**odd, "fr": 30, "op": 60, "chars": [{}]}, "t.json", {"Montserrat"}) == []   # glyphs: no font
     assert lottie_findings({**fixture, "fonts": {"list": [{"fFamily": "Montserrat", "fStyle": "Fett", "fWeight": "800"}]}},
                            "t.json", {"Montserrat"}) == []
+    # music: a style that runs a bed fails a plan with none and a render silent between words
+    snd = {"sound": {"music": {"present_pct": 100, "level_db": -18}}}
+    assert music_findings("e", {}, snd, {})[0]["level"] == "FAIL", "a music style planned silent"
+    assert music_findings("e", {}, snd, {"sound": {"music": False}}) == [] and music_findings("e", {}, {**snd, "music": False}, {}) == []
+    assert music_findings("e", {}, {"sound": {"music": {"present_pct": 20}}}, {}) == []
+    with tempfile.TemporaryDirectory() as d:   # the cut alone (bed dropped by the renderer) fails; cut + bed passes
+        mk = lambda name, *a: subprocess.run(["ffmpeg", "-v", "error", *a, "-t", "2", str(Path(d) / name)], check=True)  # noqa: E731
+        mk("cut.wav", "-f", "lavfi", "-i", "sine=f=220:r=48000")
+        (Path(d) / ".sfx").mkdir()
+        mk(".sfx/music.wav", "-f", "lavfi", "-i", "anoisesrc=r=48000:a=0.05:seed=7")
+        mk("render.wav", "-i", str(Path(d) / "cut.wav"), "-i", str(Path(d) / ".sfx" / "music.wav"), "-filter_complex", "amix=inputs=2:normalize=0")
+        mp = {"music": {"src": ".sfx/music.wav"}}
+        assert music_findings(d, mp, snd, {}, Path(d) / "cut.wav")[0]["level"] == "FAIL", "rendered without its bed"
+        assert music_findings(d, mp, snd, {}, Path(d) / "render.wav") == [], bed_gain(Path(d) / "render.wav", Path(d) / ".sfx" / "music.wav")
     assert "no --style" in style_note(None, None) and style_note("s.json", {"pace": {}}) is None
     assert "no --style" not in style_note("edits/x/style.json", {}), style_note("edits/x/style.json", {})
+    # a card style with an empty plan FAILs, saying where the cards went missing; the default style (no rate) does not
+    bare, her = {"fps": 30, "durationInFrames": 750, "cards": []}, {"graphics": {"per_min": 12}}
+    nc = no_cards(bare, her)
+    assert len(nc) == 1 and nc[0]["level"] == "FAIL" and "about 5 in 25 s" in nc[0]["what"] and "pick no card" in nc[0]["fix"], nc
+    assert "1 pick(s)" in no_cards(bare, her, [{"word": "x"}])[0]["fix"] and "(3)" in no_cards(bare, her, (), 3)[0]["fix"]
+    assert no_cards(bare, {}) == [] and no_cards(bare, {**her, "cards": {"on": False}}) == [] and no_cards(bare, {**her, "skill": "s"}) == []
+    assert no_cards({**bare, "cards": [{"start": 1}]}, her) == []
+    import tempfile
+    ue = Path(tempfile.mkdtemp(prefix="check_assets_"))
+    assert user_assets(ue, bare) == []
+    (ue / "assets.json").write_text(json.dumps({"items": [{"kind": "image", "src": "assets/asset-img1.png", "name": "a.png"},
+                                                          {"kind": "link", "url": "https://github.com/o/r", "site": "github"}]}), encoding="utf-8")
+    assert [f["what"].split()[3] for f in user_assets(ue, bare)] == ["a.png", "https://github.com/o/r"]
+    assert user_assets(ue, {"cards": [{"src": "images/asset-img1.png"}]}, [{"kind": "github", "repo": "o/r"}]) == []
     face = {"step_s": 0.5, "heads": [{"t": t / 2, "box": [30, 32, 40, 24]} for t in range(20)]}
     words = [{"text": "a", "start": 0.0, "end": 0.3, "type": "word"}]
     plan = {"width": 1080, "height": 1920, "fps": 30, "durationInFrames": 600, "zooms": [],
@@ -990,6 +1134,8 @@ def demo():
     unasked = [f for f in check_plan(fl, face, beats=[{"word": "task", "kind": "anim", "type": "flow"}]) if "nobody asked" in f["what"]]
     assert unasked and unasked[0]["level"] == "FAIL" and "overlay" in unasked[0]["fix"], unasked
     assert not any("nobody asked" in f["what"] for f in check_plan(fl, face, beats=[{"word": "Task.", "layout": "scene"}]))
+    fl["cards"][0]["scene_by"] = "creator"   # plan.py made it a cut-away: the copied creator is off screen that much
+    assert not any("nobody asked" in f["what"] for f in check_plan(fl, face, beats=[{"word": "task", "kind": "anim", "type": "flow"}]))
     # logo_cluster: logos laid round the head (no band) FAIL on vertical; plan.py's centred band passes, one logo does not
     lc = {**plan, "cards": [{"anim": {"type": "logo_cluster", "props": {"logos": [{"src": "a"}, {"src": "b"}]}}, "start": 0.5,
                              "end": 2, "trigger_word": "l", "box": [0, 0, 100, 100]}]}
@@ -1114,6 +1260,10 @@ def demo():
         "text": "users", "size": "37 clients", "accent": "#ff3300", "enter": {"ease": "back.out(2.5)", "dur": "0.3s"}}},
         "trigger_word": "w", "start": 0}]}
     assert [n for _, n, _ in unsaid_numbers(motion)] == ["37"], unsaid_numbers(motion)
+    # a file the card draws or a link is not a number on screen (upstream's card edit: a frame-by-frame image)
+    files = {**motion, "cards": [{"anim": {"type": "notes", "props": {"lines": [{"text": "users", "src": "images/frame-24.jpg"}],
+                                                                       "link": "https://x.dev/v2"}}, "trigger_word": "w", "start": 0}]}
+    assert unsaid_numbers(files) == [], unsaid_numbers(files)
     # caption chunks have no punctuation: a chunk's end ends a number, so no number is made of two; the
     # transcript's punctuated words join the ones said as one ("four hundred" | "and eighty-one" is 481)
     for chunks, text in [(["I sent a thousand", "And three people replied"], "1,003 replies"),
@@ -1202,14 +1352,41 @@ def demo():
     print("demo ok")
 
 
-def brand():
-    """The profile's brand kit (a tell the user's own brand names is only a warning)."""
+def prof():
+    """The user's profile (start skill), {} outside the plugin."""
     try:
         sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "lib"))
         from ai_editor import profile
-        return profile.load().get("brand") or {}
+        return profile.load()
     except Exception:
         return {}
+
+
+def style_pick(edit, style):
+    """FAIL when the edit's style.json is not the style the user picked for this video (the home job's as=): a Claude
+    that skipped `profile.py style --as` styles it as the default instead (QA round 3, Motion design)."""
+    try:
+        import os
+        sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "lib"))
+        from ai_editor import profile
+        home = Path(os.environ.get("AI_EDITOR_HOME", "").strip() or Path.home() / ".ai-video-editor")
+        jobs = json.loads((home / "home" / "state.json").read_text(encoding="utf-8")).get("jobs") or []
+        j = next((j for j in reversed(jobs) if j.get("type") == "video" and (j.get("args") or {}).get("edit")
+                  and Path(j["args"]["edit"]).resolve() == Path(edit).resolve()), None)
+        as_ = (j or {}).get("args", {}).get("as")
+        got = profile.picked(style, as_) if as_ else None
+    except Exception:   # no home window, no job: nothing to compare
+        return []
+    if got is None:
+        return []
+    return [finding("FAIL", None, f"style.json is {got}, but the user picked {as_} for this video",
+                    f"python3 {Path(__file__).resolve().parents[3] / 'lib' / 'ai_editor' / 'profile.py'} style {edit} --as {as_}, "
+                    "then captions, plan and stills again")]
+
+
+def brand():
+    """The profile's brand kit (a tell the user's own brand names is only a warning)."""
+    return prof().get("brand") or {}
 
 
 def main():
@@ -1239,6 +1416,12 @@ def main():
                            (rd("visuals.json") or []) + (rd("images.json") or []), rd("cut.transcript.json"))
         extra = {"static_s": static_s}
         found += font_findings(plan, google_fonts())
+        style = json.loads(Path(a.style).read_text(encoding="utf-8")) if a.style else rd("style.json") or {}
+        found += no_cards(plan, style, (rd("visuals.json") or []) + (rd("images.json") or []),
+                          sum(bool(x.get("want")) for x in rd("beats.json") or []), str(edit))
+        found += user_assets(edit, plan, rd("visuals.json") or [])
+        found += music_findings(str(edit), plan, style, prof())
+        found += style_pick(edit, rd("style.json") or {})
     else:
         video = edit / f"render{tag}.mp4"
         if not video.exists():
@@ -1260,6 +1443,7 @@ def main():
         elif rd("decisions.json"):
             found += slivers([[s["start"] * 1000, s["end"] * 1000] for s in rd("decisions.json")], 1000)
         heard, shown = rd("cut.transcript.json"), rd("captions.json")
+        found += music_findings(str(edit), plan, style or rd("style.json"), prof(), video)
         if heard:
             f, extra["audio"] = check_audio(edit, shown or heard)
             found += f

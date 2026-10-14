@@ -9,6 +9,8 @@
   python3 setup.py venv       create ~/.ai-video-editor/venv and install requirements/requirements.lock
   python3 setup.py model      download the free transcription model (about 500 MB, once, sha256 checked)
   python3 setup.py remotion   copy the renderer to ~/.ai-video-editor/remotion and npm ci it
+  python3 setup.py motion     install the motion clip tools in ~/.ai-video-editor/motion: the HyperFrames CLI and GSAP
+                              at the versions pinned in skills/motion/scripts/motion.py, and their headless Chrome
   python3 setup.py warm       pay the first edit's one-time costs now: first load of the Python libraries,
                               one test frame through the renderer (webpack's cache, the render browser's first start)
   python3 setup.py install-all [--report]   venv, model, remotion, warm, then the cutout model, never asking; a
@@ -26,8 +28,10 @@ What got installed is recorded in ~/.ai-video-editor/env.json. AI_EDITOR_HOME mo
   python3 setup.py crisper    install CrisperWhisper, free verbatim transcription (about 1 GB; non-commercial licence)
   python3 setup.py awskey     save AWS keys for Lambda renders (asks, hides what you type)
   python3 setup.py lambda     check the AWS keys and permissions for Lambda renders
-  python3 setup.py modal      install Modal (cloud renders) in the venv, then say how to log in
-  python3 setup.py modal-check   one tiny function on Modal: proves the login works
+  python3 setup.py modal-connect   cloud renders on Modal in one go: install it into the venv, log in in the
+                              browser (`modal setup`), build the render machine once, say the credit used
+                              (`modal` and `modal-check` do the same)
+  python3 setup.py modal-test      render a 5-second test video on Modal and say how long it took
   python3 setup.py matte      download the person-matting model (15 MB) for cards behind the speaker
   python3 setup.py later <step>   save an optional step for later (gemini elevenlabs style modal matte)
   python3 setup.py todo       every optional step not done yet ("finish setup")
@@ -60,6 +64,8 @@ VPY = VENV / ("Scripts/python.exe" if OS == "Windows" else "bin/python")
 PLUGIN = Path(__file__).resolve().parents[3]          # plugins/ai-editor
 REMOTION_SRC = PLUGIN / "remotion"
 REMOTION_HOME = HOME / "remotion"
+MOTION_HOME = HOME / "motion"     # the motion skill's HyperFrames CLI and GSAP (npm), not the user's global npm
+MOTION_PY = PLUGIN / "skills" / "motion" / "scripts" / "motion.py"
 LOCK = PLUGIN / "requirements" / "requirements.lock"   # uv pip compile --universal --generate-hashes
 NPM_LOCK = REMOTION_SRC / "package-lock.json"
 ENV = HOME / "env.json"           # what was installed, from which pins
@@ -231,6 +237,68 @@ def remotion_installed():
         return None
 
 
+def motion_pins():
+    """{package: version} from motion.py (HF_VERSION, GSAP_VERSION): one place pins them."""
+    text = MOTION_PY.read_text(encoding="utf-8")
+    return {"hyperframes": re.search(r'HF_VERSION = "([^"]+)"', text)[1], "gsap": re.search(r'GSAP_VERSION = "([^"]+)"', text)[1]}
+
+
+def motion_have():
+    """{package: installed version} in MOTION_HOME."""
+    have = {}
+    for name in ("hyperframes", "gsap"):
+        try:
+            have[name] = json.loads((MOTION_HOME / "node_modules" / name / "package.json").read_text(encoding="utf-8"))["version"]
+        except (OSError, ValueError, KeyError):
+            pass
+    return have
+
+
+def motion_bin():
+    return MOTION_HOME / "node_modules" / ".bin" / ("hyperframes.cmd" if OS == "Windows" else "hyperframes")
+
+
+def motion_row():
+    """(ok, detail): the pinned packages are in MOTION_HOME and the CLI finds its headless Chrome."""
+    pins, have = motion_pins(), motion_have()
+    off = [f"{k} {have.get(k, 'missing')}, pinned {v}" for k, v in pins.items() if have.get(k) != v]
+    if off:
+        return False, "; ".join(off)
+    b = run([str(motion_bin()), "browser", "path"], timeout=60) if motion_bin().exists() else None
+    if not b or b.returncode:
+        return False, "no headless Chrome for clips"
+    return True, f"hyperframes {pins['hyperframes']}, gsap {pins['gsap']}"
+
+
+def step_motion(force=False, tick=None):
+    """The motion skill's tools: `npm install` of the pinned HyperFrames CLI and GSAP into MOTION_HOME, then the
+    CLI's own headless Chrome (`hyperframes browser ensure`). About a minute and 500 MB on a first install."""
+    npm = shutil.which("npm")
+    if not npm:
+        sys.exit(f"npm missing. Install Node first: {fix('node')}")
+    MOTION_HOME.mkdir(parents=True, exist_ok=True)
+    pkg = MOTION_HOME / "package.json"
+    if not pkg.exists():
+        pkg.write_text('{"private": true, "description": "cooked. motion clip tools"}\n', encoding="utf-8")
+    done = "up to date"
+    pins = motion_pins()
+    if force or motion_have() != pins:
+        if tick:
+            tick(0.1, "the HyperFrames CLI and GSAP")
+        quiet([npm, "install", "--save-exact", "--no-audit", "--no-fund", "--loglevel=error"] +
+              [f"{k}@{v}" for k, v in pins.items()], MOTION_HOME, "installing the motion clip tools (npm install)")
+        done = "installed"
+    b = run([str(motion_bin()), "browser", "path"], timeout=60)
+    if force or b.returncode:
+        if tick:
+            tick(0.5, "the clip browser")
+        quiet([str(motion_bin()), "browser", "ensure"], MOTION_HOME, "downloading the clip browser")
+        done = "installed"
+    env_save(motion=pins)
+    print(f"Motion clip tools {done} in {MOTION_HOME}")
+    return done
+
+
 def venv_has(module):
     return VPY.exists() and run([str(VPY), "-c", f"import {module}"]).returncode == 0
 
@@ -270,6 +338,8 @@ def checks():
                  f'{py_self} "{here}" model'))
     rows.append(("renderer", bool(remo) and not d["renderer"], "; ".join(d["renderer"]) or str(REMOTION_HOME),
                  f'{py_self} "{here}" ' + ("repair" if remo else "remotion")))
+    mo_ok, mo_detail = motion_row()
+    rows.append(("motion clips", mo_ok, mo_detail, f'{py_self} "{here}" motion'))
     return rows
 
 
@@ -283,6 +353,19 @@ def disk_row(free_bytes):
         return True, f"{gb:.1f} GB free"
     return False, (f"{gb:.1f} GB free, need {DISK_MIN_GB} GB: setup installs about 1.5 GB and the cutout "
                    "writes about 0.5 MB a frame (about 0.9 GB a minute at 30 fps)")
+
+
+MODEL_MB = {"tiny": 75, "base": 145, "small": 484, "medium": 1530, "large-v3": 3100, "crisper": 1000}   # download sizes
+SPARE_GB = 1   # left free after a model lands, for the edits
+
+
+def room(what, mb, free=None):
+    """Before a model download: says its size and the free space, and stops when it would leave under SPARE_GB."""
+    gb = (free_bytes() if free is None else free) / 1e9
+    if gb < mb / 1000 + SPARE_GB:
+        sys.exit(f"Not downloading {what} (about {mb} MB): {gb:.1f} GB free, and it needs {mb / 1000 + SPARE_GB:.1f} GB "
+                 "with room for the edits. Free some space and run it again.")
+    print(f"Downloading {what}, about {mb} MB ({gb:.1f} GB free).", flush=True)
 
 
 def free_bytes():
@@ -351,6 +434,9 @@ def doctor():
     print(f"{'ok ' if disk_ok else 'FIX'}  {'free disk':<20} {detail}")
     if not disk_ok:
         print("     empty the Trash, delete old renders or move large files, then run doctor again")
+    cut = (models.DIR / MATTE).exists()   # optional: it downloads the first time cards go behind the speaker
+    print(f"{'ok ' if cut else '-- '}  {'cutout model':<20} " + ("installed: cards behind you" if cut else
+          f"downloads the first time cards go behind you: {'py' if OS == 'Windows' else 'python3'} \"{Path(__file__).resolve()}\" matte"))
     certs_ok, detail, cmd = certs_row()
     print(f"{'ok ' if certs_ok else 'FIX'}  {'secure web':<20} {detail}")
     if not certs_ok:
@@ -371,8 +457,8 @@ def doctor():
     mo = modal_status()
     print(f"{'ok ' if mo == 'ready' else '-- '}  {'modal':<20} " + {
         "ready": "logged in: cloud renders on Modal",
-        "no token": f"installed, not logged in. In your own terminal: {modal_exe()} token new",
-        "missing": f"optional, cloud renders on Modal ($30 free credit a month): {py_self} \"{here}\" modal"}[mo])
+        "no token": f"installed, not logged in: {py_self} \"{here}\" modal-connect (opens the browser)",
+        "missing": f"optional, cloud renders on Modal ($30 free credit a month): {py_self} \"{here}\" modal-connect"}[mo])
     node = shutil.which("node")
     if node:   # logged-in captures need an installed Chrome; login.mjs says which, or why none works
         b = run([node, str(PLUGIN / "skills/product-video/scripts/login.mjs"), "browser"], timeout=30)
@@ -527,6 +613,7 @@ def install_crisper():
         sys.exit("CrisperWhisper needs Python 3.10 or newer in the venv. Keep using Whisper, or "
                  f"install a newer Python ({fix('python')}), delete {VENV} and run the venv step again.")
     # The PyTorch build runs on Mac, Windows and Linux, CPU or GPU. The faster ct2 build is NVIDIA-only.
+    room("CrisperWhisper", MODEL_MB["crisper"])
     pip_optional("crisperwhisper")
     env = dict(os.environ, HF_HOME=str(HOME / "models"))
     name = os.environ.get("AI_EDITOR_CRISPER_MODEL", "small")
@@ -600,6 +687,9 @@ def step_model(force=False, tick=None):
     rec = env_load().get("models", {})
     fresh = not model_cached() or not (models.DIR / "yunet.onnx").exists()
     check = force or any(rec.get(r) != v for r, v in pins.items())
+    if not model_cached():
+        room(f"the {MODEL} transcription model", MODEL_MB.get(MODEL, 1500))
+
     def hook(blocks, size, total):   # the big file (model.bin, about 480 MB) is the bar
         if tick and total > 5e6:
             tick(min(1, blocks * size / total), f"{min(blocks * size, total) // 10**6} of {total // 10**6} MB")
@@ -646,7 +736,8 @@ def quiet(cmd, cwd, what, on_line=None, timeout=None, env=None):
     p = subprocess.Popen([str(c) for c in cmd], cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                          text=True, encoding="utf-8", errors="replace", env=env,
                          start_new_session=bool(timeout) and OS != "Windows")
-    timer = threading.Timer(timeout, kill_tree, [p]) if timeout else None
+    killed = []   # Timer.cancel() also sets .finished, so the timer says itself when it fired
+    timer = threading.Timer(timeout, lambda: (killed.append(1), kill_tree(p))) if timeout else None
     if timer:
         timer.daemon = True
         timer.start()
@@ -660,7 +751,7 @@ def quiet(cmd, cwd, what, on_line=None, timeout=None, env=None):
     finally:
         if timer:
             timer.cancel()
-    if timer and timer.finished.is_set() and code:
+    if killed and code:
         sys.exit(f"ERROR: {what} took over {timeout} s and was stopped.")
     if code:
         print("".join(tail).strip()[-3000:])
@@ -695,7 +786,15 @@ def step_remotion(force=False, tick=None):
     if not list((REMOTION_HOME / "node_modules" / ".remotion").glob("chrome-headless-shell/*")):
         if tick:
             tick(0.92, "the render browser")
-        quiet([shutil.which("npx"), "remotion", "browser", "ensure"], REMOTION_HOME, "downloading the render browser")
+        try:
+            quiet([shutil.which("npx"), "remotion", "browser", "ensure"], REMOTION_HOME, "downloading the render browser")
+        except SystemExit:   # a first edit running now fetches the same browser into the same folder: wait for it
+            for _ in range(60):
+                if list((REMOTION_HOME / "node_modules" / ".remotion").glob("chrome-headless-shell/*")):
+                    break
+                time.sleep(2)
+            else:
+                raise
         done = "installed"
     env_save(node_lock=file_sha(NPM_LOCK), node=version(["node", "--version"]),
              npm=version([npm, "--version"]))
@@ -705,6 +804,22 @@ def step_remotion(force=False, tick=None):
 
 WARM_IMPORTS = "import cv2, numpy, onnxruntime, faster_whisper, PIL.Image"
 WARM_S = 600   # each warm-up command; a stuck one is stopped and the step says skipped
+
+
+def test_edit(t, secs, env=None):
+    """A planned test edit in t/test: a secs-second test clip with four caption words."""
+    edit = t / "test"
+    edit.mkdir()
+    quiet(["ffmpeg", "-v", "error", "-f", "lavfi", "-i", f"testsrc2=s=540x960:r=30:d={secs}", "-f", "lavfi",
+           "-i", f"sine=f=220:d={secs}", "-shortest", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac",
+           edit / "cut.mp4"], t, "making a test clip", timeout=WARM_S)
+    words = [{"text": w, "start": 0.2 + i * 0.4, "end": 0.5 + i * 0.4, "type": "word"}
+             for i, w in enumerate("getting your computer ready".split())]
+    (edit / "captions.json").write_text(json.dumps(words), encoding="utf-8")
+    py = VPY if VPY.exists() else Path(sys.executable)
+    quiet([py, PLUGIN / "skills" / "style-edit" / "scripts" / "plan.py", edit / "style.json", edit / "captions.json",
+           "--no-sfx"], t, "planning a test edit", timeout=WARM_S, env=env)
+    return edit
 
 
 def step_warm(force=False, tick=None):
@@ -731,16 +846,7 @@ def step_warm(force=False, tick=None):
             quiet([VPY, "-c", WARM_IMPORTS], None, "loading the Python libraries", timeout=WARM_S)
         if tick:
             tick(0.3, "a test frame")
-        edit = t / "warm"
-        edit.mkdir()
-        quiet(["ffmpeg", "-v", "error", "-f", "lavfi", "-i", "testsrc2=s=540x960:r=30:d=2", "-f", "lavfi",
-               "-i", "sine=f=220:d=2", "-shortest", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac",
-               edit / "cut.mp4"], t, "making a test clip", timeout=WARM_S)
-        words = [{"text": w, "start": 0.2 + i * 0.4, "end": 0.5 + i * 0.4, "type": "word"}
-                 for i, w in enumerate("getting your computer ready".split())]
-        (edit / "captions.json").write_text(json.dumps(words), encoding="utf-8")
-        quiet([py, sk / "plan.py", edit / "style.json", edit / "captions.json", "--no-sfx"], t, "planning a test frame",
-              timeout=WARM_S, env=env)
+        edit = test_edit(t, 2, env)
         quiet([py, sk / "edit.py", "stills", edit, "--at", "1", "--no-check"], t, "drawing a test frame",
               timeout=WARM_S, env=env)
     except (SystemExit, Exception) as e:   # noqa: BLE001  optional: a full disk or a stuck browser never fails setup
@@ -781,7 +887,7 @@ def bootstrap(force=False, matte=False):
               "then run this again.")
         return 1
     steps = [("python packages", step_venv), ("transcription model", step_model), ("renderer", step_remotion),
-             ("warm-up", step_warm)]
+             ("motion clips", step_motion), ("warm-up", step_warm)]
     if matte:
         steps.append(("matting model", step_matte))
     for i, (name, fn) in enumerate(steps, 1):
@@ -796,7 +902,8 @@ def bootstrap(force=False, matte=False):
 INSTALL_STEPS = [  # (doctor row, what the page says, step, share of the bar, the row it needs)
     ("python packages", "Installing the Python packages", step_venv, 0.15, None),
     ("transcription model", "Downloading the transcription model", step_model, 0.35, "python packages"),
-    ("renderer", "Installing the renderer", step_remotion, 0.15, None),
+    ("renderer", "Installing the renderer", step_remotion, 0.12, None),
+    ("motion clips", "Installing the motion clip tools", step_motion, 0.03, None),
     ("warm-up", "Warming up the editor, so your first video is as fast as the rest", step_warm, 0.30, "renderer"),
     ("cutout model", "Downloading the cutout model, for cards behind you", step_cutout, 0.05, None),
 ]
@@ -894,37 +1001,142 @@ def modal_exe():
     return VENV / ("Scripts/modal.exe" if OS == "Windows" else "bin/modal")
 
 
+def modal_config():
+    """Where Modal's own CLI keeps the login (`modal setup` writes it; MODAL_CONFIG_PATH moves it)."""
+    return Path(os.environ.get("MODAL_CONFIG_PATH") or Path.home() / ".modal.toml")
+
+
 def modal_status():
-    """ready, no token, or missing. No network call: a token saved by `modal token new` counts."""
+    """ready, no token, or missing. No network call: a token saved by `modal setup` counts."""
     if not venv_has("modal"):
         return "missing"
-    token = (Path.home() / ".modal.toml").exists() or os.environ.get("MODAL_TOKEN_ID")
-    return "ready" if token else "no token"
+    try:
+        token = "token_id" in modal_config().read_text(encoding="utf-8")
+    except OSError:
+        token = False
+    return "ready" if token or os.environ.get("MODAL_TOKEN_ID") else "no token"
 
 
-def install_modal():
+MODAL_LOGIN = re.compile(r"https://modal\.com/token-flow/[\w-]+")
+MODAL_LOGIN_S = 900     # the browser login: 15 minutes to sign up or log in
+MODAL_BUILD_S = 1500    # the first build of the render machine (a few minutes; 25 is a stuck build)
+
+
+def modal_error(text):
+    """Modal's output -> one plain sentence for each way the connect or a test render fails."""
+    t = text.lower()
+    if re.search(r"autherror|token not found|token missing|could not authenticate|unauthenticated|invalid token|token.*(revoked|expired)|modal token new", t):
+        return "Not logged in to Modal. Press Connect Modal to log in again."
+    if re.search(r"billing|spend limit|credit|payment|quota exceeded|workspace.*(disabled|suspended)", t):
+        return "Your Modal account is out of credit. Add a card at modal.com/settings or render on this computer."
+    if re.search(r"image build|build.*failed|failed to build|npm err", t):
+        return "The render machine did not build on Modal. Press Connect Modal to try again; laptop renders still work."
+    if re.search(r"connect|timed out|network|dns|ssl", t):
+        return "Could not reach Modal. Check the internet connection and try again."
+    last = next((x.strip() for x in reversed(text.strip().splitlines()) if x.strip()), "no output")
+    return f"Modal did not answer: {last[:200]}"
+
+
+def modal_credit():
+    """What this month has cost so far, from `modal billing summary`. None when Modal does not say."""
+    r = run([str(modal_exe()), "billing", "summary", "--json"], timeout=60)
+    try:
+        used = float(json.loads(r.stdout)["metered_cost"])
+    except (ValueError, KeyError, TypeError):
+        return None
+    return f"${used:.2f} used this month (the free Starter plan includes $30)"
+
+
+def say(line):
+    print(line, flush=True)
+
+
+def connect_modal():
+    """The Connect Modal button (home.py runs it; the setup skill too). Installs Modal into the venv, runs
+    `modal setup` (it opens the browser; Modal's CLI keeps the token in its own file, never printed here), builds
+    the render machine once, then says the credit used. Lines: STEP <what>, LOGIN <url>, CREDIT <text>; the last
+    is `Connected.` or `FAIL <plain reason>`."""
     if not VPY.exists():
-        sys.exit("Run the venv step first.")
-    pip_optional("modal")
-    print("Modal installed.")
-    if modal_status() != "ready":
-        print(f"Next, log in. In your own terminal (it opens the browser):\n  {modal_exe()} token new")
+        say("FAIL Finish setting up the editor first, then connect Modal.")
+        return 1
+    if not venv_has("modal"):
+        say("STEP Installing Modal")
+        try:
+            pip_optional("modal")
+        except (subprocess.CalledProcessError, OSError):
+            say("FAIL Modal did not install. Check the internet connection and press Connect Modal again.")
+            return 1
+
+    def login():
+        say("STEP Log in to Modal in your browser")
+        try:
+            quiet([modal_exe(), "setup"], None, "the Modal login", timeout=MODAL_LOGIN_S,
+                  env=dict(os.environ, PYTHONUNBUFFERED="1", COLUMNS="400"),
+                  on_line=lambda ln: (m := MODAL_LOGIN.search(ln)) and say(f"LOGIN {m[0]}"))
+        except SystemExit:   # closed, timed out, or Modal said no: the old token file may still be there
+            return False
+        return modal_status() == "ready"
+
+    def build():
+        say("STEP Building the render machine on Modal (first time only, about 3 to 5 minutes)")
+        try:
+            r = run([str(VPY), str(PLUGIN / "skills" / "style-edit" / "scripts" / "modal_render.py"), "hello"],
+                    timeout=MODAL_BUILD_S)
+        except subprocess.TimeoutExpired:
+            return "The render machine did not build on Modal in 25 minutes. Press Connect Modal to try again."
+        return None if r.returncode == 0 and "modal ok" in r.stdout else modal_error(r.stderr + r.stdout)
+    fresh = modal_status() != "ready"   # logs in during this run
+    if fresh and not login():
+        say("FAIL The Modal login did not finish. Press Connect Modal to try again.")
+        return 1
+    err = build()
+    if err and err.startswith("Not logged in") and not fresh:   # a saved login Modal no longer takes
+        if not login():
+            say("FAIL The Modal login did not finish. Press Connect Modal to try again.")
+            return 1
+        err = build()
+    if err:
+        say(f"FAIL {err}")
+        return 1
+    credit = modal_credit()
+    if credit:
+        say(f"CREDIT {credit}")
+    say("Connected.")
     return 0
 
 
-def check_modal():
-    st = modal_status()
-    if st != "ready":
-        print("Modal is not installed yet: setup.py modal" if st == "missing" else
-              f"Not logged in. In your own terminal: {modal_exe()} token new")
+def test_modal():
+    """The Test render button: a 5-second test edit rendered on Modal, timed. Lines: STEP, then
+    `TIME <seconds> <usd>` and `Tested.`, or `FAIL <plain reason>`."""
+    import tempfile
+    if modal_status() != "ready":
+        say("FAIL Not logged in to Modal. Press Connect Modal first.")
         return 1
-    script = PLUGIN / "skills" / "style-edit" / "scripts" / "modal_render.py"
-    r = run([str(VPY), str(script), "hello"], timeout=900)
-    if r.returncode == 0 and "modal ok" in r.stdout:
-        print("Tested: Modal works. The render machine is built and cached in your account.")
+    t = Path(tempfile.mkdtemp(prefix="ave-modal-test-"))
+    try:
+        say("STEP Making a 5-second test video")
+        try:
+            edit = test_edit(t, 5, dict(os.environ, TMPDIR=str(t), TEMP=str(t), TMP=str(t)))
+        except (SystemExit, Exception) as e:   # noqa: BLE001
+            say(f"FAIL The test video could not be made here: {plain(e)}")
+            return 1
+        say("STEP Rendering it on Modal")
+        t0 = time.time()
+        r = run([sys.executable, str(PLUGIN / "skills" / "style-edit" / "scripts" / "edit.py"), "render", str(edit), "--modal"],
+                timeout=MODAL_BUILD_S)
+        secs = time.time() - t0
+        if r.returncode or not (edit / "render.mp4").exists():
+            say(f"FAIL {modal_error(r.stderr + r.stdout)}")
+            return 1
+        usd = re.search(r"about \$(\d+\.\d+) at Modal", r.stdout)
+        say(f"TIME {secs:.0f} {usd[1] if usd else ''}".rstrip())
+        say("Tested.")
         return 0
-    print(f"Modal did not answer:\n{(r.stderr or r.stdout).strip()[-1500:]}")
-    return 1
+    except subprocess.TimeoutExpired:
+        say("FAIL The test render took over 25 minutes and was stopped.")
+        return 1
+    finally:
+        shutil.rmtree(t, ignore_errors=True)
 
 
 def step_matte(force=False):
@@ -944,20 +1156,8 @@ def step_matte(force=False):
 
 
 LAUNCHER = PLUGIN / "lib" / "ai_editor" / "launcher.py"
-MARK = "installed by ai-editor setup.py install-launcher"
 RC_LINE = 'export PATH="$HOME/.local/bin:$PATH"  # added by ai-editor setup.py install-launcher'
-
-
-def launcher_text(os_name=OS, launcher=LAUNCHER, py=sys.executable):
-    if os_name == "Windows":
-        return (f"@echo off\r\nrem nextwork-editor: opens cooked. {MARK}; remove with setup.py uninstall-launcher\r\n"
-                f'set "L={launcher}"\r\nset "PY={py}"\r\nif not exist "%PY%" set "PY=py"\r\n'
-                'if not exist "%L%" (echo cooked. moved, maybe an update. In Claude Code, say: set up the editor. & exit /b 1)\r\n'
-                '"%PY%" "%L%" %*\r\n')
-    return (f"#!/bin/sh\n# nextwork-editor: opens cooked. {MARK}; remove with setup.py uninstall-launcher\n"
-            f"L='{launcher}'\nPY='{py}'\n[ -x \"$PY\" ] || PY=python3\n"
-            'if [ ! -f "$L" ]; then echo "cooked. moved, maybe an update. In Claude Code, say: set up the editor."; exit 1; fi\n'
-            'exec "$PY" "$L" "$@"\n')
+from ai_editor.launcher import MARK, launcher_text  # noqa: E402  (home.py refreshes the installed file with it too)
 
 
 def bin_dirs(os_name=OS, path_env=None, home=None):
@@ -1087,6 +1287,13 @@ def demo():
     assert "add my gemini key" in miss and "clipboard" in miss and "terminal" not in miss, miss
     assert key_line("gemini", "looks", "x", "the GEMINI_API_KEY variable").startswith("ok "), "found key row"
     assert modal_status() in ("ready", "no token", "missing")
+    # Connect Modal: the login link is read from `modal setup`'s output; each failure is one plain sentence
+    assert MODAL_LOGIN.search("go to https://modal.com/token-flow/tf-AbC123xyz\n")[0] == "https://modal.com/token-flow/tf-AbC123xyz"
+    assert modal_error("modal.exception.AuthError: Token missing. Could not authenticate client.").startswith("Not logged in")
+    assert modal_error("modal.exception.AuthError: Token not found").startswith("Not logged in")
+    assert "out of credit" in modal_error("Workspace has reached its spend limit")
+    assert "did not build" in modal_error("modal.exception.RemoteError: Image build for im-12 failed. See build logs")
+    assert modal_error("weird\n  last thing\n") == "Modal did not answer: last thing"
     assert major("v22.3.0") == 22 and major(None) == 0
     assert fix("ffmpeg").split()[0] in ("brew", "winget", "sudo")
     # Linux: the fix uses the package manager this computer has, not apt everywhere
@@ -1106,6 +1313,12 @@ def demo():
     assert browser_line(True, "/usr/bin/chromium").startswith("ok ")
     # Free disk: FIX under 3 GB, with the reason
     assert disk_row(5e9) == (True, "5.0 GB free")
+    room("the small transcription model", 484, free=5e9)   # says the size, goes on
+    try:   # 858 MB free: no 1.5 GB download
+        room("the medium transcription model", 1530, free=858e6)
+        raise AssertionError("downloaded into a full disk")
+    except SystemExit as e:
+        assert "about 1530 MB" in str(e) and "0.9 GB free" in str(e), e
     ok, why = disk_row(2.9e9)
     assert not ok and "need 3 GB" in why and "1.5 GB" in why and "0.5 MB a frame" in why, why
     assert free_bytes() > 0
@@ -1245,7 +1458,8 @@ def demo_install_all():
         assert job["steps"][0]["progress"] == 1.0 and "rows" in st.get("doctor", {}), job
     # The real steps: one bar (shares add to 1), warming waits for the renderer, the optional two never fail the install
     assert abs(sum(x[3] for x in INSTALL_STEPS) - 1) < 1e-9 and [x[0] for x in INSTALL_STEPS] == [
-        "python packages", "transcription model", "renderer", "warm-up", "cutout model"], INSTALL_STEPS
+        "python packages", "transcription model", "renderer", "motion clips", "warm-up", "cutout model"], INSTALL_STEPS
+    assert set(motion_pins()) == {"hyperframes", "gsap"} and all(re.match(r"^\d+\.\d+\.\d+$", v) for v in motion_pins().values())
     assert dict((x[0], x[4]) for x in INSTALL_STEPS)["warm-up"] == "renderer"
     global quiet
     real_quiet, real_fetch = quiet, models.fetch
@@ -1274,8 +1488,8 @@ def demo_install_all():
 
 if __name__ == "__main__":
     cmds = {"doctor": doctor, "venv": step_venv, "model": step_model, "remotion": step_remotion,
-            "bootstrap": bootstrap, "repair": repair, "awskey": save_aws_key,
-            "lambda": check_lambda, "modal": install_modal, "modal-check": check_modal, "matte": step_matte, "warm": step_warm,
+            "motion": step_motion, "bootstrap": bootstrap, "repair": repair, "awskey": save_aws_key,
+            "lambda": check_lambda, "modal": connect_modal, "modal-connect": connect_modal, "modal-check": connect_modal, "modal-test": test_modal, "matte": step_matte, "warm": step_warm,
             "demo": demo, "keys": test_keys, "certs": step_certs, "todo": todo, "crisper": install_crisper,
             "install-launcher": install_launcher, "uninstall-launcher": uninstall_launcher}
     if sys.argv[1:] == ["doctor", "--quiet"]:

@@ -110,6 +110,16 @@ Copies the renderer to `~/.ai-video-editor/remotion` and installs exactly its `p
 with `npm ci` (about 700 MB with Chrome's headless shell). This is the biggest download: say so
 first. A creator teardown can run meanwhile: it does not need the renderer. `npm missing`: install Node (step 2) first.
 
+Then the motion clip tools, for bespoke animations (the motion skill):
+
+```bash
+python3 "$U" motion
+```
+
+`npm install` of the pinned HyperFrames CLI and GSAP into `~/.ai-video-editor/motion` (about 120 MB, 10-60 s),
+and a headless Chrome for them (uses the installed Chrome, else downloads about 200 MB). Say the time first.
+Skipped: animations fall back to the template cards.
+
 Remotion is free for individuals and companies of up to 3 people. Bigger companies need a
 Remotion company licence (remotion.dev/license). Say this once.
 
@@ -156,10 +166,10 @@ Only to a user who skipped ElevenLabs and wants better cuts, offer CrisperWhispe
 
 ## 6. Cloud renders with Modal (offer it)
 
-Offer it once, in the question box: "Set up cloud renders with Modal? (about 5 minutes)" with
-**Later (Recommended)** first and **Set it up now** second. Also run it when the user picks Modal at
+Offer it once, in the question box: "Set up cloud renders with Modal? (one login in the browser)" with
+**Later (Recommended)** first and **Connect Modal** second. Also run it when the user picks Modal at
 render time and doctor shows `modal` as not ready. Follow `references/cloud.md` "Modal": what it
-is, what it costs, the card, then four checked steps.
+is, what it costs, the card, then one step (`setup.py modal-connect`, or Connect Modal in the window).
 
 ## 7. Check
 

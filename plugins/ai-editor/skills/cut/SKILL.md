@@ -69,8 +69,8 @@ A script (or `--keyterm Name`, repeatable) gets names and jargon right (+20% on 
 Say the time first: Whisper 1-4 min for a 3-min take, CrisperWhisper about the take's length. It picks
 Scribe when a key is saved, else CrisperWhisper if installed, else the free local Whisper (`--engine whisper|crisper|scribe` overrides), which drops
 some ums and false starts. With neither, say once that
-setup can add one (CrisperWhisper's weights are non-commercial only). A take full of retakes:
-`AI_EDITOR_WHISPER_MODEL=medium` hears them better (1.5 GB, twice as slow). Step 5 catches the rest.
+setup can add one (CrisperWhisper's weights are non-commercial only). Never download a model mid-edit: a
+re-check needing one not installed (exit 4) is skipped and said in the round's note.
 
 **Never read `words.raw.json`**: step 2 writes `transcript.txt`, 1/12 the size.
 
@@ -99,67 +99,64 @@ cloud=Claude jiv=Jev` (whole words, kept in `fixes.json` for the captions).
 ## 3. Build
 
 ```bash
-python3 "$S/build_timeline.py" <source> edits/<name> --dry-run
-python3 "$S/build_timeline.py" <source> edits/<name>
+python3 "$S/build_timeline.py" <source> edits/<name> && python3 "$PY" "$S/mirror.py" <source> edits/<name>
 ```
 
 Every pause (breaths too) over `--max-pause` (0.15 s) becomes 0.10 s; under music only word gaps
-are trimmed. Fix any dry-run `ERROR`, then run it for real.
+are trimmed. A build `ERROR` writes nothing: fix that span and run it again.
 
-Then the `cut-judge` agent scores `paper-edit.md` (what plays, `<<n>>` at each join)
-and fixes `spans.json` (a flub left in, a bad join, a good line lost). Launch, readers for takes over 5 min, and the approval score: `references/judge.md`.
-- `CLIPPED` in `paper-edit.md`: a pause cut ate a word. Raise `--pad`, rebuild. Still there: a label
-  is off; step 5 says if it plays.
+`mirror.py` says `mirrored` when a book, shirt or sign reads backwards (a front-camera take): ask once,
+**Keep it as shot (Recommended)** (most creators post it that way) / **Flip it so the text reads**; on a
+flip add `--flip` to every render.py below.
+
+In one message, start the spans encoding in the background (`run_in_background`) and the paper
+checks; step 4 then encodes only what changed:
+
+```bash
+python3 "$S/render.py" <source> edits/<name> --segments-only
+```
+
+The `cut-judge` agent grades `paper-edit.md` (a flub left in, a bad join, a good line lost) and
+fixes `spans.json`. Readers for takes over 5 min
+go first, the judge after: `references/judge.md`. Never read `paper-edit.md` yourself.
+- `CLIPPED` in `paper-edit.md`: a pause cut ate a word. Raise `--pad`. Still there: a label is off.
 - Joins inside speech move to a quiet frame. Any `still in speech`: listen in step 5.
 
-Rebuild if spans changed: paper is free, renders are not.
+## 4-5. Render and verify
 
-## 4. Render
-
-```bash
-python3 "$PY" "$S/mirror.py" <source> edits/<name>
-python3 "$S/render.py" <source> edits/<name>
-```
-
-`mirror.py` reads the text in a few frames as shot and flipped. It says `mirrored` when a book, shirt or sign
-reads backwards (a front-camera take): ask once, **Keep it as shot (Recommended)** (most creators post it that
-way) / **Flip it so the text reads**, and on a flip add `--flip` to render.py.
-
-4K takes minutes: run it in the background.
-
-## 5. Verify
+Foreground (render.py waits for the background encode):
 
 ```bash
-python3 "$PY" "$S/verify_cut.py" edits/<name> --engine <same engine as step 1>
+R="${CLAUDE_PLUGIN_ROOT}/lib/ai_editor/review.py"
+python3 "$S/build_timeline.py" <source> edits/<name> && \
+python3 "$S/render.py" <source> edits/<name> && \
+python3 "$PY" "$S/verify_cut.py" edits/<name> --engine <same engine as step 1> && \
+python3 "$S/preview_cut.py" edits/<name> --no-open && \
+python3 "$R" edits/<name> start --video edits/<name>/cut.mp4 --stage cut --transcript edits/<name>/words.json
 ```
 
-Diffs cut.mp4's transcript against the words meant to be kept.
+Verify clean: the cut page is ready. Verify diffs the cut's transcript with the kept words (exit 1 stops the chain):
 - **MISSING**: a kept word is not in the render. Raise `--pad` (or narrow the span), rebuild, re-render.
 - **SURVIVED**: a span to add for a real repeat or stumble, never one that cuts a kept line.
 - **HEARD DIFFERENTLY** ("jev -> jeff") and filler notes are transcriber variance: no rebuild.
 - **DOUBLED**: words said twice in a row. Natural ("very, very"): keep. A stumble: add its span.
 - **N join(s) in speech**: listen. Clipped: `splice_check.py edits/<name> --fix`, re-render.
 
-One fix cycle, then show the user what is left.
+One fix cycle (the same chain), then show the user what is left.
 
 ## 6. The user approves
 
-After every render, hand it over on the review page (`../style-edit/references/review.md`):
+The chain opened the review page (`../style-edit/references/review.md`). `serve` and `wait` in the
+background. Say the seconds cut. Notes: "keep <line>": narrow or delete that span; "cut <line>": add one; pauses
+off: `--max-pause`. Then steps 4-5, `resolve` each note (`--reply`: what changed), last
+`round --video edits/<name>/cut.mp4` (never a second `start`), then ask any learn question.
 
-```bash
-python3 "$S/preview_cut.py" edits/<name> --no-open
-R="${CLAUDE_PLUGIN_ROOT}/lib/ai_editor/review.py"
-python3 "$R" edits/<name> start --video edits/<name>/cut.mp4 --stage cut --transcript edits/<name>/words.json
-```
-
-Then `serve` and `wait` in the background. Say the seconds cut. `wait` exits with the notes. "keep <line>": narrow or delete that span; "cut <line>": add one; pauses
-off: `--max-pause`. Then build, render, verify, `preview_cut.py`, `resolve`, `round`.
-
-After approval: `python3 "$S/trend.py" log edits/<name>` (`tally`: trend), hook check, then hook variants if `hooks.json` exists (`references/retake-detection.md`).
+After approval, in one Bash call: `python3 "$S/trend.py" log edits/<name>` (`tally`: trend) and the hook check. Then hook variants if `hooks.json` exists (`references/retake-detection.md`); called by start, ask that in the same question box as style-edit's stills approval, not before it.
 
 Only approval finishes the cut; `cut.mp4` and `words.json` go to style-edit. On "just the
 cut first", say they can ask for the style. Never start style-edit on your own. Called by start: as
-the page opens, start the `visual-prep` agent in the background.
+the page opens, start `visual-prep` in the background; its `motion_briefs`: one background
+`clip-builder` each, at once.
 
 ## If a script stops
 
@@ -168,7 +165,7 @@ the page opens, start the `visual-prep` agent in the background.
 | `no such file` / `ffmpeg could not read audio` | ask for the right path; never copy or convert the source |
 | `faster-whisper missing` / `CrisperWhisper missing` | run with `python3 "$PY"`, or the setup skill's step 3 |
 | `no ElevenLabs key` (exit 2) / `HTTP 4xx`, `unreachable` (3) | drop `--engine scribe`, or re-save the key with the setup skill |
-| build `ERROR` on a quote | fix that span's quote or add `occurrence`, `--dry-run` again |
+| build `ERROR` on a quote | fix that span's quote or add `occurrence`, build again |
 | `cannot derive a silence threshold` / `marked no silence` | speech and background are under 10 dB apart: `ffmpeg -i <source> -af volumedetect -vn -f null -`, pass `--noise` about 10 dB above the mean |
 | render `ERROR ...` | say it; re-run render once |
 

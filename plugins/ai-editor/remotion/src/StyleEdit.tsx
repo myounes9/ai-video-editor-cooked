@@ -23,14 +23,16 @@ import { Look, Texture, loadFamily, resolveLook, useFonts } from "./look";
 import { Motion, ease, pickMotion, prog, punchAt } from "./motion";
 import { Sfx } from "./Sfx";
 import { TextItem, Texts } from "./Texts";
-import { SceneCard, SceneView, TR_S, Transition, footageX, phases, sceneGrounds } from "./Scene";
+import { SceneCard, SceneView, TR_S, Transition, footageX, phases, sceneBox, sceneGrounds } from "./Scene";
 import { captionFade, groundCovers } from "./ground";
 import { Ground, onGround } from "./look";
 import { KINETIC, hidesCaptions } from "./kinetic";
+import { BoardFrame, BoardLayout } from "./Board";
 
 // Shapes follow skills/style-edit/references/contracts.md "plan.json". Times are seconds on the cut's timeline.
 // origin: the top centre of the head over the zoom, % of the frame (plan.py from face.json): the face holds its place, the hair never rises into a card.
-type Zoom = { start: number; end: number; scale: number; kind: "punch" | "push"; ease_s: number; ease?: string; origin?: [number, number] };
+type Zoom = { start: number; end: number; scale: number; kind: "punch" | "push"; ease_s: number; ease?: string; origin?: [number, number];
+  travel_s?: number };
 // A slow sideways drift of the footage (the creator's camera.pan_per_min): from -> to, % of the width.
 type Pan = { start: number; end: number; from: number; to: number };
 export type Card = {
@@ -65,6 +67,8 @@ type Layout = {
   art: [number, number, number, number];
   speaker: { scale: number; x: number; y: number; origin: [number, number] };
   caption_full_y: number;
+  variant?: "cutout"; // 50/50 cutout: the speaker's head rises out of the window onto the ground (matte.py cutouts)
+  breakout?: number; // how far above the window's top edge, % of the frame
 };
 // "letterbox": black 9:16, the landscape cut as a band, a title above it, one photo over the opening line. % of the frame.
 type Letterbox = {
@@ -84,13 +88,14 @@ export type Plan = {
   captions: { style: CaptionStyle; chunks: Chunk[] };
   zooms: Zoom[];
   cards: Card[];
-  layout?: Layout | Letterbox;
+  layout?: Layout | Letterbox | BoardLayout;
   look?: Partial<Look>; // references/motion.md; default: the editorial look
   motion?: string | { personality?: string }; // snappy | smooth | punchy | calm
   cutouts?: Cutout[];
   pans?: Pan[];
   cover?: Cover;
   texts?: TextItem[]; // a card edit's title pill, running numbered list and X stamp (Texts.tsx)
+  grade?: { brightness: number; saturate: number }; // the creator's grade: burned into the footage copy (edit.py footage_filter), drawn here on the cutouts
 };
 // An audio-only clip (clips.py trim): the show's cover over a blurred, dimmed copy of itself. box: % of the frame.
 // push: the cover's scale at the end; ground_push: the ground's scale at the start (it eases back to 1 as the
@@ -144,7 +149,8 @@ export const zoomAt = (t: number, zooms: Zoom[]): { k: number; origin: string } 
     const z = zs[i], next = zs[i + 1]?.start ?? Infinity;
     const origin = z.origin ? `${z.origin[0]}% ${z.origin[1]}%` : ZOOM_ORIGIN;
     const push = z.kind === "push" && z.ease_s > 0;
-    const tail = push ? 0 : Math.min(PUNCH_S, Math.max(0, next - z.end));
+    const travel = z.travel_s ?? PUNCH_S;   // a copied creator's measured punch is near-instant (plan.py CREATOR_PUNCH_S)
+    const tail = push ? 0 : Math.min(travel, Math.max(0, next - z.end));
     if (t < z.start || t >= z.end + tail) continue;
     let p: number;
     if (push) {
@@ -153,7 +159,7 @@ export const zoomAt = (t: number, zooms: Zoom[]): { k: number; origin: string } 
       p = t < z.start + e ? f((t - z.start) / e) : t > z.end - e ? f((z.end - t) / e) : 1;
     } else {
       const f = ease(z.ease && z.ease !== "none" ? z.ease : PUNCH_EASE);
-      p = t < z.end ? f(Math.min(1, (t - z.start) / PUNCH_S)) : 1 - f(Math.min(1, (t - z.end) / PUNCH_S));
+      p = t < z.end ? f(Math.min(1, (t - z.start) / travel)) : 1 - f(Math.min(1, (t - z.end) / travel));
     }
     return { k: Math.pow(z.scale, Math.max(0, Math.min(1, p))), origin };
   }
@@ -267,7 +273,10 @@ export const CardView: React.FC<{ card: Card; t: number; prev?: Card; next?: Car
   const lt = t - card.start, dur = card.end - card.start;
   const SWAP = 0.5 * m.k;
   let transform = "none", opacity = 1, clipPath: string | undefined;
-  if (prev) {
+  // a card with its own measured entrance and exit (props.enter / exit) swaps in place: the old one is out before the
+  // new one lands (references/motion-design.md "Swaps"); the wipe and the darken-under are for cards without them
+  const fit = (c?: Card) => !!(c && ((c.anim?.props ?? c.props ?? {}) as Record<string, unknown>).enter);
+  if (prev && !fit(card)) {
     // the new card wipes over the old one from the right edge (transitions-cover), riding in a little
     const p = prog(lt, 0, SWAP, m.move);
     clipPath = `inset(0% 0% 0% ${(1 - p) * 100}%)`;
@@ -278,7 +287,7 @@ export const CardView: React.FC<{ card: Card; t: number; prev?: Card; next?: Car
       fade: ["none", p], scale: [`scale(${0.92 + 0.08 * p})`, p] } as Record<string, (string | number)[]>)[card.entrance] ?? ["none", 1];
     transform = e[0] as string; opacity = e[1] as number;
   }
-  if (next) {
+  if (next && !fit(next)) {
     // covered by the next card: slides back and darkens under it
     const q = prog(t, next.start, SWAP, m.move);
     transform += ` translateX(${-q * bw * 0.06}px) scale(${1 - 0.04 * q})`;
@@ -395,7 +404,11 @@ const sceneCaptions = (style: CaptionStyle, chunks: Chunk[], cards: Card[], t: n
   const shown = new Set(words(sc.anim?.props ?? {}));
   if (said.length && said.every((w) => shown.has(w))) return { ...style, present: false };
   const g = onGround(look, grounds.get(sc) ?? "ground");
-  return { ...style, color: g.ink, highlight_color: g.ink, emphasis_color: g.ink, stroke: false, box: false, flat: true };
+  // captions set over the head (a creator whose captions sit above her face) would land on the scene's card: they
+  // go under it while the scene is up, in the ground's ink
+  const [, by, , bh] = sceneBox(W, H);
+  const y = capY > by - 2 && capY < by + bh + 2 ? by + bh + 7 : capY;
+  return { ...style, color: g.ink, highlight_color: g.ink, emphasis_color: g.ink, stroke: false, box: false, flat: true, y_pct: y };
 };
 
 /** The letterbox layout: plain on purpose (no zoom, no card styling), the title and the photo hard on and off. */
@@ -418,7 +431,7 @@ const LetterboxView: React.FC<Letterbox & { video: string; captions: Plan["capti
   );
 };
 
-export const StyleEdit: React.FC<Plan> = ({ video, captions, zooms, cards, layout, look: lookIn, motion, cutouts, pans, cover, texts }) => {
+export const StyleEdit: React.FC<Plan> = ({ video, captions, zooms, cards, layout, look: lookIn, motion, cutouts, pans, cover, texts, grade }) => {
   const frame = useCurrentFrame();
   const { fps, width, height, durationInFrames } = useVideoConfig();
   const t = frame / fps;
@@ -426,7 +439,24 @@ export const StyleEdit: React.FC<Plan> = ({ video, captions, zooms, cards, layou
   const m = pickMotion(motion);
   const fonts = useFonts(look);
   const split = layout?.mode === "split";
+  const graded: React.CSSProperties = grade ? { filter: `brightness(${grade.brightness}) saturate(${grade.saturate})` } : {};
   if (layout?.mode === "letterbox") return <LetterboxView {...layout} video={video} captions={captions} t={t} m={m} font={fonts.ready ? fonts.body : null} />;
+  if (layout?.mode === "board") {
+    // the canvas and the speaker are drawn by Board.tsx; the cards left in the plan are its overlays on the speaker
+    const over = fonts.ready ? slots(cards, false).filter((s) => t >= s.from && t < s.to) : [];
+    return (
+      <AbsoluteFill>
+        <BoardFrame layout={layout} video={video} t={t} font={fonts.ready ? fonts.body : null}
+          captions={<Captions style={captions.style} chunks={captions.chunks} t={t} m={m} />}>
+          {over.map((s) => (
+            <CardView key={`${s.card.src ?? s.card.anim?.type}${s.card.start}`} card={s.card} t={t} prev={s.prev} next={s.next}
+              covered={false} light={false} look={look} m={m} fonts={fonts} />
+          ))}
+        </BoardFrame>
+        <Sfx />
+      </AbsoluteFill>
+    );
+  }
   const grounds = sceneGrounds(cards);
   const capAt = (tt: number) => sceneCaptions(captions.style, captions.chunks, cards, tt, look, grounds, m, width, height,
     split && layout ? layout.caption_full_y : captions.style.y_pct ?? 70, split);
@@ -467,7 +497,7 @@ export const StyleEdit: React.FC<Plan> = ({ video, captions, zooms, cards, layou
           // fades in over the handle before the card (its refined edge differs a little from the raw camera)
           <AbsoluteFill key={c.src} style={{ ...cam, opacity: Math.min(1, c.from === 0 ? 1 : (frame - c.from + 1) / (CUT_FADE_S * fps),
             c.to >= durationInFrames - 1 ? 1 : (c.to - frame + 1) / (CUT_FADE_S * fps)) }}>
-            <Img src={staticFile(`${c.src}/${String(frame).padStart(6, "0")}.png`)} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+            <Img src={staticFile(`${c.src}/${String(frame).padStart(6, "0")}.png`)} style={{ width: "100%", height: "100%", objectFit: "cover", ...graded }} />
           </AbsoluteFill>
         ))}
         {cardViews}
@@ -490,7 +520,7 @@ export const StyleEdit: React.FC<Plan> = ({ video, captions, zooms, cards, layou
   return (
     <AbsoluteFill style={{ backgroundColor: layout.ground }}>
       <Texture look={look} w={width} h={height} id="ground" />
-      {behindViews /* split has no cutout: the panel art sits clear of the window anyway */}
+      {behindViews /* split: the panel art sits clear of the window; the cutout variant's head is drawn over it below */}
       {cardViews}
       {kineticViews}
       <div style={{ position: "absolute", left: 0, top, width, height: height - top, overflow: "hidden",
@@ -500,6 +530,18 @@ export const StyleEdit: React.FC<Plan> = ({ video, captions, zooms, cards, layou
           {video ? <OffthreadVideo src={staticFile(video)} style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : null}
         </div>
       </div>
+      {layout.variant === "cutout" ? (() => {
+        // the same frames, cut out (matte.py), in a window that starts `breakout` higher: the head rises out of the card
+        const c = (cutouts ?? []).find((k) => frame >= k.from && frame <= k.to);
+        const b = ((layout.breakout ?? 10.6) / 100) * height * o;
+        return c && o > 0 ? (
+          <div style={{ position: "absolute", left: 0, top: top - b, width, height: height - top + b, overflow: "hidden" }}>
+            <div style={{ position: "absolute", left: -(x / 100) * width * o, top: -(y / 100) * height * o + b, width: width * k,
+              height: height * k, transform: `translateX(${footageX(t, cards, width, m)}px) scale(${zoomScale(t, zooms)})`, transformOrigin: `${origin[0]}% ${origin[1]}%` }}>
+              <Img src={staticFile(`${c.src}/${String(frame).padStart(6, "0")}.png`)} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+            </div>
+          </div>) : null;
+      })() : null}
       {sceneViews}
       {texts?.length ? <Texts items={texts} t={t} width={width} height={height} font={captions.style.font_match} /> : null}
       <AbsoluteFill style={{ opacity: capFade }}>

@@ -23,46 +23,88 @@ const css=`#askq{position:fixed;inset:0;z-index:9999;display:none;align-items:ce
 #askq input:focus{outline:none;border:1.5px solid var(--a-ink);padding:0 13.5px}
 #askq .aq-send{height:44px;margin:0;padding:0 20px;border:0;border-radius:12px;background:var(--a-ink);color:var(--a-onink);font:inherit;font-weight:600;cursor:pointer;flex-shrink:0}
 #askq .aq-send:disabled{opacity:.35;cursor:default}
+#askq .aq-clip{width:44px;height:44px;margin:0;padding:0;border:1px solid var(--a-line);border-radius:12px;background:none;color:var(--a-body);display:grid;place-items:center;cursor:pointer;flex-shrink:0}
+#askq .aq-clip:hover,#askq .aq-clip:focus-visible{border-color:var(--a-ink);color:var(--a-ink);outline:none}
+#askq .aq-pics{display:flex;gap:10px;flex-wrap:wrap;margin-top:12px}#askq .aq-pics:empty{display:none}
+#askq .aq-pics span{position:relative}#askq .aq-pics img{height:56px;max-width:120px;object-fit:cover;border-radius:8px;border:1px solid var(--a-line);display:block}
+#askq .aq-pics button{position:absolute;top:-7px;right:-7px;width:20px;height:20px;margin:0;padding:0;border:0;border-radius:50%;background:var(--a-ink);color:var(--a-onink);font:12px/20px system-ui,sans-serif;cursor:pointer}
+#askq .aq-card.aq-drag{border-color:var(--a-ink)}
 #askq .aq-wide{width:100%;margin-top:12px}
 #askq .aq-foot{margin-top:16px;padding:0;border:0;text-align:center}
 #askq .aq-term{border:0;background:none;margin:0;padding:4px;color:var(--a-muted);font:inherit;font-size:13px;text-decoration:underline 1px;text-underline-offset:3px;cursor:pointer}
 #askq .aq-done{padding:18px 0 10px;font-size:15px;color:var(--a-body);text-align:center}
+#askbar{position:fixed;left:50%;bottom:20px;transform:translateX(-50%);z-index:9999;display:none;align-items:center;gap:10px;margin:0;padding:11px 18px;border:1px solid var(--line,#E7E5E4);border-radius:999px;background:var(--panel,#fff);color:var(--ink,#0C0A09);font:600 14px/20px system-ui,-apple-system,"Segoe UI",sans-serif;box-shadow:0 8px 28px rgba(0,0,0,.16);cursor:pointer}
+#askbar.on{display:flex}#askbar i{width:8px;height:8px;border-radius:50%;background:currentColor}#askbar span{font-weight:400;color:var(--muted,var(--t3,#78716C))}
 @media (max-width:520px){#askq{align-items:flex-end}#askq .aq-card{padding:22px 18px 14px;border-radius:18px}#askq h2{font-size:18px;line-height:25px}}`;
+const CLIP='<svg width="16" height="16" viewBox="0 0 16 16"><path d="M13 7.5l-5.3 5.3a3.2 3.2 0 01-4.5-4.5l5.6-5.6a2.1 2.1 0 013 3l-5.5 5.5a1 1 0 01-1.5-1.5L9.9 4.6" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>';
+const TYPES=/^image\/(png|jpeg|gif|webp)$/,MAXB=15<<20,MAXN=6;   // the review notes' limits (askhook.save_images)
 const TICK='<svg width="11" height="11" viewBox="0 0 12 12"><path d="M2 6.2l2.6 2.6L10 3.4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const st=document.createElement('style');st.textContent=css;document.head.appendChild(st);
 const el=document.createElement('div');el.id='askq';el.setAttribute('role','dialog');el.setAttribute('aria-modal','true');el.setAttribute('aria-label','Claude has a question');
-el.addEventListener('keydown',e=>e.stopPropagation());   // the page's own shortcuts stay off while typing here
+el.addEventListener('keydown',e=>{if(e.key==='Escape'&&A){e.preventDefault();fold()}e.stopPropagation()});   // the page's own shortcuts stay off while typing here
 document.body.appendChild(el);
-let A=null,i=0,ans=[],sel=new Set(),title=null;
-const TITLE='(1) Claude has a question';
+// Esc folds the card into a bar that reopens it: the question is never lost
+const bar=document.createElement('button');bar.id='askbar';bar.type='button';bar.innerHTML='<i></i>Claude is asking you something<span>Open</span>';
+bar.onclick=()=>{bar.classList.remove('on');el.classList.add('on');el.querySelector('button,input')?.focus()};document.body.appendChild(bar);
+document.addEventListener('keydown',e=>{if(!A||!el.classList.contains('on'))return;
+  if(e.key==='Escape'){e.preventDefault();e.stopPropagation();fold();return}
+  // the card is modal: a key pressed outside it (focus left on the page after attaching an image) goes to the Other box,
+  // never to the page's shortcuts ('c' opened a note, space played)
+  if(!el.contains(e.target)&&!e.metaKey&&!e.ctrlKey&&!e.altKey){e.stopPropagation();el.querySelector('#asko')?.focus()}},true);
+function fold(){el.classList.remove('on');bar.classList.add('on')}
+// the page's header says so while a question is open (review.html reads data-ask, redraws on "askchange").
+// window.askq: the open question {about, elsewhere}; elsewhere (Home only): the video's editor has it as the card, so
+// Home shows a row "Claude is asking about <video>" whose Open calls window.askOpen()
+function flag(on){const r=document.documentElement;window.askq=on&&A?{about:A.about||'',elsewhere:!!A.elsewhere}:null;if(!!r.dataset.ask===on)return;on?r.dataset.ask='1':delete r.dataset.ask;dispatchEvent(new Event('askchange'))}
+// the card up (not folded, not Home's row): the page's shortcuts stay off (review.html reads data-ask-open)
+new MutationObserver(()=>{const on=el.classList.contains('on')&&!!A,r=document.documentElement;if(!!r.dataset.askOpen!==on)on?r.dataset.askOpen='1':delete r.dataset.askOpen}).observe(el,{attributes:true,attributeFilter:['class']});
+// the tab's title holds "(1) Claude is asking" while a question is open: a page that retitles itself (review.html on
+// every refresh) is put back before the next paint, its own title kept for after (QA: the title flipped every 5-10 s)
+const T0=document.querySelector('title')||document.head.appendChild(document.createElement('title'));
+new MutationObserver(()=>{if(A&&document.title!==TITLE){title=document.title;document.title=TITLE}}).observe(T0,{childList:true,characterData:true,subtree:true});
+window.askOpen=()=>{if(!A)return;bar.classList.remove('on');el.classList.add('on');el.querySelector('button,input')?.focus()};
+let A=null,i=0,ans=[],imgs=[],pics=[],sel=new Set(),title=null;
+// images on this answer: picked, pasted or dropped; data urls until Send
+function showPics(){const b=el.querySelector('.aq-pics');if(!b)return;b.innerHTML=pics.map((p,k)=>`<span><img src="${p}" alt="attached image ${k+1}"><button data-rm="${k}" aria-label="remove image" title="remove">×</button></span>`).join('');el.querySelector('#asko')?.dispatchEvent(new Event('input'))}
+function addFiles(fs){[...fs].filter(f=>TYPES.test(f.type)&&f.size<=MAXB).slice(0,MAXN-pics.length).forEach(f=>{const r=new FileReader();r.onload=()=>{if(A&&pics.length<MAXN){pics.push(r.result);showPics();el.querySelector('#asko')?.focus()}};r.readAsDataURL(f)})}
+el.addEventListener('paste',e=>{const fs=[...(e.clipboardData?.files||[])];if(A&&fs.length){e.preventDefault();addFiles(fs)}});
+el.addEventListener('dragover',e=>{if(!A)return;e.preventDefault();el.querySelector('.aq-card')?.classList.add('aq-drag')});
+el.addEventListener('dragleave',e=>{if(!el.contains(e.relatedTarget))el.querySelector('.aq-card')?.classList.remove('aq-drag')});
+el.addEventListener('drop',e=>{if(!A)return;e.preventDefault();el.querySelector('.aq-card')?.classList.remove('aq-drag');addFiles(e.dataTransfer.files)});
+const TITLE='(1) Claude is asking';   // a background tab shows it in its title
 function chime(){try{const c=new AudioContext(),o=c.createOscillator(),g=c.createGain();o.frequency.value=660;g.gain.setValueAtTime(.0001,c.currentTime);
   g.gain.exponentialRampToValueAtTime(.06,c.currentTime+.02);g.gain.exponentialRampToValueAtTime(.0001,c.currentTime+.35);o.connect(g).connect(c.destination);o.start();o.stop(c.currentTime+.4)}catch(e){}}
 async function send(b){try{await fetch('/ask/answer',{method:'POST',body:JSON.stringify(Object.assign({id:A.id},b))})}catch(e){}}
 function close(msg){
   if(msg){el.innerHTML=`<div class="aq-card"><div class="aq-done">${esc(msg)}</div></div>`;setTimeout(()=>{if(!A)el.classList.remove('on')},1400)}else el.classList.remove('on');
-  A=null;if(title!==null&&document.title===TITLE)document.title=title;title=null}
-function next(v){ans[i]=v;i++;sel=new Set();el.innerHTML='';if(i<A.questions.length)return draw();send({answers:ans});close('Sent. Claude has your answer.')}
+  A=null;bar.classList.remove('on');flag(false);if(title!==null&&document.title===TITLE)document.title=title;title=null}
+function next(v){ans[i]=v;imgs[i]=pics;pics=[];i++;sel=new Set();el.innerHTML='';if(i<A.questions.length)return draw();
+  send(imgs.some(m=>m.length)?{answers:ans,images:imgs}:{answers:ans});close('Sent. Claude has your answer.')}
 function draw(){
   const q=A.questions[i],n=A.questions.length,multi=!!q.multiSelect,opts=Array.isArray(q.options)?q.options:[];
   const own=el.querySelector('#asko')?.value||'';
   el.innerHTML=`<div class="aq-card"><div class="aq-top"><span>${A.about?`Claude (${esc(A.about)}) asks`:'Claude has a question'}</span><span>${n>1?`Question ${i+1} of ${n}`:''}</span></div>
   ${q.header?`<div class="aq-hd">${esc(q.header)}</div>`:''}<h2${q.header?'':' style="margin-top:14px"'}>${esc(q.question)}</h2>
   <div class="aq-opts">${opts.map((o,k)=>`<button class="aq-opt${sel.has(k)?' aq-sel':''}" data-k="${k}"${multi?` aria-pressed="${sel.has(k)}"`:''}>${multi?`<i class="aq-box">${sel.has(k)?TICK:''}</i>`:''}<div><b>${esc(o.label)}</b>${o.description?`<span>${esc(o.description)}</span>`:''}</div></button>`).join('')}</div>
-  <div class="aq-other"><input id="asko" placeholder="${multi?'Other: add your own words':'Other: type your own answer'}" aria-label="Other answer">${multi?'':'<button class="aq-send" id="asks" disabled>Send</button>'}</div>
-  ${multi?'<button class="aq-send aq-wide" id="asks" disabled>Send</button>':''}
+  <div class="aq-other"><input id="asko" placeholder="${multi?'Other: add your own words':'Other: type your own answer'}" aria-label="Other answer"><button class="aq-clip" id="askp" aria-label="attach an image" title="attach an image (or paste or drop one)">${CLIP}</button><input type="file" id="aski" accept="image/png,image/jpeg,image/gif,image/webp" multiple hidden>${multi?'':'<button class="aq-send" id="asks" disabled>Send answer</button>'}</div>
+  <div class="aq-pics"></div>
+  ${multi?'<button class="aq-send aq-wide" id="asks" disabled>Send answer</button>':''}
   <div class="aq-foot"><button class="aq-term" id="askt">Answer in Claude Code instead</button></div></div>`;
   const $o=el.querySelector('#asko'),$s=el.querySelector('#asks');
   $o.value=own;
   const value=()=>multi?[...sel].sort((a,b)=>a-b).map(k=>opts[k].label).concat($o.value.trim()?[$o.value.trim()]:[]).join(', '):$o.value.trim();
-  const ready=()=>$s.disabled=!value();
-  ready();
+  const ready=()=>$s.disabled=!value()&&!pics.length;
+  showPics();ready();
+  el.querySelector('#askp').onclick=()=>el.querySelector('#aski').click();
+  el.querySelector('#aski').onchange=e=>{addFiles(e.target.files);e.target.value=''};
+  el.querySelector('.aq-pics').onclick=e=>{const b=e.target.closest('[data-rm]');if(b){pics.splice(+b.dataset.rm,1);showPics()}};
   el.querySelectorAll('.aq-opt').forEach(b=>b.onclick=()=>{const k=+b.dataset.k;if(!multi)return next(opts[k].label);sel.has(k)?sel.delete(k):sel.add(k);draw()});
   $o.oninput=ready;
-  $o.onkeydown=e=>{if(e.key==='Enter'&&value())$s.click()};
-  $s.onclick=()=>{if(value())next(value())};
+  $o.onkeydown=e=>{if(e.key==='Enter'&&!$s.disabled)$s.click()};
+  $s.onclick=()=>{if(value()||pics.length)next(value())};
   el.querySelector('#askt').onclick=()=>{send({terminal:true});close('Answer it in Claude Code.')};
-  el.classList.add('on');
+  if(!bar.classList.contains('on')&&!(A.elsewhere&&!el.classList.contains('on')))el.classList.add('on');
 }
 async function poll(){
   let a=null;
@@ -70,7 +112,7 @@ async function poll(){
   if(!a){if(A)close();return}
   if(document.title!==TITLE){title=document.title;document.title=TITLE}
   if(A&&A.id===a.id)return;
-  A=a;i=0;ans=[];sel=new Set();el.innerHTML='';draw();chime();
+  A=a;i=0;ans=[];imgs=[];pics=[];sel=new Set();el.innerHTML='';bar.classList.remove('on');draw();flag(true);chime();
 }
 poll();setInterval(poll,1000);document.addEventListener('visibilitychange',poll);
 addEventListener('pagehide',()=>{try{navigator.sendBeacon('/ask/gone')}catch(e){}});   // a closed tab: Claude's next question goes to the terminal at once

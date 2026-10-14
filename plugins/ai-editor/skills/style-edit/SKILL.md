@@ -1,6 +1,6 @@
 ---
 name: style-edit
-description: Turns an approved cut into the finished video in a creator's measured style. Takes cut.mp4 from the cut skill plus a style.json (from start or creator-teardown), plans captions and zooms to match the creator, adds visuals timed to the spoken word (the user's own images, real screenshots, posts and logos of what is named, the line marked on the real page; no type cards, stock icons or emoji), shows one stills sheet for approval, then renders 9:16 or 16:9 with Remotion on the laptop, Modal, GitHub Actions or the user's AWS Lambda, and can export the edit to Final Cut, Premiere, Resolve or CapCut. Use when a cut already exists and the user says "style it", "now add the style", "add captions and zooms", "add my images to the video", "render the edit", "change the captions", "export to Final Cut" or "send it to Premiere". Not for a raw take or a first request to edit a video like a creator (that is start), not for cutting mistakes out (cut), and not for measuring a creator (creator-teardown).
+description: Turns an approved cut into the finished video in a creator's measured style. Takes cut.mp4 from the cut skill plus a style.json (from start or creator-teardown), plans captions and zooms to match the creator, adds visuals timed to the spoken word (the user's own images, real screenshots, posts and logos of what is named, the line marked on the real page; no type cards, stock icons or emoji), shows the stills on the review page for approval, then renders 9:16 or 16:9 with Remotion on the laptop, Modal, GitHub Actions or the user's AWS Lambda, and can export the edit to Final Cut, Premiere, Resolve or CapCut. Use when a cut already exists and the user says "style it", "now add the style", "add captions and zooms", "add my images to the video", "render the edit", "change the captions", "export to Final Cut" or "send it to Premiere". Not for a raw take or a first request to edit a video like a creator (that is start), not for cutting mistakes out (cut), and not for measuring a creator (creator-teardown).
 license: MIT
 compatibility: Python 3.9+, ffmpeg, Node 20+ and the Remotion renderer the setup skill installs; internet for captures. Optional Modal, gh or AWS account for cloud renders. Runs from the full ai-editor plugin folder (uses its lib/ and remotion/).
 ---
@@ -11,11 +11,11 @@ Paths: `${CLAUDE_SKILL_DIR}` means the folder containing this SKILL.md, and `${C
 
 Read `${CLAUDE_PLUGIN_ROOT}/PRINCIPLES.md` first: the rules every video follows (where, asking, looking real, motion, story, privacy, cost).
 
-Every question goes in the question box: the AskUserQuestion tool (2-4 options, recommended first). Only in an agent without it, ask numbered questions in text.
+Every question goes in the question box: the AskUserQuestion tool (2-4 options, recommended first). Only in an agent without it, ask numbered questions in text. `Attached images: <paths>` in an answer: Read each first.
 
 An approved cut and a creator's style in (a `skill=` job runs that skill: start step 3).
 The finished video out: captions, zooms, real captures and motion scenes timed to the words, in the
-creator's look and the user's brand. The user approves the stills (step 5) and picks the render (step 6).
+creator's look and the user's brand. The user approves the stills on the review page (step 5) and picks the render (step 6).
 
 Paths are relative to the library (PRINCIPLES.md). Run the scripts with `python3` on Mac
 and Linux, `py` on Windows. `S="${CLAUDE_SKILL_DIR}/scripts"`,
@@ -57,6 +57,8 @@ Follow every taste rule; the scripts read the settings themselves. When the user
   they hand over, goes in `edits/<name>/images/` and `images.json`:
   `[{"src": "images/dashboard.png", "word": "dashboard", "nth": 1}]` (optional `layout`, `hold_s`,
   `entrance`; transparent PNG and Lottie `.json` work).
+- **What the user added on the page** (`assets.json`, review.py `wait`'s `assets:` line): first, before any search,
+  each on its `say` words, as `agents/visual-prep.md` step 2 says. One not in images.json or visuals.json yet is new.
 
 ## 2. Captions text
 
@@ -79,8 +81,8 @@ Use captions.json from here on.
 
 ## 3. Visuals
 
-**Read `references/shapes.md` first**: the visuals.json shape for every pick, the order of what goes
-on screen and the rules plan.py enforces.
+**Read `references/shapes.md` and `references/motion-design.md` first**: each pick's shape and plan.py's
+rules, then the default look and motion (built animations over captures, big in the band, one capture a page).
 
 1. **Propose:** `python3 "$S/route.py" beats edits/<name>` splits captions.json into sentences,
    marks the named things (profile, logo-pack) into beats.json. Pick one route per sentence yourself
@@ -91,8 +93,8 @@ on screen and the rules plan.py enforces.
    a video a `youtube`, a repo a `github`, a brand in passing a `logo`, an expert's words a clip (`references/visuals.md` "Sourced proof").
 3. **Fill the overlays:** for the overlay picks, write only the props (`references/shapes.md`). Hand it to the `template-filler` agent (haiku) with the full path of `references/shapes.md` when available, else write them. Only
    words and numbers the speaker said. There are no type cards.
-4. **Fetch:** `node "$S/capture.mjs" edits/<name>` screenshots, fetches logos, posts and
-   free sources into `images/`, hides cookie banners, measures marks. The step 5 sheet shows them.
+4. **Fetch:** `node "$S/capture.mjs" edits/<name>` fetches captures, logos, posts into `images/`, marks measured.
+5. **Motion:** moving-template beats become bespoke clips (motion skill); a failed clip keeps its card.
 
 Pacing: a copied creator's rate wins. route.py prints her cards a minute, kinds and place in the frame,
 and marks that many sentences `want` (named ones first). Give each a card of her kind with a `box` at her
@@ -115,8 +117,7 @@ Writes `edits/<name>/plan.json`. Read every warning. It ends with the **style ch
 each `style:` line is a way the plan differs from the creator. Fix each (style.json, visuals.json,
 images.json) and plan again before the stills; what the user changed is already the target.
 
-1. **Music:** unless the profile says `sound.music: false`, ask the music question and lay the bed
-   (`references/plan.md` "Music"), then run plan.py again. Sound cues need nothing: plan.py adds them.
+1. **Music** follows the style unless the user set it (`references/plan.md` "Music"; plan.py lays the creator's bed itself), then plan.py again. Sound cues need nothing: plan.py adds them.
 2. **Behind the speaker:** if the profile says `"behind": true`, run `matte.py` after the last plan.py run and
    again after any later one (it cuts only new frames); say its `--estimate` first (`references/plan.md`).
 3. **Check the plan:**
@@ -127,31 +128,27 @@ python3 "$S/check.py" plan edits/<name> [--plan plan.json] [--style edits/<name>
 
 Fix every FAIL and plan again. What it FAILs: `references/plan.md`.
 
-## 5. Stills sheet, then wait
+## 5. Stills on the review page, then wait
 
 ```bash
 python3 "$S/edit.py" stills edits/<name>
 ```
 
-The first run installs the renderer (a few minutes, once; say so first). Writes one still per beat and
-`stills/sheet.png`, numbered and labelled with beat, time and card kind.
-Review the sheet; open a single still only to zoom in on a problem.
-Fix before showing: a box on the face, a zoom cutting the head, the wrong part of a capture, text
-too small for a phone, a default AI look (icon tiles, emoji, neon glass). `stills-critic` can check it.
-
-Show the user the sheet and ask in the question box: **Approve (Recommended)** / **Change something**
-/ **Open the live preview** (drag, trim and swap cards in a local page). **Do not render until they
-approve.** Notes go into the taste skill, visuals.json or images.json, then plan and stills again.
-
-On **Open the live preview**:
+The first run installs the renderer (a few minutes, once; say so first). Writes one still per beat,
+`stills/sheet.png` (labelled with beat, time and card kind) and `stills/stills.mp4` (each still over the
+cut's sound). Review the sheet; open a single still only to zoom in. Fix before showing: a box on the
+face, a zoom cutting the head, the wrong part of a capture, text too small for a phone, a default AI
+look. `stills-critic` can check it. Then show them on the cut's review page, never in the terminal first:
 
 ```bash
-python3 "$S/preview.py" edits/<name> [--plan plan.json]
+python3 "${CLAUDE_PLUGIN_ROOT}/lib/ai_editor/review.py" edits/<name> round --stage edit --stills \
+   --video edits/<name>/stills/stills.mp4 --plan edits/<name>/plan.json
 ```
 
-It waits until they press **Render** in the page (`references/render.md` "The live preview"). Then
-read `preview-done.json`, save corrections that are a preference with the taste skill, apply the
-overrides with `python3 "$S/preview.py" apply edits/<name> [--plan plan.json]`, and go to step 6.
+Then review.py's `wait` in the background and say in one line that the stills are on the page (`round --stills`
+also starts a low-priority laptop render that step 7 takes over). **Do not render until `wait` prints `APPROVE`.** A `SEND`: fix the notes (taste skill,
+visuals.json, images.json), plan, stills, `round --stills` again. Moving cards by hand only when the user
+asks: `references/render.md` "The live preview".
 
 ## 6. Where to render
 
@@ -160,19 +157,22 @@ python3 "$S/edit.py" estimate edits/<name>
 ```
 
 Prints `Laptop:`, `Modal:` and two `Other:` lines (GitHub Actions, Lambda) with this video's time and
-cost. `render` in the profile: render there, no question; say it in one line with the time ("say 'render
-on Modal' to change"). Not set: ask once, three options in this order with the printed numbers, none
-recommended (only the user knows their time and money), then `profile.py set render='"laptop|modal|github|lambda"'`.
+cost, then `Recommended:`: Modal once it is connected, the video is over a minute and Modal is quicker; the
+laptop otherwise. `render` in the profile, or `Recommended: Laptop`: render there with no question, one line
+with the time ("Rendering on your laptop, about 14 s. Say 'render on Modal' to change"). Not set and
+`Recommended: Modal`: ask once, three options in this order with the printed numbers, Modal marked
+(Recommended), then `profile.py set render='"laptop|modal|github|lambda"'`.
 
 1. **Laptop**: its time, free.
-2. **Modal**: its time and cost ($30 free credit a month); say `Not set up yet` if so.
+2. **Modal**: its time and cost ($30 free credit a month). Not connected: label it **Connect Modal**; on that
+   pick run `setup.py modal-connect` in the background (the setup skill's Modal step), then render on Modal.
 3. **Other: GitHub Actions or AWS Lambda**: both `Other:` lines in the description. On this pick, ask
    a second question with the two. GitHub Actions: free, needs `gh` logged in, the footage goes into
    a **private** repo in their account; ask before creating the repo. Lambda: their own AWS account.
    No `cloud_cleanup` in the profile: ask once "Delete the uploaded footage from <GitHub|AWS> after
    rendering?" (Yes (Recommended) / No, keep it there), then `profile.py set cloud_cleanup=true|false`.
 
-Modal picked but not set up: the setup skill's Modal step first. Lambda picked and
+Modal picked but not connected: `setup.py modal-connect` first (above). Lambda picked and
 `aws sts get-caller-identity` fails: the setup skill's Lambda section first.
 
 ## 7. Render and check
@@ -198,11 +198,11 @@ those pages up). The full list: `references/plan.md`.
 A `loudness ... LUFS` or take's own `true peak` WARN is the take's level, not a fault in the edit. `loudness`
 in the profile: do that, no question. Not set: ask once, then `profile.py set loudness='"leave|normalize"'`:
 
-> Your video plays at <N> LUFS; the apps play speech at about -14, so it will sound <quieter|louder>
-> than the videos around it. Change the volume?
+> Your video is quieter than most reels. Make it as loud as Instagram and TikTok expect? (louder: "...louder than most reels. Bring it down to what they expect?") Details: <N> LUFS; the apps play speech at about -14.
 > - **Leave my audio as it is (Recommended).** Nothing is touched.
-> - **Make it one level louder/quieter.** One gain on the whole track to -14 LUFS, never past a -1 dB
->   peak. No compression, no noise removal: the voice sounds the same, only louder or quieter.
+> - **Make it as loud as the apps expect** (or **Bring it down**). One volume change, never past a -1 dB peak.
+
+Numbers only on the Details line. Check output (FAIL, WARN, "2 frames short") never reaches the user.
 
 Only on the second answer: `python3 "$S/quality.py" normalize edits/<name>/render.mp4`. It writes
 `render-normalized.mp4` beside it; hand over that file.
@@ -211,7 +211,7 @@ Only on the second answer: `python3 "$S/quality.py" normalize edits/<name>/rende
 
 Hand over on the review page (`references/review.md`), `serve` and `wait` in the background:
 `python3 "${CLAUDE_PLUGIN_ROOT}/lib/ai_editor/review.py" edits/<name> round --stage edit --video edits/<name>/render.mp4`
-(no page: `start`, same flags). Card and visual changes later: overlays skill; caption, zoom: plan, stills, render, `round`; cut: cut skill.
+(no page: `start`, same flags). On `APPROVE`: motion skill `save`. Card and visual changes later: overlays skill (a motion clip: motion skill `note`); caption, zoom: plan, stills, render, `round`; cut: cut skill.
 
 ## 9. Export to another editor
 

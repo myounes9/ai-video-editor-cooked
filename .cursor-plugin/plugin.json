@@ -3,7 +3,7 @@
   "name": "ai-video-editor",
   "displayName": "cooked.",
   "description": "Measure how a short-form creator edits, then cut and edit your own talking-head video in that style: retakes and pauses out, captions, zooms and cards rendered with Remotion.",
-  "version": "2.6.2-cooked.1",
+  "version": "2.7.8-cooked.1",
   "author": { "name": "NextWork", "url": "https://nextwork.ai" },
   "homepage": "https://github.com/nextwork-projects/ai-video-editor-cooked",
   "repository": "https://github.com/nextwork-projects/ai-video-editor-cooked",

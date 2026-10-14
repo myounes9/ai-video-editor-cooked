@@ -40,12 +40,16 @@ Renderer: `remotion/src/kinetic/` (one file per format, the shared design system
   (`hold_s`, or the next speech, wins over the hold). `out_at` (optional) asks it to stay until then. A kinetic card
   that ends under 1 s before the next kinetic card or scene holds until it (plan.py `bridge_kinetic`), so the captions
   never flash back for a word. A card whose first landing comes after it has gone stops the render (raise `hold_s`).
-- **Zooms**: no zoom cuts under a kinetic card's hold; a zoom with an edge there eases as a push (0.8 s each way).
+- **Zooms**: no zoom cuts under a kinetic card's hold; a zoom with an edge there eases as a push (0.8 s each way). A
+  zoom up with one grows from the head's top, never from the chin (plan.py `clear_chin`), so the head holds its place.
 - **Labels** land no earlier than their figure + 0.15 s. Keep them to one or two short words: they stay phone-readable
   (48 px, 44 at the least), wrapping onto two lines before they shrink, never closer than 40 px to the next. A
   number_chain whose labels or figures cannot fit so across the grid stops the render; check.py plan FAILs it first
   (an estimate, WARN near the limit): make it a `stat_stack` (`columns`), or shorten the labels.
-- Not with the split layout (plan.py drops them there: they float over the full-frame speaker).
+- Not with the split or board layout (plan.py drops them there: they float over the full-frame speaker). A style whose
+  creator is off screen (her pictures become scenes) keeps them over the footage. A visuals.json `title` or `cta` owns
+  the band: a kinetic card up when one lands ends there, and one that would start under it is dropped (plan.py
+  `under_titles`).
 
 ## The look (tokens.ts)
 

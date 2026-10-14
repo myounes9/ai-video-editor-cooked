@@ -717,7 +717,7 @@ def zoom_moves(video, plan, w=270, h=480, behind=None, cuts=()):
 
     out = []
     for z in plan["zooms"]:
-        e = max(0.8, z.get("ease_s") or 0) if z.get("kind") == "push" and z.get("ease_s") else 0.16
+        e = max(0.8, z.get("ease_s") or 0) if z.get("kind") == "push" and z.get("ease_s") else z.get("travel_s") or 0.16
         for t in (z["start"], z["end"] - (e if z.get("kind") == "push" and z.get("ease_s") else 0)):
             if any(a <= t < b for a, b in scenes):
                 continue
@@ -832,7 +832,8 @@ def run(edit, plan, video, plan_path, style=None, cuts=(), brand=None):
             under = None if split else [cv2.warpAffine(c_, np.float32(footage_affine(t, plan, W, H)), (W, H))
                                         for c_ in (cut_prev, cut, cut_next) if c_ is not None]
             nl = max(caption_lines(frame, cap_bgr, y / 100 * H, ch, under) for y in cap_ys)
-            if nl > (cs.get("max_lines") or 1):
+            pg = page_frames[n]   # a page plan.py stacked takes 2; a big keyword takes its own line (up to 3)
+            if nl > (pg.get("lines") or (min(3, len(pg["words"])) if pg.get("big") else 0) or cs.get("max_lines") or 1):
                 wrapped.append((t, page_frames[n]["text"], nl))
         need = up or n in sframes or n in cap_frames
         if not need:
@@ -1099,7 +1100,7 @@ def run(edit, plan, video, plan_path, style=None, cuts=(), brand=None):
         if plan.get("kinetic") and anim.get("type") in KINETIC:
             continue
         from ai_tells import check_still, for_brand
-        gen = for_brand(check_still(crop, name), brand)
+        gen = for_brand(check_still(crop, name), brand, plan.get("allow_tells"))
         rr["generic"] = [f"{g['tell']}: {g['where']}" for g in gen]
         for g in gen:
             out.append(F("FAIL" if g["level"] == "BAN" else "WARN", c["start"], f"{name} AI tell '{g['tell']}': {g['where']}", g["fix"]))
@@ -1109,7 +1110,10 @@ def run(edit, plan, video, plan_path, style=None, cuts=(), brand=None):
     meas["icons"] = {"stock": icons_all, "real": real_all}
     for where, obj in (("visuals.json", (edit / "visuals.json")), ("captions.json", (edit / "captions.json"))):
         if obj.exists():
-            em = emoji_in(json.loads(obj.read_text(encoding="utf-8")))
+            doc = json.loads(obj.read_text(encoding="utf-8"))
+            if isinstance(doc, list):   # the title card keeps the user's emoji on purpose (motion-design.md "Look")
+                doc = [x for x in doc if not (isinstance(x, dict) and x.get("kind") == "title")]
+            em = emoji_in(doc)
             if em:
                 out.append(F("WARN", None, f"emoji in {where}: {' '.join(em)}", "words or a real image, not emoji"))
 

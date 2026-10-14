@@ -17,7 +17,9 @@ Every question to the user goes in the question box: call the AskUserQuestion to
 An edit folder that style-edit already rendered in. The same edit out, with only the named beats
 changed: re-planned, checked, and re-rendered where they changed. Everything else stays exactly as
 the user approved it. This skill writes no renderer code: it changes visuals.json and images.json,
-and style-edit's scripts and Remotion templates do the rest.
+and style-edit's scripts and Remotion templates do the rest. A new card for a moment uses what the user added
+first (`edits/<name>/assets.json`: an image from `assets/`, or a link by its `site`, the same way style-edit's
+step 1 does), before searching for anything.
 
 Run the scripts with `python3` on Mac and Linux, `py` on Windows. Paths are relative to the library
 (PRINCIPLES.md "Where"). `S="${CLAUDE_PLUGIN_ROOT}/skills/style-edit/scripts"`,
@@ -75,8 +77,10 @@ capture beat lives in both visuals.json and images.json: `beat` changes both. Wh
 becomes (move, bigger, off the face, off the caption, real page, animate a screenshot, smoother,
 lands late): `references/changes.md` "Requests".
 
-**New visuals** (an animation, a diagram, a real page): pick the format from what is said, in
-style-edit's order (`${CLAUDE_PLUGIN_ROOT}/skills/style-edit/references/shapes.md`): the user's own
+**New visuals** (an animation, a diagram, a real page): read style-edit's
+`${CLAUDE_PLUGIN_ROOT}/skills/style-edit/references/motion-design.md` (the default look and motion: built
+animations over static captures, big in the band, one capture per page), then pick the format from what is
+said, in style-edit's order (`${CLAUDE_PLUGIN_ROOT}/skills/style-edit/references/shapes.md`): the user's own
 asset, the real thing captured, UI rebuilt from real parts, real logos. A diagram is a `flow` of the
 real logos or captures the words name, lighting each part on its spoken word, as an overlay beside or
 above the head: the speaker stays on screen (`references/changes.md` "A diagram"). Never a text

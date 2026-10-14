@@ -16,6 +16,7 @@ Inside: videos/ (dropped files), edits/<name>/, clips/<name>/, product/<name>/, 
 uploads, and the review page's copies of each round older than the last two. Never a source, cut.mp4,
 the render, joined.mp4 or review.json.
 """
+import filecmp
 import hashlib
 import json
 import os
@@ -94,13 +95,39 @@ def _review(d):
 
 
 def status(r):
-    """cutting (no review page yet), making (Claude has the notes), ready (to review), done (approved)."""
-    if not r:
+    """cutting (no cut yet: no review page, or round 0 on the raw clip), making (Claude has the notes), ready (to review), done (approved)."""
+    if not r or r.get("raw"):   # round 0 plays the raw clip while the cut is made
         return "cutting"
     last = (r.get("events") or [{}])[-1]
     if r.get("sent") and last.get("type") == "approve":
-        return "making" if r.get("stage") == "cut" else "done"
+        return "making" if r.get("stage") == "cut" or last.get("stills") else "done"   # the stills approved: rendering
     return "making" if r.get("sent") else "ready"
+
+
+def draft_name(r, rounds):
+    """One name for a round everywhere (Home card, editor tab, Drafts list): "draft N" counts the cut's videos, and
+    on the edit the videos after the preview; a preview is "the preview" ("preview 1", "preview 2" when there are more); round 0 is
+    the clip itself. Lower case: callers capitalise. review.html rn() is the same rule."""
+    if not r or not r.get("round"):
+        return "your clip"
+    same = [x for x in rounds if x.get("stage") == r.get("stage") and 1 <= (x.get("round") or 0) <= r["round"]]
+    if r.get("stills"):
+        n = sum(1 for x in same if x.get("stills"))
+        more = sum(1 for x in rounds if x.get("stage") == r.get("stage") and x.get("stills")) > 1
+        return f"preview {max(1, n)}" if more else "the preview"
+    return f"draft {max(1, sum(1 for x in same if not x.get('stills')))}"
+
+
+def is_sample(d, r=None):
+    """The edit made by Try it with a sample video (home.py marks its review.json; older ones used the sample style)."""
+    r = r if r is not None else _review(d)
+    if (r or {}).get("sample"):
+        return True
+    try:
+        src = json.loads((d / "style.json").read_text(encoding="utf-8")).get("source") or []
+    except (OSError, ValueError, AttributeError):
+        return False
+    return any("sample-card-edit" in str(x) for x in src) and d.name.startswith("sample-video")
 
 
 def entry(d):
@@ -111,6 +138,7 @@ def entry(d):
     t = max([q.stat().st_mtime for q in (d / "review.json", d) if q.exists()])
     return {"name": (r or {}).get("label") or (r or {}).get("name") or d.name, "dir": str(d), "kind": d.parent.name,
             "status": status(r), "stage": (r or {}).get("stage"), "round": (r or {}).get("round"),
+            "draft": draft_name(r, (r or {}).get("rounds") or []) if r else None, "sample": is_sample(d, r),
             "video": video if video and Path(video).is_file() else None, "review": bool(r), "updated": t}
 
 
@@ -119,21 +147,30 @@ def entries():
 
 
 SAMPLES = Path(__file__).resolve().parents[2] / "presets" / "styles"
+# sha256 of the cover.jpg older releases shipped with a sample (Card edit twice, 50/50 once): a seeded copy of one is
+# removed, so the sample's thumb.jpg shows instead. A cover the user picked (any other bytes) stays.
+OLD_COVERS = {"95481f6eae0efdec8eb8d6d47f771d007f33863da2505d058ed7a828e5816abe",
+              "096846c01eb101daa99cd003391d8ae47b91f710daeca5c5891fe64dd47759b3",
+              "80ebc9ce6d578891c46ebd51ac181d8e8510dd5a30f91df1dae7cce8149b27db"}
 
 
 def seed_samples(lib):
-    """The sample styles the plugin ships (presets/styles/<id>/) into <library>/creator-teardowns/<id>/, so they
-    list, pick and edit like a studied creator. style.json is kept current (the user's changes live in
-    style.overrides.json beside it); any other file (the cover) only when missing, so an image the user picked stays."""
+    """The sample styles the plugin ships (presets/styles/<id>/: style.json, thumb.jpg, thumb.json, example.mp4) into
+    <library>/creator-teardowns/<id>/, so they list, pick and edit like a studied creator. Every shipped file is kept
+    current except cover.jpg (Motion design ships its drawn board), copied only when missing so an image the user
+    picked stays; the user's other changes live beside them (style.overrides.json)."""
     for src in SAMPLES.glob("*/style.json"):
         d = Path(lib) / "creator-teardowns" / src.parent.name
         try:
             for f in src.parent.iterdir():
                 t = d / f.name
-                if t.exists() and (f.name != "style.json" or t.read_bytes() == f.read_bytes()):
+                if t.exists() and (f.name == "cover.jpg" or filecmp.cmp(f, t)):   # copy2 keeps the mtime, so this is a stat check after the first copy
                     continue
                 d.mkdir(parents=True, exist_ok=True)
-                shutil.copyfile(f, t)
+                shutil.copy2(f, t)
+            c = d / "cover.jpg"
+            if c.is_file() and hashlib.sha256(c.read_bytes()).hexdigest() in OLD_COVERS:
+                c.unlink()
         except OSError:
             pass
 
@@ -291,6 +328,16 @@ def trash_cmd(p, os_name=None):
     return ["gio", "trash", str(p)]
 
 
+def open_cmd(p, os_name=None):
+    """A text file in the user's text editor (the Skills view's Open the file)."""
+    os_name = os_name or platform.system()
+    if os_name == "Darwin":
+        return ["open", "-t", str(p)]
+    if os_name == "Windows":
+        return ["notepad", str(p)]
+    return ["xdg-open", str(p)]
+
+
 def reveal_cmd(p, os_name=None):
     os_name = os_name or platform.system()
     if os_name == "Darwin":
@@ -377,6 +424,11 @@ def demo():
     assert t and t.stat().st_size > 500 and thumb(rs[0]["path"]) == t
     assert reveal_cmd(mine, "Darwin") == ["open", str(mine)] and reveal_cmd(vid, "Windows")[0] == "explorer"
     assert disk()["library"] > 0
+    # one draft name everywhere: draft 1, the preview, then the edit's first video is draft 1 again
+    rr = [{"stage": "cut", "round": 0}, {"stage": "cut", "round": 1}, {"stage": "edit", "round": 1, "stills": True},
+          {"stage": "edit", "round": 2, "stills": True}, {"stage": "edit", "round": 3}]
+    assert [draft_name(r, rr) for r in rr] == ["your clip", "draft 1", "preview 1", "preview 2", "draft 1"]
+    assert draft_name(rr[2], rr[:3]) == "the preview"
     shutil.rmtree(tmp, ignore_errors=True)
     print("library demo ok")
 

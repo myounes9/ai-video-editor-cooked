@@ -13,7 +13,9 @@ render.py frame counts: "span N: X frames, wanted X+1" must never happen.
    and 60 fps, cut with random spans by build_timeline's own frame code and rendered by render.py.
 3. Music bed: speech-like tones (one word barely over the music) on a constant music bed. The
    pauses between words are tightened and no word loses a frame.
-4. A mistimed word: its label starts 0.6 s after its audio (as transcribers do with numbers). The
+4. A late last frame: an iPhone-style 1/600 s source whose final frame is stamped 26 ms late. A span
+   ending on it keeps every frame, the real last one (not a repeat), with no x264 retry.
+5. A mistimed word: its label starts 0.6 s after its audio (as transcribers do with numbers). The
    lead-in cut trusts the label and lands inside the word; the splice check moves it to the quiet.
 """
 import json
@@ -101,12 +103,45 @@ def test_real_renders():
                 r = subprocess.run([sys.executable, HERE / "render.py", src, ed, *hw],
                                    capture_output=True, text=True, env=env)
                 assert r.returncode == 0, (name, frames, r.stdout[-400:], r.stderr[-400:])
+                if not run:   # a changed cut re-encodes only its new spans, and still lands frame-exact
+                    frames2 = frames[:-2] + [[frames[-2][0], frames[-1][1]]]   # the last cut given back
+                    (ed / "report.json").write_text(json.dumps({"fps": fps, "frames": frames2}), encoding="utf-8")
+                    r = subprocess.run([sys.executable, HERE / "render.py", src, ed, "--no-hw", "--segments-only"],
+                                       capture_output=True, text=True)
+                    assert r.returncode == 0 and "segments ready" in r.stdout, r.stdout[-400:]
+                    r = subprocess.run([sys.executable, HERE / "render.py", src, ed, "--no-hw"],
+                                       capture_output=True, text=True)
+                    assert f"{len(frames2)} of {len(frames2)} spans already encoded" in r.stdout, r.stdout[-400:]
+                    assert R.count_frames(ed / "cut.mp4") == sum(e - s for s, e in frames2)
+                    assert len(list((ed / ".segments").glob("*/*.mp4"))) == len(frames2)   # old spans pruned
                 if run:   # one span past the last frame fails, and the segments are still cleaned up
                     (ed / "report.json").write_text(json.dumps({"fps": fps, "frames": [[0, total + 5]]}),
                                                     encoding="utf-8")
                     r = subprocess.run([sys.executable, HERE / "render.py", src, ed, *hw],
                                        capture_output=True, text=True, env=env)
                     assert r.returncode and not list(quoted.glob("cut_render_*")), (r.stderr[-300:],)
+
+
+def test_late_last_frame():
+    with tempfile.TemporaryDirectory() as d:
+        d = Path(d)
+        src = d / "late-last.mov"
+        ff("-f", "lavfi", "-i", "testsrc2=s=64x64:r=30000/1001:d=3", "-f", "lavfi", "-i", "sine=d=3.1",
+           "-vf", "settb=1/600,setpts='if(eq(N,89),PTS+0.026/TB,PTS)'", "-fps_mode", "passthrough",
+           "-video_track_timescale", "600", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", src)
+        fps, _, total = B.probe(src)
+        assert total == 90, total
+        frames = [[10, 40], [60, total]]
+        for hw in (["--no-hw"], []) if sys.platform == "darwin" else (["--no-hw"],):
+            ed = d / f"edit{len(hw)}"
+            ed.mkdir()
+            (ed / "report.json").write_text(json.dumps({"fps": fps, "frames": frames}), encoding="utf-8")
+            r = subprocess.run([sys.executable, HERE / "render.py", src, ed, *hw], capture_output=True, text=True)
+            assert r.returncode == 0 and "again with x264" not in r.stdout, (r.stdout[-400:], r.stderr[-400:])
+            assert R.count_frames(ed / "cut.mp4") == 60
+            md5 = subprocess.run(["ffmpeg", "-v", "error", "-i", ed / "cut.mp4", "-map", "0:v", "-f", "framemd5", "-"],
+                                 capture_output=True, text=True, check=True).stdout.splitlines()
+            assert md5[-1].split(",")[-1] != md5[-2].split(",")[-1], md5[-2:]   # the real last frame, not a repeat
 
 
 # (start, end, amplitude): speech-like tones; the 4th word sits only a few dB over the bed
@@ -211,6 +246,7 @@ if __name__ == "__main__":
     test_first_int()
     test_window_property()
     test_real_renders()
+    test_late_last_frame()
     test_music_bed()
     test_mistimed_word_is_not_clipped()
     test_scribe_network_error_is_a_message()
