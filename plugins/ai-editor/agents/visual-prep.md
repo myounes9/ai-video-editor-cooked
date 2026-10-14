@@ -51,9 +51,12 @@ local, so they are made now and made again if the cut changes.
    `title` (the hook's promise in 2 short lines of their words, emoji allowed, from 0 s), a `cta` on the ask word, a `list`
    when they count steps, a `stamp` when they say a card's thing does not apply (visuals.md "Card edit").
    Never a `file://` page from the user's config folders.
-   Kinetic titles on (style.json `graphics.kinetic`): the number beats are plan.py's (`kinetic_beats.py`, route.py
-   marks those lines `[kinetic]`). Write no kinetic beat and no `title` over the hook, and give a `[kinetic]` line no
-   card (no `likes` or `progress` for its `counter`) unless a real page shows the figure; that page takes its place.
+   **Kinetic beats** (style.json `graphics.kinetic` true, from the style or a learned rule): the number beats are
+   plan.py's (`kinetic_beats.py`, route.py marks those lines `[kinetic]`), placed around your real cards when plan.py
+   runs. Write no kinetic beat (no `kinetic_title` either) and no `title` over the hook, never change one you find,
+   and give a `[kinetic]` line no card (no `likes` or `progress` for its `counter`) unless a real page shows the
+   figure; that page takes its place. Keep all your cards together with them at about `graphics.kinetic_per_min` a
+   minute, 1 s of plain footage between cards: `<ROOT>/skills/style-edit/references/kinetic.md` "For the AI steps".
    Decide it all yourself: the caller must not have to ask the user what to show.
    When `EDIT/logos.json` exists (the logo-pack skill), use its `brand` for each `logo` beat (beats.json
    `logos`) and one `logo_cluster` per `together` group; capture.mjs keeps its files. No logos.json and two

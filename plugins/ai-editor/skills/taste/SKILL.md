@@ -62,6 +62,8 @@ python3 "$S/taste.py" add captions "Captions smaller" --set captions.size_pct=4.
 | no sound effects | `sfx=false` |
 | always split / always overlay | `layout.mode=split` or `overlay` |
 | keep my ums / don't cut fillers | `cut.keep_fillers=true` (retakes.py proposes no filler cuts) |
+| add motion graphics / no motion graphics / fewer of them (fork) | `graphics.kinetic=true` / `false`, `graphics.kinetic_per_min=` (default 8); the words alone set them (`taste.py map "<note>"`) |
+| key words / numbers in a colour, a bit bigger (fork) | `captions.emphasis_color=` and `captions.emphasis_scale=1.1` (1: colour only) |
 | a whole caption look they want kept | write `custom/captions/<name>.json` (a style.json captions block), then `captions.preset=<name>` |
 
    No setting fits (card timing, a capture cropped wrong, a look), so it is a word rule: write it

@@ -100,7 +100,8 @@ that fails to load stops the render. Cards still come from visuals.json (step 3)
   its own word (`word` / `at_word`); a caption_page gets the words said while it is up.
 - **Captions:** `words_per_caption` at a time, never held 0.3 s past the last word, the stressed
   word of a line marked (the renderer draws it in the emphasis colour and one weight heavier, never
-  bigger); each page one line at one size; the creator's effect, sizes and colours passed through.
+  bigger; with the fork's opt-in `emphasis_scale`, every spoken number and key word instead, about 1.1x through a
+  transform: kinetic.md); each page one line at one size; the creator's effect, sizes and colours passed through.
 - **Pacing:** `card_gap_s` (SKILL.md step 3); inside a longer stretch with no card a zoom change at
   least every 5 s, and a warning naming anything said there that could be shown.
 - **Zooms:** about `zoom.per_min` a minute, alternating in and out so the frame never creeps (a creator's

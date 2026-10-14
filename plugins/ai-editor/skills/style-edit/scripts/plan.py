@@ -684,7 +684,8 @@ def with_presets(style, mine):
 
 
 def kinetic_on(style):
-    """style.json "graphics": {"kinetic": true} (the user's taste.json can set it): the kinetic family may be planned.
+    """style.json "graphics": {"kinetic": true} (the user's taste can set it, a rule in words too: taste.settings_for):
+    the kinetic family may be planned.
     Off by default: those cards are words over the footage, which the default style never draws."""
     return bool((style.get("graphics") or {}).get("kinetic"))
 
@@ -2065,9 +2066,71 @@ def letterbox_plan(head, style, words, meta, images, face, lay):
     return out
 
 
-def mark_emph(chunks):
+def emph_on(cap):
+    """Fork, opt-in: the style's emphasis captions (captions.emphasis_scale set; 1 marks without the bigger size)."""
+    return (cap or {}).get("emphasis_scale") is not None
+
+
+KEY_STRESS = 1.6   # a key word is held this much longer a letter than the take's median content word
+KEY_GAP_S = 2.5    # key words at least this far apart (spoken numbers are not counted)
+
+
+def key_words(words):
+    """Fork: indices of the take's key words, from its punctuated words: a name (capitalised inside a sentence,
+    not "I") and a content word held clearly longest for its length (people stretch the word they stress); one a
+    sentence, KEY_GAP_S apart, the name first."""
+    content = lambda w: clean(w["text"]).lower() not in STOP and len(clean(w["text"])) > 3
+    rate = lambda w: (w["end"] - w["start"]) / max(1, len(clean(w["text"])))
+    rates = sorted(rate(w) for w in words if content(w))
+    med = rates[len(rates) // 2] if rates else 0
+    out, sent, last = [], [], -1e9
+
+    def close():
+        nonlocal last
+        names = [i for i in sent if i and not ends_sentence(words[i - 1]["text"]) and clean(words[i]["text"])[:1].isupper()
+                 and clean(words[i]["text"]).lower() not in STOP | {"i'm", "i'll", "i've", "i'd"} and len(clean(words[i]["text"])) > 1]
+        held = [i for i in sent if content(words[i]) and med and rate(words[i]) >= KEY_STRESS * med and words[i]["end"] - words[i]["start"] >= 0.3]
+        pick = names[:1] or sorted(held, key=lambda i: -rate(words[i]))[:1]
+        if pick and words[pick[0]]["start"] - last >= KEY_GAP_S:
+            out.append(pick[0])
+            last = words[pick[0]]["start"]
+        sent.clear()
+    for i, w in enumerate(words):
+        sent.append(i)
+        if ends_sentence(w["text"]) or i + 1 == len(words):
+            close()
+    return out
+
+
+def mark_emph(chunks, cap=None, words=()):
     """The stressed word of a caption line: in a line of 3+ words, the one held clearly longest
-    (people stretch the word they stress). Marked "emph": true for the renderer."""
+    (people stretch the word they stress). Marked "emph": true for the renderer.
+    Fork, opt-in (emph_on: the style's emphasis captions): instead every spoken number, all of its words (numbers.py
+    on the take's punctuated words, so a number split over two pages is marked on both; a lone "one" is not a
+    figure), and the take's key words (key_words), on pages of any length, two words included. A page with a
+    number gets no other key word. Only words said are marked, so nothing is added to what the speaker says."""
+    if emph_on(cap) and words:
+        sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "lib"))
+        from ai_editor import numbers
+        words = [w for w in words if w.get("type", "word") == "word" and w["text"].strip()]
+        by_start = {}
+        for c in chunks:
+            for w in c["words"]:
+                by_start.setdefault(round(w["start"], 3), []).append(w)
+        mark = lambda t0, t1, key: [x.update(emph=key) for t, ws in by_start.items() if t0 <= t <= t1 for x in ws]
+        for sp in numbers.spans([w["text"] for w in words]):
+            if sp["start"] == sp["end"] and sp["kind"] == "count" and clean(sp["text"]).lower() in ("one", "a", "an"):
+                continue
+            mark(round(words[sp["start"]]["start"], 3), round(words[sp["end"]]["start"], 3), "number")
+        for i in key_words(words):
+            page = next((c for c in chunks if any(round(x["start"], 3) == round(words[i]["start"], 3) for x in c["words"])), None)
+            if page and not any(x.get("emph") == "number" for x in page["words"]):
+                mark(round(words[i]["start"], 3), round(words[i]["start"], 3), "key")
+        for c in chunks:
+            for x in c["words"]:
+                if x.get("emph"):
+                    x["emph"] = True
+        return chunks
     for c in chunks:
         ws = c["words"]
         if len(ws) < 3:
@@ -2592,7 +2655,7 @@ def build(style, words, meta, images=(), aspect="auto", cuts=(), visuals=(), edi
     if aspect == "9:16":   # centred captions keep the safe zone's wider side margin on both sides
         m = max(SAFE[aspect][0], SAFE[aspect][2])
         cap["width_pct"] = min(cap.get("width_pct") or 86, 100 - 2 * m)
-    chunks = mark_emph(chunk_captions(words, cap.get("words_per_caption") or 3, cap.get("case", "sentence"))) \
+    chunks = mark_emph(chunk_captions(words, cap.get("words_per_caption") or 3, cap.get("case", "sentence")), cap, words) \
         if cap.get("present", True) else []
     if took(style, "captions"):
         chunks = type_pages(chunks, cap)
@@ -3415,6 +3478,21 @@ def demo():
     em = mark_emph([{"words": [{"text": "so", "start": 0, "end": 0.1}, {"text": "really", "start": 0.1, "end": 0.6},
                                {"text": "fast", "start": 0.6, "end": 0.75}]}])
     assert em[0]["words"][1].get("emph") and not em[0]["words"][0].get("emph")
+    # fork, opt-in emphasis captions: every spoken number (split over two 2-word pages, marked on both), a name, and
+    # a stressed word; a lone "one" is no figure; off (no emphasis_scale) a 2-word page keeps upstream's rule
+    said = ("We baked two hundred and fifty croissants. One of them burned. Then Sourdough sold out. "
+            "Honestly, it was really just wonderful.").split()
+    tk, t = [], 0.0
+    for x in said:
+        d = 0.9 if x == "wonderful." else 0.3
+        tk.append({"text": x, "start": round(t, 2), "end": round(t + d, 2)})
+        t += d + 0.05
+    on = lambda c: [w["text"] for p in c for w in p["words"] if w.get("emph")]
+    em2 = mark_emph(chunk_captions(tk, 2, "sentence"), {"emphasis_scale": 1.1}, tk)
+    assert on(em2) == ["two", "hundred", "and", "fifty", "Sourdough", "wonderful"], on(em2)
+    assert [w["text"] for w in em2[1]["words"]] == ["two", "hundred"] and em2[2]["words"][0]["text"] == "and"
+    assert not on(mark_emph(chunk_captions(tk, 2, "sentence"), {"emphasis_color": "#FFD400"}, tk))
+    assert emph_on({"emphasis_scale": 1}) and not emph_on({}) and not emph_on(None)
     # behind: a wide shot above the head grows down behind the hair, its mark stays clear of the head
     bf = {"step_s": 0.5, "heads": [{"t": float(i) / 2, "box": [32, 34, 28, 23]} for i in range(10)]}
     sh = {"src": "a.png", "format": "shot", "size": [1800, 800], "start": 0.0, "end": 3.0, "trigger_word": "s", "box": [4, 10, 92, 21.6],

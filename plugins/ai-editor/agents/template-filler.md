@@ -42,8 +42,11 @@ Rules:
 8. A `flow` is an overlay over the footage: never set `"layout": "scene"` unless the caller says the user
    asked for a full-frame scene. Each node is a thing the sentence names, in spoken order, 2-3 nodes,
    labels of 1-3 of the speaker's words.
-9. Never write a kinetic beat (`kinetic_number`, `number_chain`, `goal_bar`, `stat_stack`, `step_build`): plan.py
-   places the number beats itself from the words (`scripts/kinetic_beats.py`).
+9. Kinetic beats (a kinetic `type`: `kinetic_number`, `number_chain`, `goal_bar`, `step_build`, `stat_stack`,
+   `kinetic_title`, `cta_follow`) come from the beat finder: plan.py places the number beats itself from the words
+   (`scripts/kinetic_beats.py`). Never write one unless the caller hands it to you as a pick, never a `kinetic_title`
+   on your own, and never change one you find. A pick of yours sits around them, within the style's
+   `graphics.kinetic_per_min` (style-edit `references/kinetic.md` "For the AI steps").
 
 Write the entries to the file the caller names (default `edits/<name>/visuals.fill.json`) as a JSON
 list, then return only that path and the number of entries. Do not edit any other file.

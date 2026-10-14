@@ -1,8 +1,8 @@
 // Proves each GSAP plugin is deterministic under Remotion: the same frame rendered in two separate
 // processes, and a still against the same frame inside a sequential (video) frame render, must be
-// pixel-identical. Then the parallel render: every frame of each plugin, every ease, three real cards
+// pixel-identical. Then the parallel render: every frame of each plugin, every ease, four real cards
 // (chat from Overlays.tsx, social_post from Templates.tsx, the Lottie fixture with a text layer through
-// StyleEdit.tsx LottieCard, entering with a pop) and a product page zoom (ProductVideo.tsx, on two
+// StyleEdit.tsx LottieCard, entering with a pop, and a caption page with emphasis_scale, Captions.tsx) and a product page zoom (ProductVideo.tsx, on two
 // tiles ffmpeg draws), rendered across 6 Chrome tabs (--tabs; each tab
 // jumps several frames at a time and lands on held frames from different places, as a real render does),
 // must equal the same frame rendered in one tab in order. The kinetic family runs too: its primitives (KineticKit),
@@ -34,6 +34,11 @@ const CARDS = {
   // one edge pixel 7/255 off a frame painted whole (the bar's SVG path is the same, logged both ways). Text
   // laid out under a scaled box differs on its glyph edges on most frames, over 60 to 300 px (up to 95/255).
   "card-lottie": { dur: 3, card: { src: "lottie/title-60fps.json", start: 0.5, box: [10, 30, 80, 25] }, edge: { max: 8, px: 4 } },
+  // fork: emphasis captions (Captions.tsx emphasis_scale), stressed words scaled through a transform on a fitted page
+  "card-caption-emphasis": { dur: 2.4, light: true, card: { anim: { type: "caption_page", props: { combine_ms: 2000, words: [
+    { text: "two", start: 0.1, end: 0.35, emph: true }, { text: "hundred", start: 0.35, end: 0.7, emph: true }, { text: "fresh", start: 0.7, end: 0.95 },
+    { text: "croissants", start: 0.95, end: 1.5, emph: true }], style: { effect: "pop", max_lines: 1, color: "#111111", highlight_color: "#111111",
+    emphasis_color: "#C98A00", emphasis_scale: 1.1, weight: 700 } } }, box: [4, 40, 92, 12] } },
 };
 // The kinetic family: its primitives on one frame (KineticKit), and every case in test/kinetic/*.json marked
 // "determinism": true (one per format, over a gradient ground: no assets).

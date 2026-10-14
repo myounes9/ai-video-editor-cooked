@@ -36,6 +36,24 @@ Fork base: upstream ai-editor 2.7.8 (the manifests read 2.7.8-cooked.1). The ent
   kinetic kind the copied creator hardly uses, or a soft push under a kinetic card. Tests: plan.py, check.py,
   style_check.py, quality.py and budget.py demo asserts.
 
+- Rules in words become settings, and emphasis captions (fork, opt-in). A saved rule such as "add motion graphics on
+  the number beats" or "key words in yellow, slightly bigger" was a line Claude read and nothing the scripts did:
+  the next video came out the same. taste.py now reads the motion-graphics and emphasis feedback in a rule's words
+  (`settings_for`; `taste.py map "<note>"` shows it) as the settings plan.py reads, at the rule's own scope and under
+  any value saved there: `graphics.kinetic`, `graphics.kinetic_per_min` (fewer / more, or a number a minute),
+  `captions.emphasis_color` and `captions.emphasis_scale`. `taste.py report` and the style's skill show what each
+  rule sets, it counts as applied, and `review.py learn` / `taste.py add` print a `REPLAN:` line naming what to run
+  again so the note shows on this video. Emphasis captions, on with `captions.emphasis_scale` (upstream ignores it):
+  plan.py marks every spoken number (all its words, read by numbers.py, so "two hundred | and fifty" over two pages
+  is marked on both) and the take's key words (a name, else the word held longest for its length, one a sentence),
+  on pages of any length, two-word pages included; the renderer draws them in the emphasis colour, one weight
+  heavier and about 1.1x through a transform, fitting the line with room for it, so no page re-wraps or changes
+  size, and a stressed word keeps its colour while it is said. Caption presets may carry `emphasis_scale`. The
+  agents and skills that plan visuals (visual-prep, template-filler, overlays) keep the beat finder's kinetic beats,
+  never add a kinetic_title or an unsaid figure, and count their cards against `graphics.kinetic_per_min`
+  (kinetic.md "For the AI steps"). Tests: taste.py, review.py and plan.py demo asserts, a `caption-emphasis-v`
+  renderer case and a `card-caption-emphasis` determinism case.
+
 - Kinetic titles with upstream 2.7.8 (fork, opt-in). A style whose creator is off screen half the time turns her
   picture cards into full-frame scenes: a kinetic card is no longer one of them, it stays over the footage. The board
   layout drops kinetic cards with a warning, as the split layout does (it made each one a side overlay). A card

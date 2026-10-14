@@ -3,8 +3,9 @@
 Key figures and key words set over the footage on their spoken words: a figure pulled on by a highlighter
 marker, chains of figures, a goal bar, a step tracker, a short key-word title, a follow card. They are words over
 the footage, so the default style never draws them (PRINCIPLES.md "Looking real"): a style opts in with
-`"graphics": {"kinetic": true}` in style.json or the user's taste. Without it plan.py skips these beats with a
-warning, and check.py and ai_tells.py treat a kinetic card in a plan as a text card (FAIL / type-card).
+`"graphics": {"kinetic": true}` in style.json or the user's taste, or a rule in words that asks for them ("From the
+user's rules" below). Without it plan.py skips these beats with a warning, and check.py and ai_tells.py treat a
+kinetic card in a plan as a text card (FAIL / type-card).
 
 When one fits: a number or a short claim the speaker says and no page shows (their own results, a count, a goal,
 where they are in a plan). When a real page, post or product shows it, show that instead (visuals.md). The number
@@ -110,6 +111,42 @@ beat's `strength` (0-1; a real source with none counts 0.75, a kinetic beat 0.5)
 of plain footage beside one already kept counting 0.2 less, so the picks spread out. Each card left out is named on
 stderr. plan.json records `graphics_budget`; style_check.py and quality.py compare the cards a minute with it, and do
 not flag a kinetic kind the copied creator hardly uses, or a soft push under a kinetic card, as hers to match.
+
+## From the user's rules (settings)
+
+- `graphics.kinetic` (true: the style opts in) and `graphics.kinetic_per_min` (default 8: graphics a minute in total,
+  captures and screenshots included). Taste settings like any other: taste.json, a style's `style.overrides.json`,
+  or this video's own.
+- A rule in words sets them, at its own scope (`taste.py` `settings_for`, laid in by `load_json`): "add motion
+  graphics", "kinetic number titles", "the hook's number gets a graphic", "a progress bar for the goal" turn
+  `graphics.kinetic` on; "no motion graphics" turns it off; "fewer / more motion graphics" sets `kinetic_per_min`
+  6 / 10, "N graphics a minute" sets N. A value saved in the same scope wins over the words. `taste.py map "<note>"`
+  prints what a note sets; `taste.py report` and the style's skill show it on the rule ("from its words", "Sets:").
+- Emphasis captions (fork, opt-in): `captions.emphasis_scale` (about 1.1; 1 marks in colour only) turns them on.
+  plan.py `mark_emph` then marks every spoken number, all of its words (numbers.py on the punctuated words, so a
+  number split over two pages is marked on both; a lone "one" is not a figure), and the take's key words
+  (`key_words`: a name, else the word held longest for its length; one a sentence, 2.5 s apart; none on a page that
+  has a number), on pages of any length, two words included. Captions.tsx draws them in `captions.emphasis_color`
+  (#FFD400 for this look), one weight heavier, `emphasis_scale` bigger through a transform: the page keeps its size
+  and its line breaks (the fit leaves the room), and a stressed word keeps its colour while it is said. "Key words in
+  yellow, slightly bigger" sets #FFD400 and 1.1.
+- When a learned rule changes one of these, `review.py learn` and `taste.py add` print `REPLAN:`: run what it names
+  (the visuals step for the kinetic settings, so the beat finder places the beats; plan.py for the emphasis), then
+  the stills and the render, so the note shows on this video too.
+
+## For the AI steps (visual-prep, template-filler, overlays)
+
+- The beat finder places the kinetic beats, on number beats only: the hook figure, stats, a chain, a counter, tally
+  or stamp, a goal, a money figure, and a step tracker where the speech counts sources or steps. Keep them as written:
+  never drop, retime or reword one to fit another card; place the other cards around them.
+- Never a figure or a label the speaker did not say: figures are the spoken numbers (numbers.py), labels the
+  transcript's own words. check.py plan FAILs an unsaid number.
+- Never add a `kinetic_title` (or any kinetic card) on your own: a line with no number keeps the word captions, which
+  hide only while a number card is up. A kinetic card the user asks for in a note is the exception.
+- Count every card you add against `graphics.kinetic_per_min`: the kinetic beats, route.py's `want` lines and your
+  captures together stay at about that many a minute, with at least 1 s of plain footage between two cards (punch
+  zooms land there). Over it, leave out your weakest card, never the hook's figure.
+- Not opted in (`graphics.kinetic` unset or false): no kinetic beat at all.
 
 ## The look (tokens.ts)
 

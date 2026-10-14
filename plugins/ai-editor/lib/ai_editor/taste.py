@@ -17,6 +17,8 @@
     python3 taste.py set <key.path> <value>       set a setting in taste.json (value parsed as JSON if it can be)
     python3 taste.py unset <key.path>
     python3 taste.py get                          taste.json as JSON
+    python3 taste.py map "<note>" [--section S]   the settings a note asks for in words (fork: motion graphics and
+                                  emphasis captions, settings_for), as JSON; {} when none
     python3 taste.py suggest "<what was wrong>" "<the general rule>" --owner <skill or check> [--example "..."]
                                   a correction that would help every user: one line in suggestions.jsonl,
                                   scrubbed of paths, emails, handles and file names (the improve skill reads it)
@@ -39,6 +41,10 @@ How a rule is applied: plan.py, build_timeline.py and retakes.py call load_json(
 taste.json, then the style.overrides.json of the creator style the edit used, then the "this video only"
 settings of the edit being worked on (each wins over the one before), and counts every setting
 rule it hands over as applied to that edit. Word rules are counted by `show --edit`.
+Fork: a word rule about motion graphics or caption emphasis ("add motion graphics on the number beats", "key words
+in yellow, slightly bigger") also hands over the settings its words ask for (settings_for: graphics.kinetic,
+graphics.kinetic_per_min, captions.emphasis_color, captions.emphasis_scale), under its scope's saved settings, and
+counts as a setting rule. `add` and review.py learn print a REPLAN line saying what to run again.
 Stdlib only. Exit codes: 0 ok, 1 error, 2 usage
 """
 import datetime
@@ -167,6 +173,96 @@ def parse(v):
         return json.loads(v)
     except json.JSONDecodeError:
         return v
+
+
+# ---------- fork: rules in words that name a setting ----------
+# Feedback about motion graphics and caption emphasis, said in words ("add motion graphics on the number beats",
+# "key words in yellow, slightly bigger"), is the settings plan.py reads. A word rule that asks for them hands them
+# over (load_json), so a style with those rules gets the behaviour with no value set by hand.
+KEY_YELLOW = "#FFD400"     # the kinetic family's key colour (remotion/src/kinetic/tokens.ts)
+EMPHASIS_SCALE = 1.1       # Captions.tsx emphasis_scale: a stressed word about 1.1x, through a transform
+KINETIC_RATE = 8           # graphics.kinetic_per_min when unset: graphics a minute in total, captures included
+COLOURS = {"yellow": KEY_YELLOW, "white": "#FFFFFF", "orange": "#FF9500", "red": "#FF3B30", "green": "#34C759",
+           "blue": "#0A84FF", "pink": "#FF2D55"}
+_KINETIC = (r"motion[- ]graphics?|kinetic|animated (?:motion |number |key )?(?:graphics?|titles?|numbers?|figures?|callouts?|text)"
+            r"|number (?:titles?|graphics?|cards?|animations?)|(?:hook'?s?|key) (?:key )?(?:numbers?|figures?)(?: graphics?)?"
+            r"|numbers? (?:pop|land|count|build)s?|step (?:cards?|trackers?)|progress bars?|goal bars?")
+_NOT = r"\b(?:no|without|stop (?:adding|using|putting)|remove|drop|turn off|don'?t (?:add|want|use|put))\b"
+_FEWER, _MORE = r"\b(?:fewer|less)\b", r"\b(?:more)\b"
+_EMPH_CTX = r"caption|key ?words?|keywords|stress|emphasi|highlight"
+_EMPH_SUBJ = r"key ?words?|keywords|numbers?|figures?|stress|emphasi|highlight|important words?|payoff"
+_BIGGER = r"\b(?:(?:slightly |a (?:bit|touch|little) )?(?:bigger|larger|bolder|heavier)|pops? out|stand(?:s)? out)\b"
+_SAME = r"\b(?:same size|not bigger|no bigger|never bigger)\b"
+
+
+def settings_for(text, section=None):
+    """{setting: value} a rule or note asks for in words: the fork's motion graphics (graphics.kinetic,
+    graphics.kinetic_per_min) and emphasis captions (captions.emphasis_color, captions.emphasis_scale). {} when it
+    names none. Fewer / more graphics step from KINETIC_RATE (6 / 10); a number a minute is taken as said."""
+    t = " ".join(str(text or "").lower().split())
+    out = {}
+    kin = re.search(rf"\b(?:{_KINETIC})\b", t)
+    if kin:
+        out["graphics.kinetic"] = not re.search(rf"{_NOT}[^.;]{{0,30}}$", t[:kin.start()])
+        rate = re.search(rf"\b(\d+(?:\.\d+)?)\s*(?:{_KINETIC}|graphics?|cards?)?\s*(?:a|per|/|each)\s*min", t)
+        if out["graphics.kinetic"] and rate:
+            out["graphics.kinetic_per_min"] = float(rate[1]) if "." in rate[1] else int(rate[1])
+        elif out["graphics.kinetic"] and re.search(rf"{_FEWER}[^.;]{{0,20}}(?:{_KINETIC}|graphics)", t):
+            out["graphics.kinetic_per_min"] = KINETIC_RATE - 2
+        elif out["graphics.kinetic"] and re.search(rf"{_MORE}[^.;]{{0,20}}(?:{_KINETIC}|graphics)", t):
+            out["graphics.kinetic_per_min"] = KINETIC_RATE + 2
+    ctx = (section or "").strip().lower() == "captions" or re.search(_EMPH_CTX, t)
+    if ctx and re.search(rf"\b(?:{_EMPH_SUBJ})", t) and not (kin and re.search(r"\b(?:titles?|graphics?|cards?)\b", t[kin.start():kin.end()])):
+        hexes = re.findall(r"#[0-9a-f]{6}\b", t)
+        named = [COLOURS[w] for w in re.findall(r"\b(" + "|".join(COLOURS) + r")\b", t)]
+        colour = (hexes[0].upper() if hexes else named[0] if named else None)
+        if colour:
+            out["captions.emphasis_color"] = colour
+        if re.search(_SAME, t):
+            out["captions.emphasis_scale"] = 1
+        elif re.search(_BIGGER, t):
+            out["captions.emphasis_scale"] = EMPHASIS_SCALE
+        elif colour or re.search(r"\b(?:highlight|emphasi[sz]e|stand out|pop)\b", t):
+            out["captions.emphasis_scale"] = 1   # marked (numbers and key words) in the colour, at the page's size
+        if "captions.emphasis_scale" in out and not colour and re.search(r"\b(?:highlight|emphasi[sz]e)", t):
+            out["captions.emphasis_color"] = KEY_YELLOW
+    return out
+
+
+def mapped(r):
+    """The settings a rule's words ask for (settings_for), less the one it names itself, which wins."""
+    m = settings_for(r.get("rule"), r.get("section"))
+    m.pop(r.get("setting"), None)
+    return m
+
+
+# What a changed setting needs done again, so a learned rule shows on this video too (review.py learn prints it).
+REPLAN = {"graphics.kinetic": "beats", "graphics.kinetic_per_min": "beats", "captions.emphasis_color": "plan",
+          "captions.emphasis_scale": "plan"}
+REPLAN_STEPS = {"beats": "the visuals again: route.py beats and visuals.json, where the beat finder places the kinetic beats "
+                         "(style-edit references/kinetic.md), then plan.py, edit.py stills and the render",
+                "plan": "plan.py (it marks the caption words), edit.py stills and the render"}
+
+
+def derived(rules, scope):
+    """The settings the rules of one scope ask for in words (mapped), the later rule winning."""
+    out = {}
+    for r in sorted((r for r in rules if scope and r["scope"] == scope), key=lambda r: r["id"]):
+        for k, v in mapped(r).items():
+            set_key(out, k, v)
+    return out
+
+
+def rule_keys(r):
+    """Every setting a rule hands over: the one it names, then the ones its words ask for."""
+    return ([r["setting"]] if r.get("setting") else []) + list(mapped(r))
+
+
+def replan(keys):
+    """'REPLAN: ...' naming what to run again for these settings (the widest step wins), or ''."""
+    need = {REPLAN[k] for k in keys if k in REPLAN}
+    step = "beats" if "beats" in need else "plan" if need else None
+    return f"REPLAN: {', '.join(sorted(k for k in keys if k in REPLAN))} changed: run {REPLAN_STEPS[step]}" if step else ""
 
 
 # ---------- structured rules ----------
@@ -322,19 +418,22 @@ def load_json(edit_dir=None, count=True, style=None):
     data = read_json()
     edit = Path(edit_dir) if edit_dir else guess_edit(sys.argv[1:])
     sc, over = style_scope(edit, style)
-    data = merge(data, over)
-    if not rules_path().exists():
-        return data
     name = edit.resolve().name if edit else None
     rules = load_rules()
-    mine = [r for r in rules if r.get("setting") and r["scope"] in ("all", f"video:{name}", sc)]
+    # fork: each scope's word rules hand over the settings their words ask for (settings_for), under that scope's
+    # own saved settings, so "add motion graphics" on a style turns graphics.kinetic on for it
+    data = merge(merge(derived(rules, "all"), data), merge(derived(rules, sc), over))
+    data = merge(data, derived(rules, f"video:{name}" if name else None))
+    if not rules_path().exists():
+        return data
+    mine = [r for r in rules if rule_keys(r) and r["scope"] in ("all", f"video:{name}", sc)]
     for r in mine:
-        if r["scope"].startswith("video:"):
+        if r["scope"].startswith("video:") and r.get("setting"):
             data = set_key(data, r["setting"], r["value"])
     if count and "--dry-run" not in sys.argv[1:]:
         # ponytail: caller found by script name; give load_json a key filter if a third caller appears
         acts = CALLERS.get(Path(sys.argv[0]).name, lambda k: True)
-        ids = {r["id"] for r in mine if acts(r["setting"])}
+        ids = {r["id"] for r in mine if any(acts(k) for k in rule_keys(r))}
         mark_applied(rules, lambda r: r["id"] in ids, name)
         save_rules(rules)
     return data
@@ -356,7 +455,7 @@ def show(edit=None):
         st = [r for r in rules if sc and r["scope"] == sc]
         if st:
             out.append(f"## This style (@{sc[6:]})\n" + "\n".join(f"- {r['rule']}" for r in st) + "\n" + json.dumps(over))
-        mark_applied(rules, lambda r: not r.get("setting") and r["scope"] in ("all", f"video:{name}", sc), name)
+        mark_applied(rules, lambda r: not rule_keys(r) and r["scope"] in ("all", f"video:{name}", sc), name)
         save_rules(rules)
     return "\n".join(out)
 
@@ -369,6 +468,7 @@ def report():
     lines = []
     for r in sorted(rules, key=order):
         setting = f"  [{r['setting']} = {json.dumps(r['value'])}]" if r.get("setting") else ""
+        setting += f"  [from its words: {', '.join(f'{k} = {json.dumps(v)}' for k, v in mapped(r).items())}]" if mapped(r) else ""
         scope = ("every video" if r["scope"] == "all" else f"this style (@{r['scope'][6:]})" if r["scope"].startswith("style:")
                  else r["scope"].replace("video:", "only ")) + (
             ", from a review note" if r.get("from") == "review" else "")
@@ -565,6 +665,7 @@ def demo():
         assert "this style (@alice)" in report() and "Captions smaller" in show(eb)
         assert "Said 1x" in (Path(d) / "skills" / "edit-like-alice" / "SKILL.md").read_text(encoding="utf-8")
         assert "Captions bigger again" in (Path(d) / "skills" / "my-style" / "SKILL.md").read_text(encoding="utf-8")
+        demo_words(d, sp, eb, ed)
     sys.argv = old_argv
     for k, v in (("AI_EDITOR_SKILLS", old_skills), ("AI_EDITOR_LIBRARY", old_lib)):
         if v is None:
@@ -572,6 +673,45 @@ def demo():
         else:
             os.environ[k] = v
     print("demo ok")
+
+
+def demo_words(d, sp, eb, ed):
+    """Fork: notes about motion graphics and caption emphasis, in words, become the settings plan.py reads."""
+    m = lambda t, sec=None: settings_for(t, sec)   # noqa: E731
+    assert m("add motion graphics on the number beats") == {"graphics.kinetic": True}
+    assert m("Kinetic number titles when she says a figure") == {"graphics.kinetic": True}
+    assert m("the hook's key number gets a graphic") == {"graphics.kinetic": True}
+    assert m("no kinetic titles on this one") == {"graphics.kinetic": False}
+    assert m("fewer motion graphics") == {"graphics.kinetic": True, "graphics.kinetic_per_min": 6}
+    assert m("motion graphics, about 10 a minute") == {"graphics.kinetic": True, "graphics.kinetic_per_min": 10}
+    assert m("key words in yellow and a bit bigger", "captions") == {"captions.emphasis_color": "#FFD400", "captions.emphasis_scale": 1.1}
+    assert m("highlight the numbers in the captions") == {"captions.emphasis_scale": 1, "captions.emphasis_color": "#FFD400"}
+    assert m("stressed words #00AAFF, same size", "captions") == {"captions.emphasis_color": "#00AAFF", "captions.emphasis_scale": 1}
+    assert m("yellow kinetic number titles over the head") == {"graphics.kinetic": True}   # a title's colour, not the captions'
+    assert m("Captions bigger", "captions") == {} and m("fewer zooms") == {} and m("cut the um at 0:12") == {}
+    assert replan(["graphics.kinetic"]).startswith("REPLAN: graphics.kinetic changed: run the visuals again")
+    assert "plan.py" in replan(["captions.emphasis_scale"]) and replan(["captions.size_pct"]) == ""
+    # a word rule on a style: its edits get the settings, other edits do not; counted as applied
+    st, r = add("visuals", "Add motion graphics on the number beats", scope="style:alice", edit=eb, style=sp)
+    assert r.get("setting") is None and mapped(r) == {"graphics.kinetic": True}
+    sys.argv = ["plan.py", str(eb / "style.json"), str(eb / "words.json")]
+    assert load_json()["graphics"] == {"kinetic": True}
+    assert "graphics" not in load_json(ed, count=False)
+    assert next(x for x in load_rules() if x["id"] == r["id"])["applied_in"] == ["vid-b"]
+    # a saved value wins over words in its own scope; a narrower scope's words win over a wider saved value
+    add("visuals", "Plain footage, no graphics", "graphics.kinetic", False, edit=ed)
+    assert load_json(ed, count=False)["graphics"]["kinetic"] is False and load_json(eb, count=False)["graphics"]["kinetic"] is True
+    st, e = add("captions", "Key words get the caption accent, slightly bigger", "captions.emphasis_color", "#FFD400",
+                scope="style:alice", edit=eb, style=sp)
+    got = load_json(eb, count=False)["captions"]
+    assert got["emphasis_color"] == "#FFD400" and got["emphasis_scale"] == 1.1, got
+    assert "from its words: captions.emphasis_scale = 1.1" in report() and "Sets: `graphics.kinetic = true`" in \
+        (Path(d) / "skills" / "edit-like-alice" / "SKILL.md").read_text(encoding="utf-8")
+    # this video only: in that edit's settings alone
+    add("visuals", "Kinetic number titles on this one", scope="video:vid-a", edit=ed)
+    assert load_json(ed, count=False)["graphics"]["kinetic"] is True
+    forget(r["id"])
+    assert load_json(eb, count=False)["graphics"]["kinetic"] is False   # the every-video value is back
 
 
 def main():
@@ -589,6 +729,11 @@ def main():
         print(report())
     elif cmd == "get":
         print(json.dumps(read_json()))
+    elif cmd == "map" and len(a) >= 2:
+        m = settings_for(a[1], flag("--section"))
+        print(json.dumps(m))
+        if replan(m):
+            print(replan(m))
     elif cmd == "add" and len(a) >= 3:
         setting = value = None
         if flag("--set"):
@@ -607,6 +752,10 @@ def main():
         where = "this video only" if video else f"this style, skill {styleskill.name(style)}" if style else "every video, skill my-style"
         print(f"{status}: #{r['id']} {r['section']}: {r['rule']}" + (f" [{setting} = {json.dumps(value)}]" if setting else "")
               + f" ({where}) -> {rules_path()}")
+        if mapped(r):
+            print("its words set: " + ", ".join(f"{k} = {json.dumps(v)}" for k, v in mapped(r).items()) + " (settings_for)")
+        if replan(rule_keys(r)):
+            print(replan(rule_keys(r)))
         if status == "regression":
             print(f"note: already applied {r['applied']}x, and it had to be said again. Check why it did not "
                   "hold: a setting no script reads, or a word rule too vague to follow.")

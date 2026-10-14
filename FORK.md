@@ -152,6 +152,28 @@ writing them, at a set density, only where a number is said.
 - `agents/visual-prep.md`, `agents/template-filler.md`: write no kinetic beat; `references/kinetic.md` "Automatic
   beats", `references/contracts.md` (the `auto` mark); `tests/demos.sh` runs its demo.
 
+### 7. Rules to settings and emphasis captions (Phase 3: `p3-rules`)
+
+Why: the user's saved feedback ("add motion graphics", "kinetic number titles", "key words in yellow, slightly
+bigger") was a line in a skill that no script read, so every video needed beats written by hand; and upstream marks
+a caption word only in pages of 3+ words and never draws it bigger, so the numbers on 2-word pages went unmarked.
+
+- `plugins/ai-editor/lib/ai_editor/taste.py`: `settings_for(text, section)` reads a rule's words as the fork's settings
+  (`graphics.kinetic`, `graphics.kinetic_per_min`, `captions.emphasis_color`, `captions.emphasis_scale`); `load_json`
+  lays each scope's word-rule settings under that scope's saved ones and counts them; `replan(keys)` and `REPLAN` say
+  what to run again; `taste.py map`. `review.py learn` (notes and the Teach panel) prints the REPLAN line;
+  `styleskill.py` shows "Sets:" on a rule; `presets.py` lets a caption preset carry `emphasis_scale`.
+- `skills/style-edit/scripts/plan.py`: `emph_on`, `key_words`, `mark_emph(chunks, cap, words)`: with
+  `captions.emphasis_scale` set, every spoken number (numbers.py) and the key words, on pages of any length.
+- `remotion/src/Captions.tsx`: `emphasis_scale` (opt-in) scales a stressed word through a transform; the line is fitted
+  with room for it; with it set, the stressed word keeps its colour while said. Test cases in `test/cases.json` and
+  `test/determinism.mjs`.
+- Guidance: `references/kinetic.md` "From the user's rules" and "For the AI steps", rows in `references/review.md`,
+  the taste SKILL.md table, `agents/visual-prep.md`, `agents/template-filler.md`, overlays `references/changes.md`.
+
+Fork-only: upstream chose one type size per page ("never bigger") and reads no settings from a rule's words. Both are
+off unless a rule or a setting asks for them.
+
 ## What to offer upstream, and what stays here
 
 Neutral fixes, worth a pull request to upstream (each a real bug any user hits):
