@@ -59,10 +59,29 @@ held lockup pushes 1.5%; it leaves in one feathered sweep, left to right. Counte
 | `goal_bar` | planned | the goal layout without a panel: the % on the left with a small cap-aligned %, the target on the same baseline under a small GOAL label; a pill track with its remainder, a fill with a glow band and a landing flare, a target marker that pops on the target and rings on "goal" | `pct`, `target`, `at_pct`, `at_target`, `at_goal?` |
 | `step_build` | planned | a tracker of 2-4 slots (`empty`, `filled`, `question`) that returns at several beats with the same slots and identity | `slots: [{label, at, state}]`, `id?` |
 | `stat_stack` | planned | 2-4 stats landing one by one in a compact stack or row, beside a real screenshot card | `stats: [{num, label, at}]`, `layout?: "stack" \| "row"` |
-| `kinetic_title` | planned | a key-word title for a beat with no number: 1-3 lines, each word on its time, key words in the key colour | `lines: [{words: [{text, at, key?}]}]` |
-| `cta_follow` | planned | a handle and a follow button that presses on "follow", an optional avatar circle | `handle`, `at`, `follow_at`, `avatar?` (an image file) |
+| `kinetic_title` | yes | a key-word title for a beat with no number: 1-3 lines, each word on its time; a line with a key word is set in Anton, its key words pulled on by the marker (a run of key words shares one marker) and handed to the foil when the next run comes; a line with none is a supporting line in Oswald at 0.4x; centred on the grid | `lines: [{words: [{text, at, key?}]}]` (1-3 lines, one word per entry), `out_at?`, `band?`, `hide_captions?` |
+| `cta_follow` | yes | a handle over a follow button, beside an optional avatar circle with a key-colour ring; the button wipes in as an empty well and on "follow" presses, the marker pulled across it turns it to FOLLOWING with a check, and two rings leave it | `handle` (no spaces; an "@" is added), `at`, `follow_at`, `avatar?` (an image file, "images/..."), `button?` ("Follow"), `pressed?` ("Following"), `out_at?`, `band?`, `hide_captions?` |
 
 A planned format is registered but stops the render with its name until its branch builds it.
+
+**kinetic_title**: give each title word as its own entry and let plan.py time it. A word's `word` (else its own
+`text`) is matched in reading order from the card's start, so a repeated word lands on its own later saying; a
+word given an `at` and no `word` keeps it. Mark the one to three words that carry the beat `"key": true`; keep the
+other lines short (they set small). Not for a number: use `kinetic_number` or `number_chain`.
+
+```json
+{"word": "this", "kind": "anim", "type": "kinetic_title", "hold_s": 3,
+ "props": {"lines": [{"words": [{"text": "this"}, {"text": "is"}, {"text": "how"}]}, {"words": [{"text": "sourdough", "key": true}]},
+                     {"words": [{"text": "we"}, {"text": "bake"}, {"text": "by"}, {"text": "hand"}]}]}}
+```
+
+**cta_follow**: on the spoken ask ("give me a follow"). `follow_word` gives `follow_at`. Use the creator's real
+handle and, when they have one, their profile picture as `avatar`; never a made-up account.
+
+```json
+{"word": "give", "kind": "anim", "type": "cta_follow", "hold_s": 4,
+ "props": {"handle": "@yourhandle", "follow_word": "follow", "avatar": "images/avatar.jpg"}}
+```
 
 ## Building a format (for the renderer)
 

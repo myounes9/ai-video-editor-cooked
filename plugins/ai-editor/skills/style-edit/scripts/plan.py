@@ -787,6 +787,26 @@ def word_at(words, card, node, key):
     return at
 
 
+def title_times(card, words):
+    """kinetic_title: each word of the title lands on its own spoken word, read in order. A word's "word" (else its
+    own text) is the first time it is said after the word before it, so "bake to order and bake to sell" lands its
+    second "bake" and "to" on the second ones. A word given an "at" and no "word" keeps it; one not said keeps what
+    it had (no time: the template spreads it)."""
+    i = next((n for n, w in enumerate(words) if w["start"] >= card["start"]), len(words))
+    for line in (card["anim"]["props"].get("lines") or []):
+        for node in (line or {}).get("words") or [] if isinstance(line, dict) else []:
+            if not isinstance(node, dict) or ("at" in node and "word" not in node) or "nth" in node:
+                continue
+            target = clean(str(node.get("word") or node.get("text") or "")).lower()
+            j = next((n for n in range(i, len(words)) if clean(words[n]["text"]).lower() == target), None)
+            if j is None:
+                print(f"warning: title word '{target}' is not said in order during the '{card['trigger_word']}' card",
+                      file=sys.stderr)
+                continue
+            node["at"] = round(words[j]["start"] - card["start"], 3)
+            i = j + 1
+
+
 def scene_parts(cards, words, edit_dir):
     """Fill in every anim card's props, anywhere they nest: "icon" / "logo" -> "src" (the file capture.mjs
     fetched), "word" / "off_word" -> "at" / "off_at", seconds after the card lands (a kinetic card's parts too:
@@ -825,6 +845,8 @@ def scene_parts(cards, words, edit_dir):
         if c.get("anim"):
             c["anim"] = json.loads(json.dumps(c["anim"]))   # never write back into visuals
             walk(c["anim"]["props"], c)
+            if c["anim"]["type"] == "kinetic_title":
+                title_times(c, words)
             if c["anim"]["type"] == "caption_page" and not c["anim"]["props"].get("words"):
                 c["anim"]["props"]["words"] = [
                     {"text": w["text"], "start": round(max(0.0, w["start"] - c["start"]), 3),
@@ -2394,6 +2416,17 @@ def demo():
     assert not set(KINETIC) & set(TYPE_ONLY) and all(t in ANIMS for t in KINETIC)
     assert hides_captions(kc) and not hides_captions({"anim": {"type": "number_chain", "props": {"hide_captions": False}}}) \
         and hides_captions({"anim": {"type": "flow", "props": {"hide_captions": True}}}) and not hides_captions({"src": "images/c.png"})
+    # kinetic_title: each title word lands on its own spoken word read in order (the second "bake" on the second one); a
+    # word with an "at" and no "word" keeps it; one never said keeps no time (the template spreads it)
+    tw = [{"text": t, "start": 0.3 * i, "end": 0.3 * i + 0.2} for i, t in enumerate("we bake to order and bake to sell".split())]
+    tc = scene_parts([{"start": 0.2, "end": 3.0, "trigger_word": "bake", "anim": {"type": "kinetic_title", "props": {"lines": [
+        {"words": [{"text": "bake"}, {"text": "to"}, {"text": "order", "key": True}]},
+        {"words": [{"text": "bake", "at": 0.05}, {"text": "to"}, {"text": "SELL!", "key": True}, {"text": "fresh"}]}]}}}], tw, None)[0]
+    tl = tc["anim"]["props"]["lines"]
+    assert [x.get("at") for x in tl[0]["words"] + tl[1]["words"]] == [0.1, 0.4, 0.7, 0.05, 1.6, 1.9, None], tl
+    cf = scene_parts([{"start": 0.2, "end": 3.0, "trigger_word": "bake", "anim": {"type": "cta_follow", "props": {
+        "handle": "@yourhandle", "follow_word": "sell"}}}], tw, None)[0]["anim"]["props"]
+    assert cf["follow_at"] == 1.9 and "at" not in cf, cf   # no "at": the template lands it on the card's own word
     # an overlay goes to the free region its picture fills best; on vertical only the band above the head is centred
     # (check.py plan FAILs a card beside the head), so a tall one goes there too
     hd_face = {"step_s": 0.5, "heads": [{"t": float(i) / 2, "box": [32, 34, 28, 23]} for i in range(30)]}

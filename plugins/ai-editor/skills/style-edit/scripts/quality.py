@@ -249,6 +249,14 @@ def card_diff(a, behind):
     return np.min([cv2.absdiff(blur, cv2.GaussianBlur(b, (5, 5), 0)).max(axis=2) for b in behind], axis=0)
 
 
+def title_word(c, word):
+    """When a kinetic_title is due to land: it builds word by word, so its ink 0.6 s in (landing's reference) is
+    whole once the last word said in that time is up. word: the card's own word, when no word has a time."""
+    ats = [x["at"] for ln in (c["anim"].get("props") or {}).get("lines") or [] for x in (ln or {}).get("words") or []
+           if isinstance(x, dict) and isinstance(x.get("at"), (int, float)) and x["at"] <= 0.6]
+    return c["start"] + max(ats) if ats else word
+
+
 def landing(area, f0, fps):
     """(frame it landed, first-frame verdict) from a card's ink area per frame, area[0] = frame f0-3.
     verdict: None, 'flash' (whole then gone) or 'whole' (no entrance)."""
@@ -970,6 +978,9 @@ def run(edit, plan, video, plan_path, style=None, cuts=(), brand=None):
             word, lt = scene_land(c, cwords, k_)
         elif overlay_led(c):     # started OVERLAY_LEAD_S x k before its word (plan.lay_out)
             word = scene_land(c, cwords, k_, OVERLAY_LEAD_S)[0]
+        kin = plan.get("kinetic") and (c.get("anim") or {}).get("type") in KINETIC
+        if kin and c["anim"]["type"] == "kinetic_title":
+            word = title_word(c, word)
         if not others and c.get("entrance", "pop") in ENTRANCES + ("cut",):   # cut: the creator's measured hard cut
             land, verdict = landing(st["area"], first[i], fps)
             if land is not None or scene:
@@ -1017,7 +1028,7 @@ def run(edit, plan, video, plan_path, style=None, cuts=(), brand=None):
                     run_ = [] if v is None else [v]
                 else:
                     run_.append(v)
-        if worst and not others:
+        if worst and not others and not kin:   # a kinetic card's parts rise one by one through their masks, by design
             r["jitter"] = max(w for _, w in worst)
             out.append(F("WARN", c["start"], f"{name}'s outline turns back at speed {len(worst)} time(s) "
                          f"(worst {r['jitter']:.0%} of its peak speed both sides of the turn)",
@@ -1054,9 +1065,9 @@ def run(edit, plan, video, plan_path, style=None, cuts=(), brand=None):
         grey = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
         ih, iw = grey.shape
         rr = rec.setdefault(f"{i}:{c['trigger_word']}", {})
-        if bgv is None:
-            bgv = float(np.median(grey))
-            bad = []                           # no uniform panel: nothing to overflow
+        if bgv is None or (plan.get("kinetic") and anim.get("type") in KINETIC):
+            bgv = float(np.median(grey)) if bgv is None else bgv
+            bad = []                           # no uniform panel, or a kinetic card: its box is the frame, it fits the grid
         else:
             rr["edges"] = ov = edge_overflow(grey, bgv)
             bad = [k for k, v in ov.items() if v > EDGE_ROWS]
@@ -1427,6 +1438,10 @@ def demo():
                         "-af", "volume=-30dB", "-c:a", "aac", str(q)], check=True)
         out, g, (lufs, tp) = normalize(q)
         assert out.name == "quiet-normalized.mp4" and q.exists() and abs(lufs - LUFS_TARGET) < 0.5 and tp <= -0.5, (g, lufs, tp)
+    # a kinetic_title builds word by word: it is due when the last word said in its first 0.6 s is up
+    kt = {"start": 2.0, "anim": {"type": "kinetic_title", "props": {"lines": [{"words": [{"text": "this", "at": 0.1}]},
+          {"words": [{"text": "sourdough", "at": 0.4, "key": True}]}, {"words": [{"text": "we", "at": 0.9}]}]}}}
+    assert title_word(kt, 2.1) == 2.4 and title_word({"start": 2.0, "anim": {"type": "kinetic_title", "props": {}}}, 2.1) == 2.1
     print("demo ok")
 
 
