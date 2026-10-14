@@ -17,8 +17,10 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
-from plan import SAFE, card_rate, graphics, off_screen, took  # noqa: E402
+from plan import KIN_BAND, KINETIC, SAFE, card_rate, graphics, kinetic_on, off_screen, took  # noqa: E402
 from route import OFF_SCENE_S  # noqa: E402
+sys.path.insert(1, str(HERE.parents[2] / "lib"))
+from ai_editor import budget  # noqa: E402
 
 # a plan card -> the creator-teardown graphics.kinds it counts as
 CARD_KIND = {"shot": ("photo", "real screenshot", "meme"), "browser": ("UI recording", "real screenshot"),
@@ -39,6 +41,11 @@ def card_kind(c):
 def zone(c):
     if c.get("layout") == "scene":
         return "full"
+    a = c.get("anim") or {}
+    if a.get("type") in KINETIC:   # its box is the whole frame; it sits in its band over the head
+        b = (a.get("props") or {}).get("band") or KIN_BAND
+        mid = (b[0] + b[1]) / 2
+        return "top" if mid < 100 / 3 else "bottom" if mid > 200 / 3 else "middle"
     x, y, w, h = c.get("box") or [0, 0, 100, 100]
     mid = y + h / 2
     return "top" if mid < 100 / 3 else "bottom" if mid > 200 / 3 else "middle"
@@ -90,17 +97,26 @@ def check(plan, style):
     nz = sum(2 if x.get("travel_s") else 1 for x in zs)   # a creator punch comes back by itself: two of her measured zooms
     if z.get("per_min") is not None and off(nz, z["per_min"], dur):
         out.append((f"{per_min(nz, dur)} zooms a minute, {h} {z['per_min']}", "plan again; zoom.per_min sets it"))
-    if zs and z.get("kind") and any(x.get("kind") != z["kind"] for x in zs):
-        out.append((f"zoom kind {zs[0].get('kind')}, {h} {z['kind']}", "set zoom.kind"))
-    g = graphics(style, "graphics")
     cards = plan.get("cards") or []
+    kin = kinetic_on(style)
+    # a zoom under a kinetic card's hold eases as a soft push by design (plan.py clear_entrances): not her kind to match
+    held = lambda x: kin and x.get("kind") == "push" and any((c.get("anim") or {}).get("type") in KINETIC  # noqa: E731
+                                                            and c["start"] < x["end"] and x["start"] < c["end"] for c in cards)
+    odd = [x for x in zs if x.get("kind") != z.get("kind") and not held(x)]
+    if odd and z.get("kind"):
+        out.append((f"zoom kind {odd[0].get('kind')}, {h} {z['kind']}", "set zoom.kind"))
+    g = graphics(style, "graphics")
     rate = card_rate(style)   # her rate under the user's own cap
-    if rate and off_screen(style) and not (style.get("cards") or {}).get("per_min"):   # route.py want: her cut-aways
+    if kin:   # kinetic titles on: one count of graphics in all, kinetic and real-source (budget.py), the user's own rate
+        rate = budget.per_min(style)
+    elif rate and off_screen(style) and not (style.get("cards") or {}).get("per_min"):   # route.py want: her cut-aways
         rate = max(rate, round(60 * (1 - style["face"]["present_pct"] / 100) / OFF_SCENE_S, 1))
     if rate and off(len(cards), rate, dur):
-        out.append((f"{len(cards)} cards ({per_min(len(cards), dur)} a minute), {h} {rate:g} a minute "
-                    f"(about {round(rate * dur / 60)} here)",
-                    "give a card to each beats.json sentence marked want (route.py), from real sources" if len(cards) <
+        out.append((f"{len(cards)} cards ({per_min(len(cards), dur)} a minute), " +
+                    (f"the graphics budget {rate:g} a minute (graphics.kinetic_per_min)" if kin else f"{h} {rate:g} a minute") +
+                    f" (about {round(rate * dur / 60)} here)",
+                    ("give the strongest number beats a kinetic card, or a real source" if kin else
+                     "give a card to each beats.json sentence marked want (route.py), from real sources") if len(cards) <
                     rate * dur / 60 else "drop the weakest cards"))
     kinds = {k: v for k, v in (g.get("kinds") or {}).items() if v}
     if kinds and cards:
@@ -109,7 +125,9 @@ def check(plan, style):
         if miss:
             out.append((f"no {' or '.join(miss)} cards; {h}: " + ", ".join(f"{k} {v}%" for k, v in kinds.items()),
                         "show those kinds: the user's own photos (images.json) or a capture shot of the real thing said"))
-        alien = sorted({card_kind(c) for c in cards if not any(kinds.get(k, 0) >= 5 for k in CARD_KIND.get(card_kind(c), ()))})
+        # a kinetic card the style opted in to is the user's choice, not a kind she would use: never flagged here
+        alien = sorted({card_kind(c) for c in cards if not (kin and card_kind(c) in KINETIC)
+                        and not any(kinds.get(k, 0) >= 5 for k in CARD_KIND.get(card_kind(c), ()))})
         if alien:
             out.append((f"{', '.join(alien)} cards, a kind {h} hardly uses", "swap them for her kinds where a real source exists"))
     zp = (graphics(style, "layout").get("layout") or {}).get("zones_pct") or {}
@@ -166,6 +184,21 @@ def demo():
     plan["captions"]["chunks"] = [{"text": "a b c", "treat": "backing"}] * 8
     assert "plain" in check(plan, style)[0][0], check(plan, style)
     assert "matches @h" in report([], style) and "default style" in report([], {"handle": "default"})
+    # kinetic titles on: kinetic kinds she hardly uses are the user's choice (no nag), the cards a minute are compared
+    # with the graphics budget (graphics.kinetic_per_min, default 8), not her 10, and a kinetic card sits at the top
+    kn = lambda t: {"anim": {"type": t, "props": {"band": [8.6, 29.7]}}, "box": [0, 0, 100, 100], "start": 0, "end": 0}  # noqa: E731
+    plan["captions"]["chunks"] = [{"text": "a b c"}] * 8
+    kp = {**plan, "durationInFrames": 1800, "zooms": [{"kind": "punch"}] * 3,
+          "cards": plan["cards"] + [kn("kinetic_number"), kn("number_chain"), kn("goal_bar")]}
+    ks = {**style, "graphics": {**style["graphics"], "kinetic": True}}
+    assert check(kp, ks) == [], check(kp, ks)   # 6 cards in 60 s against 8: inside half to double
+    assert any("kinetic_number" in w for w, _ in check(kp, style))   # not opted in: a kind she hardly uses
+    many = {**kp, "cards": kp["cards"] + [kn("kinetic_number")] * 14}
+    assert any(w.startswith("20 cards (20.0 a minute), the graphics budget 8 a minute") for w, _ in check(many, ks)), check(many, ks)
+    pushed = {**kp, "zooms": [{"kind": "punch"}] * 2 + [{"kind": "push", "start": 1, "end": 3}]}
+    kp["cards"][-1].update(start=0.5, end=4)
+    assert check(pushed, ks) == [] and any("zoom kind push" in w for w, _ in check(pushed, style)), check(pushed, ks)
+    assert zone(kn("goal_bar")) == "top" and zone({"anim": {"type": "goal_bar", "props": {}}, "box": [0, 0, 100, 100]}) == "top"
     print("style_check ok")
 
 

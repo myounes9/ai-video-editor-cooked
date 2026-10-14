@@ -126,6 +126,12 @@ chain of figures) have no page to capture. The kinetic family sets them over the
   between cards) and pushes instead of cuts under a kinetic card's hold; `beside` for every kinetic card over a scene.
   Each format exports a `probe` (`kinetic/probe.ts`) that `test/templates.mjs` checks on every kinetic case.
 
+- Placement and timing (Phase 3, `p3-place`): plan.py `face_band` and `kinetic_bands` set each card's band from
+  face.json over its own time (check.py `kinetic_eyes` checks it); captions hide only under number cards (plan.py
+  `HIDES_CAPTIONS`, `kinetic/index.ts`); `punch_between` keeps punches on the plain footage between cards; one graphics
+  budget (`lib/ai_editor/budget.py`, `graphics.kinetic_per_min`) that the beat finder and plan.py `budget_cards` share;
+  style_check.py and quality.py compare with it.
+
 Fork-only: a look this fork chose (words over the footage, a house key colour), against upstream's rule that a
 number is shown inside the page that published it. Off unless a style opts in.
 

@@ -541,13 +541,13 @@ def stale(render, inputs):
                   key=lambda x: -x[1])
 
 
-def rate_check(name, got, want):
+def rate_check(name, got, want, whose="the creator's style has"):
     if not want:
         return None
     r = got / want
     if RATE_BAND[0] <= r <= RATE_BAND[1]:
         return None
-    return F("WARN", None, f"{name}: {got:.1f} a minute, the creator's style has {want:.1f}",
+    return F("WARN", None, f"{name}: {got:.1f} a minute, {whose} {want:.1f}",
              "fewer/more visuals or zooms in visuals.json / style.json, then plan again" if "card" in name or "zoom" in name
              else "the cut sets this: compare spans.json with the creator's pace")
 
@@ -1042,10 +1042,14 @@ def run(edit, plan, video, plan_path, style=None, cuts=(), brand=None):
                          "give the beat \"entrance\": \"fade\" in visuals.json, then plan and render again"))
 
     if style:
+        # with kinetic titles on, cards are counted against the graphics budget (plan.py graphics_budget, budget.py):
+        # every graphic, kinetic and real-source, against graphics.kinetic_per_min, not the creator's own rate
+        gb = (plan.get("graphics_budget") or {}).get("per_min")
         for nm, got, want in (("cuts", meas["rhythm"]["cuts_per_min"], (pace.get("cuts_per_10s") or 0) * 6),
-                              ("cards", len(landed) / mins if landed else len(cards) / mins, style.get("per_min")),
+                              ("cards", len(landed) / mins if landed else len(cards) / mins, gb or style.get("per_min")),
                               ("zooms", meas["rhythm"]["zooms_per_min"], (style.get("zoom") or {}).get("per_min"))):
-            f = rate_check(nm, got, want)
+            f = rate_check(nm, got, want, "the graphics budget (graphics.kinetic_per_min) is" if nm == "cards" and gb else
+                           "the creator's style has")
             if f:
                 out.append(f)
         meas["rhythm"]["creator"] = {"cuts_per_min": round((pace.get("cuts_per_10s") or 0) * 6, 1) or None,
@@ -1127,7 +1131,7 @@ def run(edit, plan, video, plan_path, style=None, cuts=(), brand=None):
     # ponytail: the scene's own ink-on-ground pair is not measured here.
     k_cap = MOTION_K.get(plan.get("motion"), 1.0)
     inked = [(c["start"] + 0.31 * k_cap, c["end"]) for c in cards if c.get("layout") == "scene"]
-    # a kinetic title hides the captions while it is up (they fade over 0.24 s either side, ground.ts captionFade)
+    # a number card hides the captions while it is up (they fade over 0.24 s either side, ground.ts captionFade)
     inked += [(a - 0.24, b + 0.24) for a, b in quiet_spans(cards)]
     for t, chunk in caps:
         if any(a <= t < b for a, b in inked):
@@ -1162,7 +1166,7 @@ def run(edit, plan, video, plan_path, style=None, cuts=(), brand=None):
                          f"captions read at {lo[0]}:1 against what is around them ({len(bad)} of {len(worst_cap)} samples under {CONTRAST_WARN}:1)",
                          f"plan again: plan.py reads this check and gives each page under {CONTRAST_TARGET}:1 the next treatment "
                          "(shadow, stroke, backing; contrast.json keeps it); then render"))
-    # pages under a landed scene draw in the scene's ink, not the caption colour, and pages a kinetic title hides are
+    # pages under a landed scene draw in the scene's ink, not the caption colour, and pages a number card hides are
     # not drawn: neither is read here
     wrapped = [w for w in wrapped if not any(a <= w[0] < b for a, b in inked)]
     meas["caption_lines"] = {"pages": len(page_frames), "over": [[round(t, 2), txt, nl] for t, txt, nl in wrapped]}
@@ -1426,6 +1430,7 @@ def demo():
     assert icon_counts({"type": "logo", "props": {"src": "images/logo-claude.svg"}}) == (0, 1)
     assert emoji_in([{"text": "fast \U0001F680"}]) == ["\U0001F680"] and emoji_in(["plain"]) == []
     assert rate_check("cuts", 3, 12) and rate_check("cuts", 10, 12) is None and rate_check("cuts", 1, None) is None
+    assert "the graphics budget" in rate_check("cards", 30.0, 8, "the graphics budget (graphics.kinetic_per_min) is")["what"]
     # audio: a cue mixed 6 dB under the voice measures about -6, even with the render 7 samples late
     sr = 48000
     rng = np.random.default_rng(1)

@@ -1,7 +1,7 @@
 // The kinetic family (references/kinetic.md): key figures and key words set over the footage on their spoken words,
 // opt-in per style (style.json graphics.kinetic; plan.py passes these types only then). Each format is one file here;
 // Templates.tsx registers them all as floating templates (no card under them), and StyleEdit.tsx hides the word
-// captions while one is up. The names never collide with plan.py TYPE_ONLY (the removed type cards).
+// captions while a number card is up. The names never collide with plan.py TYPE_ONLY (the removed type cards).
 import type React from "react";
 import type { TP } from "../Templates";
 import { CtaFollow, probe as ctaProbe } from "./CtaFollow";
@@ -29,10 +29,11 @@ export const PROBES: Record<string, Prober> = {
   kinetic_title: titleProbe, cta_follow: ctaProbe,
 };
 
-/** Does this card hide the word captions while it is up? A kinetic card does unless its props say
- *  hide_captions: false; any other card does only when its props say hide_captions: true. */
+/** Does this card hide the word captions while it is up? A number card (every kinetic format but kinetic_title, which
+ *  has no number: the captions keep running under it) does unless its props say hide_captions: false; any other card,
+ *  a kinetic_title included, only when its props say hide_captions: true. plan.py hides_captions reads the same. */
 export const hidesCaptions = (anim?: { type?: string; props?: Record<string, unknown> }) => {
   if (!anim?.type) return false;
   const v = anim.props?.hide_captions;
-  return typeof v === "boolean" ? v : anim.type in KINETIC;
+  return typeof v === "boolean" ? v : anim.type in KINETIC && anim.type !== "kinetic_title";
 };

@@ -37,7 +37,7 @@ sys.dont_write_bytecode = True
 sys.path.insert(0, str(HERE))
 sys.path.insert(1, str(HERE.parents[2] / "lib"))
 from ai_editor import numbers  # noqa: E402
-from plan import GAP_S, KINETIC, QUIET_HOLD_S, card_gaps, scene_capture, INK_MIN_W, OVERLAY_EDGE, READ_XH, SAFE, capture_xh, explain_ink, clean, cut_lines, cut_points, head_during, overlay_led, small_lines, sticker_crop  # noqa: E402
+from plan import BROW_SHARE, EYES_SHARE, GAP_S, KIN_BAND, KINETIC, QUIET_HOLD_S, card_gaps, scene_capture, INK_MIN_W, OVERLAY_EDGE, READ_XH, SAFE, capture_xh, explain_ink, clean, cut_lines, cut_points, head_during, overlay_led, small_lines, sticker_crop  # noqa: E402
 
 CENTRE_PLAN = 1.5      # % of the width a vertical card's box centre may sit off 50
 CENTRE_INK = 2.0       # % of the width a card's drawn content may sit off centre
@@ -220,6 +220,7 @@ def check_plan(plan, face=None, cuts=(), static_s=STATIC_S, visuals=None, brand=
         if (c.get("anim") or {}).get("type") in KINETIC:
             out += kinetic_fit(c, name, aspect)
             out += kinetic_over_scene(c, name, cards, aspect)
+            out += kinetic_eyes(c, name, heads)
         if c.get("layout") == "scene" and beats is not None and c.get("scene_by") != "creator" and not any(
                 b.get("layout") in ("scene", "split") and re.sub(r"[^\w'-]+", "", b.get("word") or "").lower() == word for b in beats):
             out.append(finding("FAIL", c["start"], f"{name} is a full-frame scene nobody asked for: the speaker leaves the frame",
@@ -507,6 +508,30 @@ def kinetic_over_scene(c, name, cards, aspect):
                 return [finding("WARN", max(c["start"], sc["start"]), f"{name} draws over the '{sc['trigger_word']}' scene's picture: "
                                 f"it starts {top + 1.25:.0f}% down, too high to leave room above it for the card",
                                 "end the kinetic card before the scene (hold_s), or move the beat off the scene")]
+    return []
+
+
+def kinetic_eyes(c, name, heads):
+    """A kinetic card's band (props.band, else the renderer's) against the head as drawn while it is up (face.json moved
+    by the zooms): its type hangs from the band's top and may fill it, so a band reaching the eyes (plan.EYES_SHARE down
+    the head box) FAILs and one past the brows (plan.BROW_SHARE) WARNs. plan.py face_band sets it clear of both."""
+    if c.get("layout") == "scene":
+        return []
+    p = c["anim"].get("props") or {}
+    band = p.get("band") or KIN_BAND
+    up = [h["box"] for h in heads if h["box"] and c["start"] <= h["t"] <= c["end"]]
+    if not up or not isinstance(band, list) or len(band) != 2:
+        return []
+    bottom = max(band[0] + 4, band[1])   # kinetic/fit.ts layoutBox
+    eyes = min(b[1] + EYES_SHARE * b[3] for b in up)
+    brows = min(b[1] + BROW_SHARE * b[3] for b in up)
+    fix = "plan again (plan.py fits the band to face.json over the card's time); drop a \"band\" set on that beat in visuals.json"
+    if bottom > eyes:
+        return [finding("FAIL", c["start"], f"{name}'s band reaches {bottom:.0f}% down and the eyes are at {eyes:.0f}%: "
+                        "its type may sit on the speaker's eyes", fix)]
+    if bottom > brows + 0.5:
+        return [finding("WARN", c["start"], f"{name}'s band reaches {bottom:.0f}% down, past the brows at {brows:.0f}%: "
+                        "its type may touch the glasses or the eyes", fix)]
     return []
 
 
@@ -1238,6 +1263,17 @@ def demo():
     scn = lambda size: {"src": "images/x.png", "size": size, "layout": "scene", "box": [0, 0, 100, 100], "start": 0, "end": 4, "trigger_word": "x"}
     assert kinetic_over_scene(kn, "k", [kn, scn([1600, 640])], "9:16") == []
     assert [f["level"] for f in kinetic_over_scene(kn, "k", [kn, scn([1080, 1920])], "9:16")] == ["WARN"]
+    # a kinetic card's band against the head while it is up: past the eyes FAILs, past the brows WARNs (a close talking
+    # head: brows 31.2% down, eyes 36.6%); plan.py's own band passes
+    import plan as planmod
+    close = [{"t": i / 2, "box": [5, 6, 80, 68]} for i in range(10)]
+    kb = lambda band: {"anim": {"type": "kinetic_number", "props": {"num": "340", **({"band": band} if band else {})}}, "start": 1, "end": 3}  # noqa: E731
+    assert kinetic_eyes(kb(planmod.face_band({"heads": close}, 1, 3)), "k", close) == [] and kinetic_eyes(kb(None), "k", close) == []
+    assert [f["level"] for f in kinetic_eyes(kb([8.6, 33]), "k", close)] == ["WARN"]
+    assert [f["level"] for f in kinetic_eyes(kb([8.6, 40]), "k", close)] == ["FAIL"] and kinetic_eyes(kb([8.6, 40]), "k", []) == []
+    high = {**plan, "kinetic": True, "zooms": [], "cards": [{**kb([8.6, 26.2]), "trigger_word": "three", "box": [0, 0, 100, 100], "lane": "kinetic"}]}
+    assert any("may sit on the speaker's eyes" in f["what"] for f in check_plan(high, {"step_s": 0.5, "heads": [
+        {"t": i / 2, "box": [10, 0, 80, 40]} for i in range(10)]})), check_plan(high, None)   # brows 14.8%, eyes 18%
     # a kinetic card is not measured while a scene is up or a punch travels; a slow push and a held punch are measured
     zs = [{"start": 2.0, "end": 4.0, "scale": 1.2, "kind": "punch", "ease_s": 0}, {"start": 6.0, "end": 9.0, "scale": 1.1, "kind": "push", "ease_s": 1.0}]
     sk = lambda t: kinetic_skip(t, [scn([1600, 640])] if t < 1 else [], zs, 30)

@@ -107,6 +107,9 @@ LEGACY = ("logo", "flow")
 KINETIC = ("kinetic_number", "number_chain", "goal_bar", "step_build", "stat_stack", "kinetic_title", "cta_follow")
 KINETIC_JOIN_S = 1.0   # two beats of one step tracker closer than this are joined: it carries on, never leaves and comes back
 KINETIC_BRIDGE_S = 1.0  # a kinetic card this close to the next one (or a scene) holds until it: captions never flash back
+# The word captions fade out only under a number card: every kinetic type but kinetic_title (no number; the captions
+# keep running under it). kinetic/index.ts hidesCaptions reads the same; a card's props.hide_captions wins.
+HIDES_CAPTIONS = tuple(t for t in KINETIC if t != "kinetic_title")
 ANIMS = tuple(dict.fromkeys(TEMPLATES + OVERLAYS + LEGACY + KINETIC))
 # Where each card sits (references/motion.md "Layout per template"). "scene": a full-frame cut-away on
 # the look's ground. "split": the split layout's top panel. "box": a card over the footage, only for these.
@@ -318,6 +321,7 @@ def place_zooms(zoom, words, duration, cuts, cut_kinds=None, quiet=(), shot_s=No
 ENTER_S = (0.15, 0.75)   # a card's entrance window: from just before its start to when it has settled
 KINETIC_PUSH_S = 0.8     # StyleEdit.tsx PUSH_MIN_S: a zoom under a kinetic card's hold eases at least this long each way
 PUNCH_S = 0.16           # StyleEdit.tsx PUNCH_S: how long a punch zoom takes to travel
+MOVE_REST_S = 0.4        # the face holds still this long between a punch and a soft push under a kinetic card
 CREATOR_PUNCH_S = 0.1    # a copied creator's punch (measured as a one-frame step): 3 frames, under quality.py's snap line
 
 
@@ -326,7 +330,8 @@ def clear_entrances(zooms, cards):
     for a full-frame scene, to its middle, hidden under it (the footage comes back at the new zoom, like a cut).
     Nor cuts under a kinetic card's hold (kinetic_hold): the face jumping 1.2x under a lockup that stays still changes
     its clearance over the head in one frame, so a zoom with an edge there becomes a push (KINETIC_PUSH_S each way).
-    Moving the edges instead would gather every zoom of a video carried by kinetic cards onto the few card changes and
+    punch_between has already cut a punch back to the plain footage between cards where enough of it was left there;
+    moving every edge out would gather the zooms of a video carried by kinetic cards onto the few card changes and
     join them into one long hold.
     Two zooms closer than a punch's travel join into one (the out move would be cut short: a one-frame snap);
     a zoom that gets shorter than 0.5 s is dropped. Two moves at once compete for the eye, and the render check
@@ -352,7 +357,21 @@ def clear_entrances(zooms, cards):
             if not sc:
                 continue
             z["start"], z["end"] = round(sc["end"] + ENTER_S[1], 3), round(sc["end"] + ENTER_S[1] + b0 - a0, 3)
-        if out and z["start"] < out[-1]["end"] + PUNCH_S:
+        mixed = (out[-1].get("kind") == "push") != (z.get("kind") == "push") if out else False
+        if mixed and z["start"] < out[-1]["end"] + PUNCH_S + MOVE_REST_S:
+            # a punch beside a push under a kinetic card never joins it (the push grows from the head's top, held small;
+            # the punch may grow from the chin): the punch gives way, back out before the push, or in after it, the face
+            # still for MOVE_REST_S between the two (a punch out straight into a push reads as one move that reverses)
+            if z.get("kind") == "push":
+                out[-1]["end"] = round(z["start"] - PUNCH_S - MOVE_REST_S, 3)
+                if out[-1]["end"] - out[-1]["start"] < 0.5:
+                    out.pop()
+            else:
+                z["start"] = round(out[-1]["end"] + MOVE_REST_S, 3)   # a push eases all the way back inside its own span
+                if z["end"] - z["start"] < 0.5:
+                    continue
+            out.append(z)
+        elif out and z["start"] < out[-1]["end"] + PUNCH_S:
             out[-1]["end"] = max(out[-1]["end"], z["end"])
         else:
             out.append(z)
@@ -364,7 +383,31 @@ def kinetic_hold(c):
     under its exit sweep is hidden by it). None for any other card."""
     if (c.get("anim") or {}).get("type") not in KINETIC:
         return None
-    return c["start"], max(c["start"], c["end"] - ENTER_S[0] - PUNCH_S)
+    return c["start"], round(max(c["start"], c["end"] - ENTER_S[0] - PUNCH_S), 3)
+
+
+PUNCH_KEEP_S = 0.8   # a punch cut back out of a kinetic card's hold keeps at least this long on the plain footage
+
+
+def punch_between(zooms, cards):
+    """Punches belong to the plain footage between kinetic cards. A punch with an edge under a card's still hold
+    (kinetic_hold) is cut back to that footage: it goes back out before the card comes in, or punches in once the card
+    has gone (never under its exit sweep: a punch from the chin would lift the head into the leaving type), when
+    PUNCH_KEEP_S of it is left there; else it stays as it is and clear_entrances eases it as a soft push under the
+    card. A punch over a whole card keeps both edges (the face is still while the card is up). Run before the zooms
+    get their origin, so clear_chin sees where each one really is."""
+    holds = [(*h, c["end"]) for c in cards for h in [kinetic_hold(c)] if h]
+    in_hold = lambda t: next((h for h in holds if h[0] < t < h[1]), None)  # noqa: E731
+    in_card = lambda t: next((h for h in holds if h[0] < t < h[2]), None)  # noqa: E731
+    for z in zooms:
+        hs, he = in_card(z["start"]), in_hold(z["end"])
+        if z.get("kind", "punch") != "punch" or not (hs or he):
+            continue
+        s = hs[2] if hs else z["start"]
+        e = he[0] - ENTER_S[0] - PUNCH_S if he else z["end"]
+        if e - s >= PUNCH_KEEP_S and not in_card(s) and not in_hold(e):
+            z["start"], z["end"] = round(s, 3), round(e, 3)
+    return zooms
 
 
 def bridge_kinetic(cards):
@@ -648,10 +691,11 @@ def kinetic_on(style):
 
 def hides_captions(card):
     """The word captions fade out while this card is up (remotion/src/kinetic/index.ts hidesCaptions, StyleEdit.tsx):
-    a kinetic card unless its props say "hide_captions": false; any other card only when they say true."""
+    a number card (HIDES_CAPTIONS: every kinetic type but kinetic_title) unless its props say "hide_captions": false;
+    any other card, a kinetic_title included, only when they say true."""
     a = card.get("anim") or {}
     v = (a.get("props") or {}).get("hide_captions")
-    return v if isinstance(v, bool) else a.get("type") in KINETIC
+    return v if isinstance(v, bool) else a.get("type") in HIDES_CAPTIONS
 
 
 QUIET_BRIDGE_S = 0.6   # StyleEdit.tsx: captions back for less than this between two cards that hide them stay hidden
@@ -888,6 +932,25 @@ def thin_cards(cards, duration, cards_cfg):
     return [c for c in cards if id(c) in keep]
 
 
+def budget_cards(cards, duration, style):
+    """With kinetic titles on (style.json graphics.kinetic) the video gets one count of graphics in all, kinetic and
+    real-source cards together: graphics.kinetic_per_min a minute (default 8; lib/ai_editor/budget.py, which the beat
+    finder reads too). The strongest are kept (budget.pick: the hook always, then each beat's "strength", spread out
+    so plain footage stays between them); each card left out is named on stderr. Kinetic off: thin_cards' rules."""
+    sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "lib"))
+    from ai_editor import budget
+    n = budget.allowance(style, duration)
+    if n is None:
+        return thin_cards(cards, duration, style.get("cards"))
+    keep = budget.pick(cards, n)
+    gone = [c for c in cards if not any(c is k for k in keep)]
+    if gone:
+        print(f"note: {len(gone)} card{'s' if len(gone) != 1 else ''} left out (at most {n} graphics in "
+              f"{duration:.0f} s: graphics.kinetic_per_min {budget.per_min(style):g}; the strongest kept): " +
+              ", ".join(f"{c.get('trigger_word') or kind_of(c)}@{c['start']:.1f}s" for c in gone), file=sys.stderr)
+    return keep
+
+
 def template_props(kind, props):
     """A beat's props over the user's defaults for that template (<library>/custom/templates/<kind>.json)."""
     sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "lib"))
@@ -924,7 +987,8 @@ def anim_items(visuals, edit_dir=None, style=None):
             print(f"warning: '{v.get('word')}' {v['type']} is a kinetic title (words over the footage) and this style has "
                   "not opted in; set \"graphics\": {\"kinetic\": true} in style.json (taste) to plan it. Skipped", file=sys.stderr)
             continue
-        item = {k: v[k] for k in ("word", "nth", "box", "entrance", "hold_s", "layout", "transition_in", "transition_out", "focus", "heading") if k in v}
+        item = {k: v[k] for k in ("word", "nth", "box", "entrance", "hold_s", "layout", "transition_in", "transition_out", "focus", "heading",
+                                  "strength", "hook") if k in v}
         if "box" in v:
             item["_own_box"] = True
         if v["type"] in KINETIC:   # its own lane: it may share the frame with a capture (stat_stack beside a screenshot)
@@ -1088,6 +1152,9 @@ def _place(images, words, duration, hold, ent, box, aspect):
                 card[k] = im[k]
         if im.get("marks"):
             card["marks"] = json.loads(json.dumps(im["marks"]))
+        for k in ("strength", "hook"):   # the beat finder's score and hook flag, for budget_cards (popped before the plan)
+            if im.get(k) is not None:
+                card["_" + k] = im[k]
         kind = im.get("format") or (im.get("anim") or {}).get("type") or ("shot" if "src" in im else None)
         end = min(duration, start + (im.get("hold_s") or hold))
         if im.get("lane") == "logo":    # a logo in passing leaves when its sentence does
@@ -2432,6 +2499,62 @@ def clear_chin(zooms, face, cap, holds=()):
     return out
 
 
+# A kinetic card's band (props.band, kinetic/fit.ts layoutBox): over the hair and forehead, under the Reels header,
+# clear of the eyes, from face.json over the card's own time.
+BROW_SHARE = 0.37      # the brows (a pair of glasses' top), down the head box: the eyes at EYES_SHARE less check.py's
+#                        BROW_UP (0.12) of the face, which is 1/1.5 of face.py's head box; 0.36 measured on a close shot
+KIN_BAND = [8.6, 26.2]  # kinetic/tokens.ts BAND: no head found anywhere in the take
+KIN_TOP = 8.6          # a band's top: under the Reels header (tokens.ts HEADER 8)
+KIN_BAND_MAX = 50      # tokens.ts BAND_MAX: the renderer refuses a band reaching lower
+KIN_GAP = 3.0          # % kept between the band's bottom and the brows (1.5 set a sub-line on a pair of glasses)
+KIN_BAND_H = 24        # the tallest band: a head low in the frame takes the band down with it, over its hair
+KIN_MIN_H = 7          # less room than this above the brows and the card is dropped: its type would sit on the eyes
+
+
+def face_band(face, start, end, moved=None):
+    """props.band ([top, bottom] % of the frame height) for a kinetic card up from start to end: from KIN_TOP (under
+    the Reels header) down to KIN_GAP above the highest brow line (BROW_SHARE down the head box) face.json has while
+    the card is up, the head as drawn when `moved` ({"zooms", "pans"}, check.py on_screen) is given; at most KIN_BAND_H
+    tall (a lower head pulls its top down) and never past KIN_BAND_MAX. No head in its window: the take's median head;
+    none at all: KIN_BAND. None when under KIN_MIN_H is left: the card would sit on the eyes."""
+    heads = [h for h in (face or {}).get("heads", []) if h.get("box")]
+    if not heads:
+        return list(KIN_BAND)
+    step = face.get("step_s", 0.5)
+    # the samples while it is up (a punch just before it is not under it), else the ones either side of a short card
+    up = [h for h in heads if start <= h["t"] <= end] or [h for h in heads if start - step <= h["t"] <= end + step]
+    if up:
+        if moved:   # drawn as the footage is while the card is up
+            from check import on_screen
+            up = [{**h, "box": on_screen(h["box"], min(max(h["t"], start), end), moved)} for h in up]
+        brow = min(h["box"][1] + BROW_SHARE * h["box"][3] for h in up)
+    else:
+        top, bottom = heads_median(face)
+        brow = top + BROW_SHARE * (bottom - top)
+    bottom = min(brow - KIN_GAP, KIN_BAND_MAX)
+    top = max(KIN_TOP, bottom - KIN_BAND_H)
+    return [round(top, 1), round(bottom, 1)] if bottom - top >= KIN_MIN_H else None
+
+
+def kinetic_bands(cards, face, moved=None):
+    """Every kinetic card's props.band from face_band (a band set on its beat wins); a card with no room above the
+    brows is dropped, named on stderr (covering the eyes is worse than losing the graphic)."""
+    out = []
+    for c in cards:
+        p = (c.get("anim") or {}).get("props")
+        if kind_of(c) not in KINETIC or c.get("layout") == "scene" or p is None or "band" in p:
+            out.append(c)
+            continue
+        band = face_band(face, c["start"], c["end"], moved)
+        if band is None:
+            print(f"warning: the '{c.get('trigger_word')}' {kind_of(c)} dropped: the head sits too high from {c['start']:.1f} s "
+                  f"to leave {KIN_MIN_H}% above the brows for its type (it would cover the eyes)", file=sys.stderr)
+            continue
+        p["band"] = band
+        out.append(c)
+    return out
+
+
 def one_per_page(images, visuals):
     """Never the same page twice: a capture of a URL already captured in this edit is dropped (one capture of a
     page, cropped to the line that matters, then an animation or another page)."""
@@ -2511,8 +2634,8 @@ def build(style, words, meta, images=(), aspect="auto", cuts=(), visuals=(), edi
     _, wants_split = lay_out(probe_cards, aspect, face, style, split_ok)
     split_now = split_now or wants_split
     logo_y = split_y if split_now else cap["y_pct"]
-    cards = thin_cards(place_cards(list(images) + anim_items(visuals, edit_dir, style) + logo_items(visuals, edit_dir, logo_y, aspect, pictures_only(style)),
-                                   words, duration, style, aspect), duration, style.get("cards"))
+    cards = budget_cards(place_cards(list(images) + anim_items(visuals, edit_dir, style) + logo_items(visuals, edit_dir, logo_y, aspect, pictures_only(style)),
+                                     words, duration, style, aspect), duration, style)
     cards, _ = lay_out(cards, aspect, face, style, split_ok)
     cards = scene_grounds(cards, style)
     if off_screen(style):
@@ -2525,6 +2648,7 @@ def build(style, words, meta, images=(), aspect="auto", cuts=(), visuals=(), edi
         quiet = []
     zooms = [] if cover else place_zooms(style.get("zoom") or {}, words, duration, list(cuts), pace.get("cut_kinds"), quiet,
                                          pace.get("median_shot_s"))
+    zooms = punch_between(zooms, cards)
     for z in zooms if face else []:
         # grow from the top of the head, centred on it: the face holds its place and the hair never rises
         # into a card placed above the head (a zoom about the face's middle pushed the hair up into it)
@@ -2588,14 +2712,16 @@ def build(style, words, meta, images=(), aspect="auto", cuts=(), visuals=(), edi
         out = dict(head)
     cards = clear_caption_paths(creator_motion(sorted(rest + scenes + kinetic, key=lambda c: c["start"]), style, aspect), cap["y_pct"], aspect)
     cards = kinetic_links(cards, aspect)
+    if not split_now:   # each kinetic card over the hair and forehead of the head as drawn while it is up
+        cards = kinetic_bands(cards, face, moved)
     for c in cards:
         px = c.get("layout") != "scene" and c.get("size") and capture_xh(c, aspect)
         if px and px < READ_XH and (aspect == "9:16" or c.get("format") == "sticker") and not pictures_only(style):
             print(f"warning: '{c['trigger_word']}' capture text renders at {px:.0f} px x-height (under {READ_XH}: "
                   "too small on a phone; check.py plan FAILs it on vertical). Cut it to a shorter sentence, a smaller \"fit\", "
                   "or a \"crop\" round the evidence in visuals.json", file=sys.stderr)
-        c.pop("_f", None)
-        c.pop("_own_box", None)
+        for k in ("_f", "_own_box", "_strength", "_hook"):
+            c.pop(k, None)
     for c in cards:   # logos sit round the head as drawn: grown by a zoom up while they are
         hd = ((c.get("anim") or {}).get("props") or {}).get("head") if (c.get("anim") or {}).get("type") == "logo_cluster" else None
         z = hd and next((z for z in zooms if z["start"] < c["end"] and c["start"] < z["end"]), None)
@@ -2608,6 +2734,8 @@ def build(style, words, meta, images=(), aspect="auto", cuts=(), visuals=(), edi
         extra["card_kinds"] = list(style["card_kinds"])
     if kinetic_on(style):   # check.py and ai_tells.py read it: kinetic cards are this style's own, not text cards
         extra["kinetic"] = True
+        from ai_editor import budget   # quality.py and style_check.py compare the cards a minute with it
+        extra["graphics_budget"] = {"per_min": budget.per_min(style), "max": budget.allowance(style, duration)}
     texts = text_items(visuals, words, duration, cards, face, cap["y_pct"])
     if texts:
         extra["texts"] = texts
@@ -3128,7 +3256,8 @@ def demo():
         {"num": "3", "word": "every", "label": "videos", "label_word": "video"}, {"num": "1", "word": "zooms", "label": "edit"}]}}]
     off = build(style, words, vm, visuals=kv)
     assert off["cards"] == [] and "kinetic" not in off, off["cards"]
-    kp = build({**style, "graphics": {"kinetic": True}}, words, vm, [{"src": "images/c.png", "word": "every", "nth": 1}], visuals=kv)
+    kp = build({**style, "graphics": {"kinetic": True, "kinetic_per_min": 20}}, words, vm, [{"src": "images/c.png", "word": "every", "nth": 1}],
+               visuals=kv)   # 2 graphics in its 7 s
     kc = next(c for c in kp["cards"] if (c.get("anim") or {}).get("type") == "number_chain")
     ev, vw = (next(w["start"] for w in words if w["text"] == x) for x in ("every", "video"))
     assert kp["kinetic"] is True and kc["box"] == [0, 0, 100, 100] and kc["lane"] == "kinetic" and kc["start"] == round(ev - CARD_LEAD_S, 3), kc
@@ -3136,10 +3265,18 @@ def demo():
     assert it[0]["at"] == CARD_LEAD_S and it[0]["label_at"] == round(vw - kc["start"], 3) and it[1]["at"] > it[0]["label_at"], it
     assert not {"enter", "exit", "ambient"} & set(kc["anim"]["props"]) and len(kp["cards"]) == 2, kp["cards"]   # beside the capture
     assert not set(KINETIC) & set(TYPE_ONLY) and all(t in ANIMS for t in KINETIC)
+    assert kc["anim"]["props"]["band"] == KIN_BAND, kc   # no face.json: the renderer's own band, written out
+    assert kp["graphics_budget"] == {"per_min": 20, "max": 2}, kp["graphics_budget"]
+    # the captions hide only under a number card: every kinetic type but kinetic_title (the captions carry its line);
+    # a card's own hide_captions wins either way
     assert hides_captions(kc) and not hides_captions({"anim": {"type": "number_chain", "props": {"hide_captions": False}}}) \
         and hides_captions({"anim": {"type": "flow", "props": {"hide_captions": True}}}) and not hides_captions({"src": "images/c.png"})
-    kq = lambda a, b: {"start": a, "end": b, "anim": {"type": "kinetic_title", "props": {}}}
+    assert all(hides_captions({"anim": {"type": t, "props": {}}}) for t in KINETIC if t != "kinetic_title")
+    assert not hides_captions({"anim": {"type": "kinetic_title", "props": {}}}) \
+        and hides_captions({"anim": {"type": "kinetic_title", "props": {"hide_captions": True}}})
+    kq = lambda a, b, t="kinetic_number": {"start": a, "end": b, "anim": {"type": t, "props": {}}}  # noqa: E731
     assert quiet_spans([kq(1, 2), kq(2.5, 3), kq(4, 5), {"src": "images/c.png", "start": 5.2, "end": 6}]) == [(1, 3), (4, 5)]
+    assert quiet_spans([kq(1, 2), kq(2.5, 3, "kinetic_title"), kq(4, 5, "goal_bar")]) == [(1, 2), (4, 5)]
     # two beats of one step tracker close together are joined (one tracker carries on); a stat_stack keeps clear of the
     # card up with it longest
     sb = lambda a, b, **p: {"start": a, "end": b, "lane": "kinetic", "box": [0, 0, 100, 100],
@@ -3172,6 +3309,49 @@ def demo():
     zz = clear_entrances([{"start": 2.0, "end": 6.0, "scale": 1.2, "kind": "punch", "ease_s": 0},
                           {"start": 7.0, "end": 8.0, "scale": 1.2, "kind": "punch", "ease_s": 0}], [sb(1.0, 4.0)])
     assert [(z["start"], z["kind"], z["ease_s"]) for z in zz] == [(2.0, "push", KINETIC_PUSH_S), (7.0, "punch", 0)], zz
+    # punches stay on the plain footage between kinetic cards: one with an edge under a card is cut back to end before
+    # the card comes in (or to start once it has gone); one with too little left there eases as a push under it
+    pz = lambda a, b: {"start": a, "end": b, "scale": 1.2, "kind": "punch", "ease_s": 0}  # noqa: E731
+    kk = [sb(3.0, 8.0)]
+    kz = clear_entrances(punch_between([pz(1.0, 5.0), pz(5.5, 6.5), pz(7.0, 12.0)], kk), kk)
+    assert [(z["start"], z["end"], z["kind"]) for z in kz] == [(1.0, 2.69, "punch"), (5.5, 6.5, "push"), (8.0, 12.0, "punch")], kz
+    # a punch next to a push under the card never joins it (it may grow from the chin): it goes back out before the
+    # push, or comes in after it, the face still for MOVE_REST_S between; too short then, it goes
+    ph = lambda a, b: {**pz(a, b), "kind": "push", "ease_s": KINETIC_PUSH_S}  # noqa: E731
+    jz = clear_entrances([pz(0.5, 2.0), ph(2.05, 6.0), ph(8.0, 9.0), pz(9.05, 10.0), ph(11.0, 12.3), pz(12.0, 12.6)], kk)
+    assert [(z["start"], z["end"], z["kind"]) for z in jz] == [(0.5, 1.49, "punch"), (2.05, 6.0, "push"), (8.0, 9.0, "push"),
+                                                               (9.4, 10.0, "punch"), (11.0, 12.3, "push")], jz
+    # the budget: with kinetic titles on, one count of graphics in all (kinetic and real-source cards), the hook kept
+    # and the strongest of the rest, spread out; off, the style page's cards.per_min as before
+    bg = [{"start": 0.5, "end": 3.0, "anim": {"type": "kinetic_number", "props": {}}, "trigger_word": "hook"},
+          {"start": 3.2, "end": 6.0, "anim": {"type": "stat_stack", "props": {}}, "_strength": 0.9, "trigger_word": "stats"},
+          {"start": 8.0, "end": 10.0, "src": "images/menu.png", "trigger_word": "menu"},
+          {"start": 12.0, "end": 14.0, "anim": {"type": "goal_bar", "props": {}}, "_strength": 0.6, "trigger_word": "goal"},
+          {"start": 18.0, "end": 20.0, "anim": {"type": "kinetic_title", "props": {}}, "_strength": 0.2, "trigger_word": "title"},
+          {"start": 24.0, "end": 26.0, "anim": {"type": "kinetic_number", "props": {}}, "_strength": 0.7, "trigger_word": "money"}]
+    kept = budget_cards(bg, 30.0, {"graphics": {"kinetic": True}})   # 8 a minute: 4 in 30 s
+    assert [c["trigger_word"] for c in kept] == ["hook", "stats", "menu", "money"], kept
+    assert len(budget_cards(bg, 30.0, {"graphics": {"kinetic": True, "kinetic_per_min": 4}})) == 2
+    assert len(budget_cards(bg, 30.0, {"cards": {"per_min": 4}})) == 2 and budget_cards(bg, 30.0, {}) == bg
+    # the face band: over the hair and forehead of the head while the card is up, under the Reels header, KIN_GAP above
+    # the brows (BROW_SHARE down face.json's head box), the head as drawn when the zooms are given
+    hb = lambda *bx: {"step_s": 0.5, "heads": [{"t": i / 2, "box": list(bx[min(len(bx) - 1, i // 10)])} for i in range(30)]}  # noqa: E731
+    close = hb([5, 6, 80, 68])                                   # a close talking head: brows 31.2% down
+    assert face_band(close, 1.0, 4.0) == [8.6, 28.2], face_band(close, 1.0, 4.0)
+    assert face_band(hb([35, 40, 30, 20]), 1.0, 4.0) == [20.4, 44.4]   # a head low in a wide shot takes the band down with it
+    assert face_band(hb([10, 0, 80, 30]), 1.0, 4.0) is None             # brows at 11%: no room above them
+    moves = hb([5, 6, 80, 68], [5, 0, 86, 74])                  # the head rises at 5 s: a card then sits higher
+    assert face_band(moves, 1.0, 4.0) == [8.6, 28.2] and face_band(moves, 5.0, 8.0) == [8.6, 24.4], face_band(moves, 5.0, 8.0)
+    assert face_band(moves, 4.0, 6.0) == [8.6, 24.4]               # a card across the change keeps to the higher head
+    pushed = {"zooms": [{"start": 0.0, "end": 9.0, "scale": 1.1, "kind": "punch", "origin": [45, 6]}], "pans": []}
+    assert face_band(close, 1.0, 4.0, pushed) == [8.6, 30.7], face_band(close, 1.0, 4.0, pushed)   # grown from the head's top
+    sparse = {"step_s": 0.5, "heads": [{"t": 0.0, "box": [5, 6, 80, 68]}, {"t": 20.0, "box": [5, 6, 80, 68]}] +
+              [{"t": 0.5 * i, "box": None} for i in range(1, 30)]}
+    assert face_band(sparse, 5.0, 8.0) == [8.6, 28.2] and face_band(None, 1.0, 4.0) == KIN_BAND and face_band({"heads": []}, 0, 1) == KIN_BAND
+    kb = kinetic_bands([kq(1.0, 4.0), {**kq(5.0, 8.0), "anim": {"type": "goal_bar", "props": {"band": [10, 20]}}},
+                        {"src": "images/c.png", "start": 1.0, "end": 3.0}], close)
+    assert kb[0]["anim"]["props"]["band"] == [8.6, 28.2] and kb[1]["anim"]["props"]["band"] == [10, 20] and "anim" not in kb[2], kb
+    assert kinetic_bands([kq(1.0, 4.0)], hb([10, 0, 80, 30])) == []   # it would sit on the eyes: dropped
     # kinetic_title: each title word lands on its own spoken word read in order (the second "bake" on the second one); a
     # word with an "at" and no "word" keeps it; one never said keeps no time (the template spreads it)
     tw = [{"text": t, "start": 0.3 * i, "end": 0.3 * i + 0.2} for i, t in enumerate("we bake to order and bake to sell".split())]

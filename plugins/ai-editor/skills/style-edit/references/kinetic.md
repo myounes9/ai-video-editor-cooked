@@ -29,19 +29,27 @@ Renderer: `remotion/src/kinetic/` (one file per format, the shared design system
   0.6x and a % at 0.56x, cap-aligned; K, M and B stay full size. A bare number is read too, but `"40%"` keeps the
   check of the %. check.py plan reads every figure against what the speaker says (numbers.py), `target` included.
 - **Placement**: plan.py gives the card the whole frame (`box` [0, 0, 100, 100]) and its own lane `kinetic` (it may
-  share the frame with a capture). The format fits itself to `band` ([top, bottom] % of the frame height): over the
-  hair and forehead, under the Reels header (never above 8%), above the eyes. Unset: [8.6, 26.2], a close talking
-  head. Phase 3 fills it from face.json. A band that is not [top, bottom] with top under bottom, inside 0-50%, stops
-  the render. Over a full-frame scene plan.py passes the scene's picture as `beside` and the band stops 24 px above it
+  share the frame with a capture). The format fits itself to `band` ([top, bottom] % of the frame height), which
+  plan.py sets from face.json over the card's own time (`face_band`): from 8.6% (under the Reels header) down to 3%
+  above the highest brow line while the card is up (0.37 down face.py's head box, the head as the zooms draw it), at
+  most 24% tall (a head low in a wide shot takes the band down with it), never past 50%. No head while it is up: the
+  take's median head; none at all: [8.6, 26.2]. Under 7% of room above the brows (a head high in the frame), the card
+  is dropped with a warning rather than set on the eyes. A `band` on the beat wins. check.py plan FAILs a band that
+  reaches the eyes and WARNs one past the brows. A band that is not [top, bottom] with top under bottom, inside 0-50%,
+  stops the render. Over a full-frame scene plan.py passes the scene's picture as `beside` and the band stops 24 px above it
   (when that leaves 7% of the frame; else check.py plan WARNs that the card covers the picture).
-- **Captions**: the word captions fade out while a kinetic card is up and back right after it
-  (`hide_captions`, default true; false keeps them). Two cards under 0.6 s apart keep them hidden in between.
+- **Captions**: the word captions fade out only while a number card is up (every format but `kinetic_title`) and back
+  right after it (`hide_captions`, default true for those, false for `kinetic_title`; a card's own value wins). Two
+  cards under 0.6 s apart keep them hidden in between. Everywhere else the word captions carry the line.
 - **Hold**: a lockup holds at least 1.2 s after its last landing and leaves in time to be gone when the card ends
   (`hold_s`, or the next speech, wins over the hold). `out_at` (optional) asks it to stay until then. A kinetic card
   that ends under 1 s before the next kinetic card or scene holds until it (plan.py `bridge_kinetic`), so the captions
   never flash back for a word. A card whose first landing comes after it has gone stops the render (raise `hold_s`).
-- **Zooms**: no zoom cuts under a kinetic card's hold; a zoom with an edge there eases as a push (0.8 s each way). A
-  zoom up with one grows from the head's top, never from the chin (plan.py `clear_chin`), so the head holds its place.
+- **Zooms**: punches happen on the plain footage between cards. A punch with an edge under a card is cut back to end
+  before the card comes in, or to start once it has gone (plan.py `punch_between`), when 0.8 s of it is left there;
+  else it eases under the card as a soft push (0.8 s each way), and a punch beside such a push gives way to it rather
+  than joining it. No zoom cuts under a kinetic card's hold. A zoom up with one grows from the head's top, never from
+  the chin (plan.py `clear_chin`), so the head holds its place.
 - **Labels** land no earlier than their figure + 0.15 s. Keep them to one or two short words: they stay phone-readable
   (48 px, 44 at the least), wrapping onto two lines before they shrink, never closer than 40 px to the next. A
   number_chain whose labels or figures cannot fit so across the grid stops the render; check.py plan FAILs it first
@@ -50,6 +58,18 @@ Renderer: `remotion/src/kinetic/` (one file per format, the shared design system
   creator is off screen (her pictures become scenes) keeps them over the footage. A visuals.json `title` or `cta` owns
   the band: a kinetic card up when one lands ends there, and one that would start under it is dropped (plan.py
   `under_titles`).
+
+## How many (the graphics budget)
+
+One count for every graphic a viewer sees, kinetic and real-source together (captures, posts, logos):
+`graphics.kinetic_per_min` a minute (default 8; it wins over the style page's `cards.per_min`, and `cards.on` false
+still means none). `lib/ai_editor/budget.py` holds it, so the beat finder and plan.py pick against the same number:
+`allowance(style, duration_s)`, `remaining(style, duration_s, taken)`, `pick(items, n)`. plan.py `budget_cards` keeps
+the strongest: the hook always (a beat with `"hook": true`, else the first graphic in the opening 3 s), then by each
+beat's `strength` (0-1; a real source with none counts 0.75, a kinetic beat 0.5), a beat that would leave under 1 s
+of plain footage beside one already kept counting 0.2 less, so the picks spread out. Each card left out is named on
+stderr. plan.json records `graphics_budget`; style_check.py and quality.py compare the cards a minute with it, and do
+not flag a kinetic kind the copied creator hardly uses, or a soft push under a kinetic card, as hers to match.
 
 ## The look (tokens.ts)
 
