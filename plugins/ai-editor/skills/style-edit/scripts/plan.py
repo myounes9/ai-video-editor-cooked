@@ -576,12 +576,22 @@ def hides_captions(card):
     return v if isinstance(v, bool) else a.get("type") in KINETIC
 
 
-def kinetic_links(cards):
+def scene_capture(c, aspect):
+    """Where a full-frame scene's picture draws, % of the frame: fitted whole in the scene's type box (Scene.tsx
+    sceneBox, Capture.tsx), grown by the scene's slow push (4.5%) and a little more."""
+    x, y, w, h = content_rect(c, SCENE_TYPE_BOX[aspect == "9:16"], aspect)
+    g = 1.05 / FILL
+    return [round(v, 1) for v in (x + w / 2 - w * g / 2, y + h / 2 - h * g / 2, w * g, h * g)]
+
+
+def kinetic_links(cards, aspect="9:16"):
     """Kinetic cards that read their neighbours (remotion/src/kinetic). A step_build beat followed in the kinetic lane
     within KINETIC_JOIN_S by the next beat of the same tracker (props.id, else the same slot labels) holds until it
     ("join_out") and the next carries on from it ("join_in"): one tracker on screen, never a sweep out and back in.
     A stat_stack with no "beside" gets the box of the card up with it longest (a capture of the same numbers), and keeps
-    to the part of the face band that box leaves free."""
+    to the part of the face band that box leaves free; for a full-frame scene that is where its picture draws.
+    A kinetic card draws over a scene it shares the frame with (StyleEdit.tsx): that scene takes the dark ground
+    ("ink"), so the white and gold type reads."""
     is_ = lambda c, t: (c.get("anim") or {}).get("type") == t
     who = lambda c: c["anim"]["props"].get("id") or [str(x.get("label", "")).lower() for x in c["anim"]["props"].get("slots") or []]
     lane = sorted((c for c in cards if c.get("lane") == "kinetic"), key=lambda c: c["start"])
@@ -593,9 +603,13 @@ def kinetic_links(cards):
     for c in cards:
         if is_(c, "stat_stack") and "beside" not in c["anim"]["props"]:
             up = lambda o: min(c["end"], o["end"]) - max(c["start"], o["start"])
-            near = [o for o in cards if o.get("layout") != "scene" and kind_of(o) not in KINETIC and o.get("box") and up(o) > 0]
+            near = [o for o in cards if kind_of(o) not in KINETIC and o.get("box") and up(o) > 0]
             if near:
-                c["anim"]["props"]["beside"] = list(max(near, key=up)["box"])
+                o = max(near, key=up)
+                c["anim"]["props"]["beside"] = scene_capture(o, aspect) if o.get("layout") == "scene" else list(o["box"])
+    for sc in (c for c in cards if c.get("layout") == "scene"):
+        if any(kind_of(k) in KINETIC and k["start"] < sc["end"] and sc["start"] < k["end"] for k in cards):
+            sc.setdefault("ground", "ink")
     return cards
 
 
@@ -1967,7 +1981,7 @@ def build(style, words, meta, images=(), aspect="auto", cuts=(), visuals=(), edi
             rest = tuck_behind(rest, face, aspect)
         out = dict(head)
     cards = clear_caption_paths(creator_motion(sorted(rest + scenes + kinetic, key=lambda c: c["start"]), style, aspect), cap["y_pct"], aspect)
-    cards = kinetic_links(cards)
+    cards = kinetic_links(cards, aspect)
     for c in cards:
         px = c.get("layout") != "scene" and c.get("size") and capture_xh(c, aspect)
         if px and px < READ_XH and (aspect == "9:16" or c.get("format") == "sticker") and not pictures_only(style):
@@ -2453,6 +2467,14 @@ def demo():
     assert not jp[3].get("join_in") and jp[2]["beside"] == [14, 14, 72, 34], (jp[2], jp[3])   # the stat_stack sits between
     other = kinetic_links([sb(1.0, 2.0), sb(2.2, 3.0, id="u")])
     assert not any(k in c["anim"]["props"] for c in other for k in ("join_in", "join_out")) and other[0]["end"] == 2.0, other
+    # a stat_stack over a full-frame scene keeps to where the scene's picture draws; that scene takes the dark ground
+    sc = {"src": "images/dash.png", "size": [1600, 640], "start": 5.5, "end": 7.5, "layout": "scene", "box": list(SCENE_BOX)}
+    lone = {"src": "images/e.png", "start": 20.0, "end": 22.0, "layout": "scene", "box": list(SCENE_BOX)}
+    st2 = {**st, "anim": {"type": "stat_stack", "props": {"stats": []}}}
+    ln = kinetic_links([st2, sc, lone])
+    bs = st2["anim"]["props"]["beside"]
+    assert 11 < bs[0] < 13 and 30 < bs[1] < 33 and 74 < bs[2] < 77 and bs[1] + bs[3] < 50, bs   # 2.5:1 across the type box, pushed
+    assert sc["ground"] == "ink" and "ground" not in lone, (sc, lone)
     # kinetic_title: each title word lands on its own spoken word read in order (the second "bake" on the second one); a
     # word with an "at" and no "word" keeps it; one never said keeps no time (the template spreads it)
     tw = [{"text": t, "start": 0.3 * i, "end": 0.3 * i + 0.2} for i, t in enumerate("we bake to order and bake to sell".split())]

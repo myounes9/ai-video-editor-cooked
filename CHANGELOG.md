@@ -4,6 +4,13 @@ What changed for every user, newest first.
 
 ## Unreleased
 
+- Kinetic titles over a full-frame scene (fork, opt-in). In the overlay layout a capture planned as a scene (one
+  with `"layout": "split"` or `"scene"`) covered every kinetic card up with it, so a stat_stack meant to sit beside the
+  capture of its numbers never showed. A kinetic card now draws over a scene it shares the frame with, and plan.py
+  gives that scene the dark ground (`"ground": "ink"`) so the white and gold type reads; a stat_stack's `beside` is
+  where the scene's picture draws (fitted in the scene's type box and grown by its slow push, from the capture's
+  `size`). check.py render does not measure a kinetic card's face cover or ink while a scene is up (the face is
+  hidden, and the scene is not its ink). Tests: a plan.py demo assert.
 - Kinetic titles: `kinetic_number` is built (fork, opt-in with the rest of the family). One key figure, centred on
   the grid, pulled on as ink on its marker on its word, with an optional sub-line under it whose words land on
   their own words (never before the figure + 0.15 s; key words in foil). Variants: `hook` (the default), `counter`
@@ -40,9 +47,8 @@ What changed for every user, newest first.
   it reads final, a € at 0.6x and a % at 0.56x cap-aligned, a heavy connector, measured fitting to the grid and to
   a face band from props (`band`, [top, bottom] % of the frame; default over the hair, under the Reels header).
   `number_chain` is built (2-4 figures, fixed columns and equal connectors, labels that never land before their
-  figure + 0.15 s nor sit closer than 40 px, a hold of at least 1.2 s after the last landing); `kinetic_number`,
-  `goal_bar`, `step_build`, `stat_stack`, `kinetic_title` and `cta_follow` are registered and stop the render with
-  their name until built. While a kinetic card is up the word captions fade out and come back after it
+  figure + 0.15 s nor sit closer than 40 px, a hold of at least 1.2 s after the last landing); the other six formats
+  have their own entries. While a kinetic card is up the word captions fade out and come back after it
   (`hide_captions`, per card, on by default for the family). plan.py passes these beats through only when the style
   opts in: the whole frame as their box, their own lane (`kinetic`, so one can share the frame with a capture), each
   part's spoken word turned into its time (`label_word` -> `label_at`, `word_goal` -> `at_goal`), and

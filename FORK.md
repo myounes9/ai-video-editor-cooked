@@ -6,7 +6,8 @@ video, made automatically, with free tools only, rendered at the best quality th
 
 Fork base: upstream commit `4d48b2e` (ai-editor 2.4.0, creator-teardown 2.6.0).
 Fork work so far: Phase 1, merged on branch `phase1` from four branches (`p1-numbers`, `p1-render`,
-`p1-lottie`, `p1-determinism`). Each change has its own entry under "## Unreleased" in CHANGELOG.md.
+`p1-lottie`, `p1-determinism`), and Phase 2 (kinetic titles), merged on branch `phase2`. Each change has its
+own entry under "## Unreleased" in CHANGELOG.md.
 
 ## What the fork changes, and why
 
@@ -89,13 +90,13 @@ Why: a render split across Chrome tabs gave different pixels from a render in on
   in one tab and compares them pixel for pixel; a Lottie card with text is one case.
 - `skills/style-edit/references/motion.md`: the one-line rule.
 
-### 5. Kinetic titles, the foundation (`p2-foundation`, Phase 2)
+### 5. Kinetic titles (Phase 2: `p2-foundation`, `p2-number`, `p2-goal`, `p2-step`, `p2-title`, merged on `phase2`)
 
 Why: the fork's goal is graphics through the whole video, and a talking head's own results (a count, a goal, a
 chain of figures) have no page to capture. The kinetic family sets them over the footage, opt-in per style.
 
 - `plugins/ai-editor/remotion/src/kinetic/` (new): the design system (`tokens.ts`, `type.ts`, `time.ts`, `fit.ts`,
-  `primitives.tsx`), `NumberChain.tsx` (the reference format), a registered placeholder per format still to build,
+  `primitives.tsx`), `NumberChain.tsx` (the reference format), one file per format,
   `Kit.tsx` (every primitive on one frame, a `KineticKit` composition in `Root.tsx`).
 - `Templates.tsx` registers them as floating templates; `StyleEdit.tsx` fades the word captions out while one is up.
 - `skills/style-edit/scripts/plan.py` (`KINETIC`, `kinetic_on`, `hides_captions`), `check.py`, `ai_tells.py`,
@@ -105,14 +106,22 @@ chain of figures) have no page to capture. The kinetic family sets them over the
   `test/determinism.mjs`.
 - `KineticNumber.tsx` (`p2-number`): `kinetic_number`, one figure with a sub-line; variants hook, counter, tally and
   stamp. Cases in `remotion/test/kinetic/kinetic_number.json`.
+- `GoalBar.tsx` (`p2-goal`): `goal_bar`, the goal layout without a panel. `quality.py` reads no panel edge on a
+  kinetic card.
+- `step_build` and `stat_stack` (`p2-step`): `kinetic/StepBuild.tsx` (a tracker across beats, joined by plan.py
+  `kinetic_links` when two beats of one tracker are under 1 s apart) and `kinetic/StatStack.tsx` (stats beside a
+  capture, its box passed as `beside` by `kinetic_links`). `StyleEdit.tsx`: a kinetic card gets no lane swap and
+  leaves the frame to the next card in its lane at its start; `primitives.tsx` `Lockup` takes `out = Infinity` and
+  `joined`.
+- `KineticTitle.tsx` and `CtaFollow.tsx` (`p2-title`): `kinetic_title` (plan.py `title_times` times each word in
+  reading order) and `cta_follow`. `quality.py` judges a title's landing on the last word it shows in its first
+  0.6 s and reads no outline jitter on a kinetic card.
+- Integration (`phase2`): a kinetic card draws over a full-frame scene it shares the frame with (`StyleEdit.tsx`), the
+  scene on the dark ground, a stat_stack beside the scene's picture (plan.py `scene_capture`, `kinetic_links`), and
+  check.py render skips a kinetic card's measures while a scene is up.
 
 Fork-only: a look this fork chose (words over the footage, a house key colour), against upstream's rule that a
 number is shown inside the page that published it. Off unless a style opts in.
-
-`step_build` and `stat_stack` (`p2-step`): `kinetic/StepBuild.tsx` (a tracker across beats, joined by plan.py
-`kinetic_links` when two beats of one tracker are under 1 s apart) and `kinetic/StatStack.tsx` (stats beside a
-capture, its box passed as `beside` by `kinetic_links`). `StyleEdit.tsx`: a kinetic card gets no lane swap and leaves the
-frame to the next card in its lane at its start; `primitives.tsx` `Lockup` takes `out = Infinity` and `joined`.
 
 ## What to offer upstream, and what stays here
 

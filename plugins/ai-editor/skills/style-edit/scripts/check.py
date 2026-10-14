@@ -597,7 +597,7 @@ def check_render(edit, plan, video):
     det = None
     pix = lambda b, pad=0: (max(0, int((b[0] - pad) / 100 * W)), max(0, int((b[1] - pad) / 100 * H)),
                             min(W, int((b[0] + b[2] + pad) / 100 * W)), min(H, int((b[1] + b[3] + pad) / 100 * H)))
-    per = {i: {"diffs": [], "cover": [], "prev": None, "mid": None} for i in range(len(cards))}
+    per = {i: {"diffs": [], "cover": [], "prev": None, "mid": None, "n": 0} for i in range(len(cards))}
     for n, (t, frame) in enumerate(sampled(video, "null", W, H, fps)):
         cut = next(behind, (0, None))[1]
         up = [i for i, c in enumerate(cards) if c["start"] + 0.35 <= t <= c["end"] - 0.2]
@@ -627,8 +627,17 @@ def check_render(edit, plan, video):
         grey = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY).astype(np.float32)
         al = None if split or not any(cards[i].get("layer") == "behind" for i in up) else cutout_alpha(edit, plan, t)
         person = None if al is None else cv2.warpAffine(cv2.resize(al, (W, H), interpolation=cv2.INTER_AREA), zm, (W, H)) > 230
+        # a kinetic card's box is the whole frame, so it reads every pixel the cut is not: not while a scene is on
+        # screen (it draws over it: the face is hidden, and the scene is not its ink), nor while a punch travels (one
+        # frame off there moves the whole picture, read as ink on the face)
+        cutaway = any(o.get("layout") == "scene" and o["start"] <= t <= o["end"] for o in cards)
+        moving = not split and len({round(zoom_state(t + d, plan["zooms"])[0], 4) for d in (-1 / fps, 0, 1 / fps)}) > 1
         for i in up:
             c, st = cards[i], per[i]
+            if (cutaway or moving) and (c.get("anim") or {}).get("type") in KINETIC:
+                st["prev"] = None
+                continue
+            st["n"] += 1
             x0, y0, x1, y1 = pix(c["box"], 2)
             if split:   # below the art box is the speaker's window and its shadow, never the card
                 y1 = min(y1, int((c["box"][1] + c["box"][3]) / 100 * H))
@@ -680,7 +689,7 @@ def check_render(edit, plan, video):
                                    PLAN_FIX + "; then render again" if explain else
                                    "plan again: drop the beat's \"box\" in visuals.json/images.json so plan.py centres it, "
                                    "or give a capture a \"crop\" round the evidence; then render again"))
-        elif c["end"] - c["start"] > 0.8:
+        elif c["end"] - c["start"] > 0.8 and st["n"]:   # never measured: a kinetic card up only over a scene
             rec["ink"] = None
             out.append(finding("WARN", (c["start"] + c["end"]) / 2, f"{name} card: nothing drawn found in its box",
                                "look at that frame: the card may be missing from the render"))

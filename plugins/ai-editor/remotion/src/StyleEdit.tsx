@@ -431,8 +431,11 @@ export const StyleEdit: React.FC<Plan> = ({ video, captions, zooms, cards, layou
     <CardView key={`${s.card.src ?? s.card.anim?.type}${s.card.start}`} card={s.card} t={t} prev={s.prev} next={s.next} covered={s.covered}
       light={split} look={look} m={m} fonts={fonts} ground={grounds.get(s.card)} />
   );
-  // Box cards sit under the speaker's window in split; scenes cut away from everything, so they go on top.
-  const cardViews = up.filter((s) => s.card.layout !== "scene" && s.card.layer !== "behind").map(view);
+  // Box cards sit under the speaker's window in split; scenes cut away from everything, so they go on top. A kinetic
+  // card goes over a scene it shares the frame with (a stat_stack beside a full-frame capture of its numbers).
+  const kin = (s: Slot) => !!s.card.anim && s.card.anim.type in KINETIC;
+  const cardViews = up.filter((s) => s.card.layout !== "scene" && s.card.layer !== "behind" && !kin(s)).map(view);
+  const kineticViews = up.filter((s) => s.card.layout !== "scene" && s.card.layer !== "behind" && kin(s)).map(view);
   const behindViews = up.filter((s) => s.card.layer === "behind").map(view);
   const sceneViews = up.filter((s) => s.card.layout === "scene").map(view);
   if (!split || !layout) {
@@ -457,6 +460,7 @@ export const StyleEdit: React.FC<Plan> = ({ video, captions, zooms, cards, layou
         ))}
         {cardViews}
         {sceneViews}
+        {kineticViews}
         {texts?.length ? <Texts items={texts} t={t} width={width} height={height} font={captions.style.font_match} /> : null}
         <AbsoluteFill style={{ opacity: capFade }}><Captions style={capStyle} chunks={captions.chunks} t={t} m={m} /></AbsoluteFill>
         <Sfx />
@@ -476,6 +480,7 @@ export const StyleEdit: React.FC<Plan> = ({ video, captions, zooms, cards, layou
       <Texture look={look} w={width} h={height} id="ground" />
       {behindViews /* split has no cutout: the panel art sits clear of the window anyway */}
       {cardViews}
+      {kineticViews}
       <div style={{ position: "absolute", left: 0, top, width, height: height - top, overflow: "hidden",
         borderRadius: `${r}px ${r}px 0 0`, boxShadow: o > 0 ? `0 ${-height * 0.004}px ${height * 0.02}px rgba(0,0,0,${0.12 * o})` : undefined }}>
         <div style={{ position: "absolute", left: -(x / 100) * width * o, top: -(y / 100) * height * o, width: width * k,

@@ -66,8 +66,6 @@ A goal beat in visuals.json: `{"word": "forty", "kind": "anim", "type": "goal_ba
 "word_pct": "forty", "count_word": "percent", "target": "20K", "word_target": "20k", "word_goal": "goal"}}` (plan.py
 turns `word_pct`, `count_word`, `word_target` and `word_goal` into `at_pct`, `count_at`, `at_target` and `at_goal`).
 
-A planned format is registered but stops the render with its name until its branch builds it.
-
 A `kinetic_number` beat, the spoken words filled in by plan.py (`word` -> `at`, `land_word` -> `land_at`; the
 sub-line's and the stamp's `word` -> `at`):
 
@@ -106,6 +104,12 @@ A stat_stack may share its beat with a real capture of the same numbers (a dashb
 that card's box as `beside` (the card up with it longest; a `beside` in props wins) and the stats keep 24 px clear of
 it, in the biggest part of the band it leaves free (above, below, left or right), as a row or a stack, whichever fits
 biggest unless `layout` says.
+
+In the overlay layout a capture with `"layout": "split"` (or `"scene"`) is a full-frame scene. A kinetic card up with
+a scene draws over it, and the scene takes the dark ground (`"ground": "ink"`) so the white and gold type reads. For a
+stat_stack, `beside` is then where the scene's picture draws: give the capture its pixel `size` in images.json
+(capture.mjs writes it; add it to a picture added by hand) so plan.py knows its shape. The split layout drops kinetic
+cards.
 
 **kinetic_title**: give each title word as its own entry and let plan.py time it. A word's `word` (else its own
 `text`) is matched in reading order from the card's start, so a repeated word lands on its own later saying; a
