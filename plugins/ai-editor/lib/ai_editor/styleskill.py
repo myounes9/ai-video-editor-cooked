@@ -285,6 +285,8 @@ def learned(sc):
     lines = []
     for r in rules:
         setting = f" Setting: `{r['setting']} = {json.dumps(r['value'])}`." if r.get("setting") else ""
+        m = taste.mapped(r)   # fork: the settings its words ask for, which plan.py applies (taste.settings_for)
+        setting += (" Sets: " + ", ".join(f"`{k} = {json.dumps(v)}`" for k, v in m.items()) + ".") if m else ""
         last = r["corrections"][-1]["at"][:10] if r["corrections"] else "never"
         reg = r["regressions"]
         lines.append(f"- {r['rule']}.{setting} Said {len(r['corrections'])}x, last {last}."

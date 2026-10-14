@@ -64,12 +64,13 @@ DEFAULTS = {"captions": "plain", "zoom": "smooth", "cut": "natural", "cards": "s
 
 
 # What a caption preset may set (Captions.tsx CaptionStyle): key -> (type, low, high) or a set of allowed words.
+# emphasis_scale is the fork's opt-in (stressed words drawn bigger through a transform).
 # Anything else in a file, or a value of the wrong type or out of range, is dropped with a warning.
 HEX = re.compile(r"#[0-9A-Fa-f]{6}([0-9A-Fa-f]{2})?|#[0-9A-Fa-f]{3}")
 FIELDS = {"style": str, "font_match": str, "size_pct": (float, 1, 15), "weight": (int, 100, 900), "case": {"as_is", "lower", "upper", "sentence"},
           "words_per_caption": (int, 1, 8), "max_lines": (int, 1, 3), "y_pct": (float, 10, 95), "width_pct": (float, 30, 100),
           "color": HEX, "highlight_color": HEX, "emphasis_color": HEX, "box_color": HEX, "inactive_opacity": (float, 0, 1),
-          "active_scale": (float, 1, 2), "active_lift": (float, 0, 40), "stroke": bool, "box": bool, "shadow": bool, "present": bool,
+          "active_scale": (float, 1, 2), "active_lift": (float, 0, 40), "emphasis_scale": (float, 1, 1.3), "stroke": bool, "box": bool, "shadow": bool, "present": bool,
           "effect": {"pop", "slide", "word_highlight", "karaoke", "reveal", "lift", "none"},
           "animation": {"pop", "slide", "word_highlight", "none"}}
 

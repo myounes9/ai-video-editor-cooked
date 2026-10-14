@@ -31,6 +31,7 @@ x 3-97, y 5-90. The caption band sits at the style's `captions.y_pct` (66% by de
 | it leaves too soon | `hold_s` so the card is still up on its last word. |
 | it moves too much / too little | see "Motion". |
 | a new animation here | a new beat on the word said at that moment: the real thing the sentence names (shapes.md order). A mechanism with no screen: a diagram. |
+| add motion graphics, a number title here (fork) | a preference, not one beat: the taste setting `graphics.kinetic` at the note's scope (style-edit `references/review.md` table), then the `REPLAN:` line, so the beat finder places the kinetic beats. A single figure the user points at: a kinetic beat on its spoken words (style-edit `references/kinetic.md`), the number as said, never a `kinetic_title` they did not ask for, within `graphics.kinetic_per_min`. |
 
 A capture beat is in visuals.json and images.json (capture.mjs copies it). `plan.py beat` changes
 both. A user's own image is in images.json only.

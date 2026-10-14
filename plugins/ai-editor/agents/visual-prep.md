@@ -52,6 +52,11 @@ local, so they are made now and made again if the cut changes.
    when they count steps, a `stamp` when they say a card's thing does not apply (visuals.md "Card edit").
    Never a `file://` page from the user's config folders.
    Decide it all yourself: the caller must not have to ask the user what to show.
+   **Kinetic beats** (`style.json` `graphics.kinetic` true, from the style or a learned rule): the beat finder has
+   already placed them on the number beats. Keep every one as written, never add a kinetic card yourself (no
+   `kinetic_title`), never a figure or label not said, and keep all your cards together with them at about
+   `graphics.kinetic_per_min` a minute, 1 s of plain footage between cards: `<ROOT>/skills/style-edit/references/kinetic.md`
+   "For the AI steps".
    When `EDIT/logos.json` exists (the logo-pack skill), use its `brand` for each `logo` beat (beats.json
    `logos`) and one `logo_cluster` per `together` group; capture.mjs keeps its files. No logos.json and two
    or more brands named: follow `<ROOT>/skills/logo-pack/SKILL.md` steps 1-4 first (free, no questions; a logo

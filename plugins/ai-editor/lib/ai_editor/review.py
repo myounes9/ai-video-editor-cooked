@@ -2233,7 +2233,7 @@ def learn_done(folder, summary):
     style = shown_style(sp)
     from ai_editor import skillrules
     tg = skillrules.target(folder)
-    saved = []   # (rule, status, kind, ref) for the receipts
+    saved, keys = [], []   # (rule, status, kind, ref) for the receipts; the settings saved (taste.replan)
     if tg["kind"] == "skill":   # a skill style: its skill made the edit, so the rules go into its SKILL.md
         if not tg["path"]:
             sys.exit(f"the {tg['skill']} skill is not in your skill folders; nothing saved")
@@ -2247,6 +2247,7 @@ def learn_done(folder, summary):
         status, x = styleskill.learn(sp, r["section"], r["rule"], setting or None, taste.parse(raw) if setting else None,
                                      edit=folder, source="review")
         saved.append((x["rule"], status, "settings", x["id"]))
+        keys.extend(taste.rule_keys(x))
         print(f"{status} rule #{x['id']} {x['section']}: {x['rule']} (skill {styleskill.name(sp)})")
 
     def done(d):
@@ -2254,6 +2255,8 @@ def learn_done(folder, summary):
                           receipts=[receipt(d, style, *x, src="teach")["id"] for x in saved])
     update(folder / "review.json", done)
     print(f"saved to {style}")
+    if taste.replan(keys):
+        print(taste.replan(keys))
 
 
 def edit_style(folder):
@@ -2340,6 +2343,11 @@ def cmd_learn(a, folder):
                     continue
                 scope = f"video:{d['name']}" if a.scope == "video" else styleskill.scope(sp)
                 status, r = taste.add(section, rule, setting, value, scope, folder, source="review", style=sp)
+                keys.extend(taste.rule_keys(r))   # fork: a rule whose words set motion graphics or emphasis
+                lost = {k: v for k, v in taste.settings_for(c["text"], section).items() if k not in taste.rule_keys(r)}
+                if lost:
+                    out.append(f"#{c['id']}: the note asks for {', '.join(f'{k} = {json.dumps(v)}' for k, v in lost.items())}, the "
+                               "rule's words do not: write the rule in the note's words, or give that key=value")
                 c.update(rule=rule, taste={"style": r["id"], "this-style": r["id"], "video": "video-only"}.get(a.scope, "suggested"))
                 if a.scope != "video":
                     c["receipt"] = receipt(d, shown_style(sp), r["rule"], status, "settings", r["id"], c["id"])["id"]
@@ -2352,8 +2360,11 @@ def cmd_learn(a, folder):
             elif (c["stage"], c["round"]) == (stage, rnd) and "taste" not in c:
                 c["taste"] = "one-off"
         return out
+    keys = []
     for line in update(folder / "review.json", f) or ["no preference notes: all marked one-off"]:
         print(line)
+    if taste.replan(keys):
+        print(taste.replan(keys))
 
 
 def _post_code(url, body):
@@ -2768,6 +2779,11 @@ def demo():
     assert "size_pct" not in taste.read_json().get("captions", {})
     assert "- Captions too big." in (tmp / "skills" / "edit-like-alice" / "SKILL.md").read_text(encoding="utf-8")
     assert "Cards fill the space they have" in (tmp / "skills" / "my-style" / "SKILL.md").read_text(encoding="utf-8")
+    # fork: a rule in words about motion graphics turns graphics.kinetic on for this style and asks for a re-plan
+    with contextlib.redirect_stdout(o):
+        learn(scope="this-style", rule=[[str(c3["id"]), "visuals", "Motion graphics on the number beats"]])
+    assert "REPLAN: graphics.kinetic changed: run the visuals again" in o.getvalue(), o.getvalue()
+    assert taste.load_json(folder, count=False)["graphics"] == {"kinetic": True}
     # propose -> the page ticks two of three -> wait prints them -> done saves them into the edit's style
     props = [{"rule": "Captions one size smaller.", "section": "captions", "set": "captions.size_pct=4"},
              {"rule": "Fewer zooms in the first 5 s", "section": "visuals"}, {"rule": "Keep the pauses short", "section": "Cut"}]

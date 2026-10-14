@@ -34,8 +34,10 @@ export type CaptionStyle = {
   /** Active word lift, % of the font size. Default 8 for lift. */
   active_lift?: number;
   /** Colour of words marked "emph": true (default highlight_color); they also draw one weight heavier.
-   *  Never a bigger size: one page keeps one type size, so emphasis_scale is no longer read. */
+   *  One page keeps one type size: a stressed word is never set bigger. */
   emphasis_color?: string;
+  /** Fork, opt-in (unset upstream, which ignores it): a stressed word drawn this much bigger (about 1.1) through a
+   *  transform, so the page's size and its line breaks stay as fitted; the fit leaves the room it takes. */
   emphasis_scale?: number;
   /** Opacity of words not yet said (karaoke, reveal). Default 0.45 karaoke. */
   inactive_opacity?: number;
@@ -90,13 +92,24 @@ export const CaptionLine: React.FC<{ style: CaptionStyle; chunk: Chunk; t: numbe
     const lines = breaks.size ? 1 : style.max_lines ?? 1;
     const heavy = light ? weight : Math.min(900, weight + 100);
     const activeScale = style.active_scale ?? (fx === "lift" || fx === "pop" ? 1.08 : fx === "karaoke" ? 1.12 : 1);
+    // fork: the stressed words' own scale (emphasis_scale, opt-in), 1-1.3; a big word keeps its own size
+    const es = Math.min(1.3, Math.max(1, Number(style.emphasis_scale) || 1));
+    const emScale = (i: number) => (es > 1 && words[i].emph && i !== bi ? es : 1);
     // one size per page, on one line unless the style asks for more: fitted at the stressed word's weight with
     // room for the active word's scale, and never wrapped
     const segs: string[] = [];   // the page's lines, the big word's line left out (it is fitted on its own)
-    words.forEach((w, i) => { if (i === bi) return; if (!segs.length || breaks.has(i) || i === bi + 1) segs.push(w.text); else segs[segs.length - 1] += ` ${w.text}`; });
-    const fit = (text: string, max: number) => fitTextOnNLines({ text, maxLines: lines, maxBoxWidth: boxW / activeScale, fontFamily: family,
-      fontWeight: heavy, maxFontSize: max }).fontSize * 0.96;
-    const size = segs.length ? fit(segs.reduce((a, b) => (b.length > a.length ? b : a)), maxSize * (brk > 0 ? STACK_K : 1)) : maxSize;
+    const grow: number[] = [];   // per line: the share of its letters in stressed words, times their extra scale
+    words.forEach((w, i) => {
+      if (i === bi) return;
+      if (!segs.length || breaks.has(i) || i === bi + 1) { segs.push(w.text); grow.push(0); } else segs[segs.length - 1] += ` ${w.text}`;
+      grow[grow.length - 1] += (emScale(i) - 1) * w.text.length;
+    });
+    // the scaled words take (es - 1) of their own width more: the line is fitted that much narrower, so it still fits
+    const room = (k: number) => 1 + grow[k] / Math.max(1, segs[k].length);
+    const fit = (text: string, max: number, k = -1) => fitTextOnNLines({ text, maxLines: lines, maxBoxWidth: boxW / activeScale / (k >= 0 ? room(k) : 1),
+      fontFamily: family, fontWeight: heavy, maxFontSize: max }).fontSize * 0.96;
+    const longest = segs.reduce((a, b, k) => (b.length * room(k) > segs[a].length * room(a) ? k : a), 0);
+    const size = segs.length ? fit(segs[longest], maxSize * (brk > 0 ? STACK_K : 1), longest) : maxSize;
     const bigSize = bi >= 0 ? fit(words[bi].text, maxSize * (chunk.words[bi].big ?? 1)) : size;
     const lt = t - chunk.start;
     const enter = ease(m.pop)(Math.min(1, Math.max(0, lt / (0.38 * m.k))));
@@ -120,14 +133,16 @@ export const CaptionLine: React.FC<{ style: CaptionStyle; chunk: Chunk; t: numbe
           const on = t >= w.start && t < next, said = t >= w.start;
           // active word: springs up on its start, eases back as the next word starts
           const a = prog(t, w.start - 0.03, 0.22 * m.k, m.pop) * (1 - prog(t, next - 0.03, 0.2, "power2.out"));
-          const sc = 1 + (activeScale - 1) * a;
+          const sc = (1 + (activeScale - 1) * a) * emScale(i);
           const fill = fx === "karaoke" ? Math.min(1, Math.max(0, (t - w.start) / Math.max(0.08, w.end - w.start))) : 0;
           const rev = fx === "reveal" ? prog(t, w.start - 0.04, 0.24 * m.k, m.enter) : 1;
           const op = fx === "karaoke" ? (said ? 1 : dimmed) : fx === "reveal" ? dimmed + (1 - dimmed) * rev : 1;
           const pill = fx === "word_highlight" && on;
           const pillP = pill ? ease("back.out(2)")(Math.min(1, (t - w.start) / 0.18)) : 0;
           const base = w.emph ? style.emphasis_color ?? hi : color;
-          const textColor = fx === "karaoke" ? undefined : on && !pill && fx !== "reveal" && fx !== "none" ? hi : base;
+          // fork: with emphasis_scale a stressed word keeps its emphasis colour while it is said, too
+          const keep = w.emph && style.emphasis_scale != null;
+          const textColor = fx === "karaoke" ? undefined : on && !pill && !keep && fx !== "reveal" && fx !== "none" ? hi : base;
           const stroke = pill ? undefined : style.stroke ? `${Math.max(2, size * 0.1)}px #000`
             : tr === "stroke" || tr === "backing" ? `${Math.max(2, size * 0.1)}px ${tc}` : undefined;
           return (
