@@ -7,8 +7,9 @@ video, made automatically, with free tools only, rendered at the best quality th
 Fork base: upstream commit `4d48b2e` (ai-editor 2.4.0, creator-teardown 2.6.0).
 Upstream merged since: ai-editor 2.7.8 (upstream `871cabe`), on branch `p3-base`.
 Fork work so far: Phase 1, merged on branch `phase1` from four branches (`p1-numbers`, `p1-render`,
-`p1-lottie`, `p1-determinism`), and Phase 2 (kinetic titles), merged on branch `phase2`. Each change has its
-own entry under "## Unreleased" in CHANGELOG.md.
+`p1-lottie`, `p1-determinism`), Phase 2 (kinetic titles), merged on branch `phase2`, and Phase 3 (the kinetic
+titles placed automatically), merged on branch `phase3` from `p3-beats`, `p3-place` and `p3-rules`. Each change has
+its own entry under "## Unreleased" in CHANGELOG.md.
 
 ## What the fork changes, and why
 
@@ -174,6 +175,25 @@ a caption word only in pages of 3+ words and never draws it bigger, so the numbe
 Fork-only: upstream chose one type size per page ("never bigger") and reads no settings from a rule's words. Both are
 off unless a rule or a setting asks for them.
 
+### 8. The automatic path, end to end (Phase 3 integration: `phase3`)
+
+Why: the three Phase 3 parts each worked alone; together the beat finder, plan.py and the visuals step counted the
+graphics three ways, and a real edit lost every kinetic card to the split panel.
+
+- One count: `kinetic_beats.py` takes its rate and count from `lib/ai_editor/budget.py` (`count`, `per_min`; the style
+  page's `cards.per_min` no longer caps it) and gives each beat its `strength` and the hook `"hook": true`, so plan.py
+  `budget_cards` keeps the same beats; a tracker's beats share one strength and `budget.pick` never spaces them apart
+  (`group`). `taste.KINETIC_RATE` is budget's default.
+- `route.py`: with kinetic titles on, `want` marks only the budget's room left after the number beats and the edit's
+  own cards (`mark_kinetic` now sees images.json and visuals.json), never a `[kinetic]` line, and no title hint for the
+  hook. `taste.REPLAN_STEPS["beats"]` names plan.py, whose beat finder places the beats again.
+- `plan.py`: with kinetic titles on, a picture asking for the split panel is a full-frame scene (only a split layout
+  set by hand opens the panel, where kinetic cards cannot go); two punches on plain footage join only up to
+  `PUNCH_JOIN_MAX_S`; a caption figure keeps its decimal point (`cased`: "3.5k" was drawn "35k").
+- `cta_follow` keeps the word captions like `kinetic_title` (plan.py `HIDES_CAPTIONS`, `kinetic/index.ts`): only number
+  cards hide them. `StyleEdit.tsx`: over a dark scene ground the emphasis captions keep their colour.
+- `style_check.py`: with kinetic titles on, a kinetic card counts as the creator's text cards in her mix.
+
 ## What to offer upstream, and what stays here
 
 Neutral fixes, worth a pull request to upstream (each a real bug any user hits):
@@ -183,6 +203,7 @@ Neutral fixes, worth a pull request to upstream (each a real bug any user hits):
   that nothing personal ships) with a made-up take, and consider renaming the file to avoid the
   `numbers` clash with Python's own module (for example `spoken.py`), which removes the guard.
 - Lottie cards (3), as they are.
+- A caption figure's decimal point (8, plan.py `cased`): "3.5k" was drawn "35k", a number nobody said.
 - Same frames in every tab (4), as it is.
 - From the render change (2), the parts that are fixes rather than taste: tagging finals BT.709
   limited range like the cut, the same 320k sound on laptop renders as on GitHub, and the

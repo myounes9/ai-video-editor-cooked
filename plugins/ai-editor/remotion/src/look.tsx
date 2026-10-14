@@ -146,7 +146,7 @@ export const useFonts = (look: Look): Fonts => {
 };
 
 // ---------- texture ----------
-const lum = (c: string) => {
+export const lum = (c: string) => {
   const m = c.match(/^#([0-9a-f]{6})$/i);
   if (!m) return 0.5;
   const n = parseInt(m[1], 16);

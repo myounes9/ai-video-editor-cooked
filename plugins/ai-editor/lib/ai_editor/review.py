@@ -2782,7 +2782,7 @@ def demo():
     # fork: a rule in words about motion graphics turns graphics.kinetic on for this style and asks for a re-plan
     with contextlib.redirect_stdout(o):
         learn(scope="this-style", rule=[[str(c3["id"]), "visuals", "Motion graphics on the number beats"]])
-    assert "REPLAN: graphics.kinetic changed: run the visuals again" in o.getvalue(), o.getvalue()
+    assert "REPLAN: graphics.kinetic changed: run plan.py again: it runs the beat finder" in o.getvalue(), o.getvalue()
     assert taste.load_json(folder, count=False)["graphics"] == {"kinetic": True}
     # propose -> the page ticks two of three -> wait prints them -> done saves them into the edit's style
     props = [{"rule": "Captions one size smaller.", "section": "captions", "set": "captions.size_pct=4"},

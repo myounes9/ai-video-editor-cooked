@@ -107,9 +107,9 @@ LEGACY = ("logo", "flow")
 KINETIC = ("kinetic_number", "number_chain", "goal_bar", "step_build", "stat_stack", "kinetic_title", "cta_follow")
 KINETIC_JOIN_S = 1.0   # two beats of one step tracker closer than this are joined: it carries on, never leaves and comes back
 KINETIC_BRIDGE_S = 1.0  # a kinetic card this close to the next one (or a scene) holds until it: captions never flash back
-# The word captions fade out only under a number card: every kinetic type but kinetic_title (no number; the captions
-# keep running under it). kinetic/index.ts hidesCaptions reads the same; a card's props.hide_captions wins.
-HIDES_CAPTIONS = tuple(t for t in KINETIC if t != "kinetic_title")
+# The word captions fade out only under a number card: every kinetic type but kinetic_title and cta_follow (no number;
+# the captions keep running under them). kinetic/index.ts hidesCaptions reads the same; a card's props.hide_captions wins.
+HIDES_CAPTIONS = tuple(t for t in KINETIC if t not in ("kinetic_title", "cta_follow"))
 ANIMS = tuple(dict.fromkeys(TEMPLATES + OVERLAYS + LEGACY + KINETIC))
 # Where each card sits (references/motion.md "Layout per template"). "scene": a full-frame cut-away on
 # the look's ground. "split": the split layout's top panel. "box": a card over the footage, only for these.
@@ -149,7 +149,8 @@ def clean(text):
 
 
 def cased(text, mode):
-    text = clean(text)
+    # a figure keeps the point or comma between its digits: "3.5k" with it dropped read 35k, a number nobody said
+    text = "".join(re.findall(r"[\w'’-]+|(?<=\d)[.,](?=\d)", text))
     return text.lower() if mode == "lower" else text.upper() if mode == "upper" else text
 
 
@@ -322,6 +323,7 @@ ENTER_S = (0.15, 0.75)   # a card's entrance window: from just before its start 
 KINETIC_PUSH_S = 0.8     # StyleEdit.tsx PUSH_MIN_S: a zoom under a kinetic card's hold eases at least this long each way
 PUNCH_S = 0.16           # StyleEdit.tsx PUNCH_S: how long a punch zoom takes to travel
 MOVE_REST_S = 0.4        # the face holds still this long between a punch and a soft push under a kinetic card
+PUNCH_JOIN_MAX_S = 5.0   # two punches on plain footage join into one hold only up to this (check.py STATIC_S is 6 s)
 CREATOR_PUNCH_S = 0.1    # a copied creator's punch (measured as a one-frame step): 3 frames, under quality.py's snap line
 
 
@@ -333,7 +335,9 @@ def clear_entrances(zooms, cards):
     punch_between has already cut a punch back to the plain footage between cards where enough of it was left there;
     moving every edge out would gather the zooms of a video carried by kinetic cards onto the few card changes and
     join them into one long hold.
-    Two zooms closer than a punch's travel join into one (the out move would be cut short: a one-frame snap);
+    Two zooms closer than a punch's travel join into one (the out move would be cut short: a one-frame snap); two
+    punches on plain footage closer than that plus MOVE_REST_S join too, up to PUNCH_JOIN_MAX_S (past it the first goes
+    back out MOVE_REST_S before the next);
     a zoom that gets shorter than 0.5 s is dropped. Two moves at once compete for the eye, and the render check
     cannot time a card's landing while the footage under it jumps. A punch that would start and end under a scene
     starts as the scene leaves instead (the footage comes back punched in), so the scene does not eat it."""
@@ -350,6 +354,8 @@ def clear_entrances(zooms, cards):
         if any(a < z[k] < b for a, b in holds for k in ("start", "end")):
             z.update(kind="push", ease_s=max(z.get("ease_s") or 0, KINETIC_PUSH_S))
     out = []
+    # two punches on plain footage (no card up where the second starts)
+    punches = lambda a, b: a.get("kind") == b.get("kind") == "punch" and not any(c["start"] <= b["start"] <= c["end"] for c in cards)  # noqa: E731
     for z in sorted(zooms, key=lambda z: z["start"]):
         if z["end"] - z["start"] < 0.5:
             a0, b0 = orig[id(z)]
@@ -371,8 +377,15 @@ def clear_entrances(zooms, cards):
                 if z["end"] - z["start"] < 0.5:
                     continue
             out.append(z)
-        elif out and z["start"] < out[-1]["end"] + PUNCH_S:
-            out[-1]["end"] = max(out[-1]["end"], z["end"])
+        elif out and z["start"] < out[-1]["end"] + PUNCH_S + (MOVE_REST_S if punches(out[-1], z) else 0):
+            cut = round(z["start"] - PUNCH_S - MOVE_REST_S, 3)
+            if punches(out[-1], z) and z["end"] - out[-1]["start"] > PUNCH_JOIN_MAX_S and cut - out[-1]["start"] >= 0.5:
+                # two punches joined would hold one frame past check.py's static line: the first goes back out, the
+                # face rests MOVE_REST_S (an out straight into an in reads as a surge), the next punches in
+                out[-1]["end"] = cut
+                out.append(z)
+            else:
+                out[-1]["end"] = max(out[-1]["end"], z["end"])
         else:
             out.append(z)
     return out
@@ -692,8 +705,8 @@ def kinetic_on(style):
 
 def hides_captions(card):
     """The word captions fade out while this card is up (remotion/src/kinetic/index.ts hidesCaptions, StyleEdit.tsx):
-    a number card (HIDES_CAPTIONS: every kinetic type but kinetic_title) unless its props say "hide_captions": false;
-    any other card, a kinetic_title included, only when they say true."""
+    a number card (HIDES_CAPTIONS: every kinetic type but kinetic_title and cta_follow) unless its props say
+    "hide_captions": false; any other card, a kinetic_title or cta_follow included, only when they say true."""
     a = card.get("anim") or {}
     v = (a.get("props") or {}).get("hide_captions")
     return v if isinstance(v, bool) else a.get("type") in HIDES_CAPTIONS
@@ -2688,7 +2701,9 @@ def build(style, words, meta, images=(), aspect="auto", cuts=(), visuals=(), edi
     explicit = (layout or {}).get("mode") or (style.get("layout") or {}).get("mode")
     if lay.get("mode") == "split" and aspect != "9:16" and explicit:
         sys.exit("ERROR: the split layout is vertical only; use --layout overlay for 16:9")
-    split_ok = aspect == "9:16" and explicit != "overlay"
+    # kinetic titles float over the full-frame speaker, so with them on a card asking for the panel is a full-frame
+    # scene instead (references/kinetic.md "Beside a capture"); only a split layout set by hand opens it
+    split_ok = aspect == "9:16" and explicit != "overlay" and (explicit == "split" or not kinetic_on(style))
     seam = lay["seam"]
     split_y = min(seam + SPLIT_CAP_BELOW, 100 - bottom - 4)
     split_now = split_ok and (explicit == "split")
@@ -3330,11 +3345,17 @@ def demo():
     assert not set(KINETIC) & set(TYPE_ONLY) and all(t in ANIMS for t in KINETIC)
     assert kc["anim"]["props"]["band"] == KIN_BAND, kc   # no face.json: the renderer's own band, written out
     assert kp["graphics_budget"] == {"per_min": 20, "max": 2}, kp["graphics_budget"]
-    # the captions hide only under a number card: every kinetic type but kinetic_title (the captions carry its line);
-    # a card's own hide_captions wins either way
+    # a picture asking for the split panel becomes a full-frame scene with kinetic titles on (they float over the
+    # full-frame speaker), unless the split layout was set by hand
+    ks = build({**style, "graphics": {"kinetic": True, "kinetic_per_min": 20}}, words, {**vm, "width": 1080, "height": 1920},
+               [{"src": "images/c.png", "word": "every", "nth": 1, "layout": "split"}], "9:16", visuals=kv)
+    assert "layout" not in ks and any(c.get("layout") == "scene" for c in ks["cards"]) \
+        and any(kind_of(c) == "number_chain" for c in ks["cards"]), ks["cards"]
+    # the captions hide only under a number card: every kinetic type but kinetic_title and cta_follow (the captions
+    # carry their line); a card's own hide_captions wins either way
     assert hides_captions(kc) and not hides_captions({"anim": {"type": "number_chain", "props": {"hide_captions": False}}}) \
         and hides_captions({"anim": {"type": "flow", "props": {"hide_captions": True}}}) and not hides_captions({"src": "images/c.png"})
-    assert all(hides_captions({"anim": {"type": t, "props": {}}}) for t in KINETIC if t != "kinetic_title")
+    assert all(hides_captions({"anim": {"type": t, "props": {}}}) == (t not in ("kinetic_title", "cta_follow")) for t in KINETIC)
     assert not hides_captions({"anim": {"type": "kinetic_title", "props": {}}}) \
         and hides_captions({"anim": {"type": "kinetic_title", "props": {"hide_captions": True}}})
     kq = lambda a, b, t="kinetic_number": {"start": a, "end": b, "anim": {"type": t, "props": {}}}  # noqa: E731
@@ -3475,12 +3496,15 @@ def demo():
     assert [m["at"] for m in mk["marks"]] == [round(zw["start"] - mk["start"], 3), 2.0, 0.8] and "at_word" not in mk["marks"][0], mk
     assert pick_motion({"pace": {"median_shot_s": 1.0}}) == "punchy" and pick_motion({"motion": {"personality": "calm"}}) == "calm"
     assert pick_motion({"pace": {"median_shot_s": 3.98}}) == "smooth" and pick_motion({}) == "smooth"
+    cw = [cased(x, "sentence") for x in ("3.5k", "1,200.", "$4.5k,", "end.", "don't")]
+    assert cw == ["3.5k", "1,200", "4.5k", "end", "don't"], cw   # a caption figure keeps its point
+    assert cased("3.5k", "upper") == "3.5K" and cased("well,", "sentence") == "well"
     em = mark_emph([{"words": [{"text": "so", "start": 0, "end": 0.1}, {"text": "really", "start": 0.1, "end": 0.6},
                                {"text": "fast", "start": 0.6, "end": 0.75}]}])
     assert em[0]["words"][1].get("emph") and not em[0]["words"][0].get("emph")
     # fork, opt-in emphasis captions: every spoken number (split over two 2-word pages, marked on both), a name, and
     # a stressed word; a lone "one" is no figure; off (no emphasis_scale) a 2-word page keeps upstream's rule
-    said = ("We baked two hundred and fifty croissants. One of them burned. Then Sourdough sold out. "
+    said = ("We baked two hundred and forty croissants. One of them burned. Then Sourdough sold out. "
             "Honestly, it was really just wonderful.").split()
     tk, t = [], 0.0
     for x in said:
@@ -3489,7 +3513,7 @@ def demo():
         t += d + 0.05
     on = lambda c: [w["text"] for p in c for w in p["words"] if w.get("emph")]
     em2 = mark_emph(chunk_captions(tk, 2, "sentence"), {"emphasis_scale": 1.1}, tk)
-    assert on(em2) == ["two", "hundred", "and", "fifty", "Sourdough", "wonderful"], on(em2)
+    assert on(em2) == ["two", "hundred", "and", "forty", "Sourdough", "wonderful"], on(em2)
     assert [w["text"] for w in em2[1]["words"]] == ["two", "hundred"] and em2[2]["words"][0]["text"] == "and"
     assert not on(mark_emph(chunk_captions(tk, 2, "sentence"), {"emphasis_color": "#FFD400"}, tk))
     assert emph_on({"emphasis_scale": 1}) and not emph_on({}) and not emph_on(None)
@@ -3594,6 +3618,13 @@ def demo():
     bx = clear_entrances([zp(24.0, 28.5)], [{"start": 28.2, "end": 30.0, "layout": "box"}])
     assert bx[0]["end"] + PUNCH_S <= 28.2 - ENTER_S[0] + 1e-6, bx
     assert len(clear_entrances([zp(1.0, 3.0), zp(3.1, 5.0)], [])) == 1
+    # ... unless the joined hold would be static past PUNCH_JOIN_MAX_S on plain footage: out, a rest, in again
+    lj = clear_entrances([zp(45.7, 47.26), zp(47.26, 49.8), zp(49.8, 52.41)], [])
+    assert [(z["start"], z["end"]) for z in lj] == [(45.7, 49.24), (49.8, 52.41)], lj
+    # an out straight into an in (0.2 s apart) surges: joined when short, else a rest between them
+    assert [(z["start"], z["end"]) for z in clear_entrances([zp(1.0, 3.0), zp(3.2, 5.0)], [])] == [(1.0, 5.0)]
+    rz = clear_entrances([zp(49.8, 52.41), zp(52.62, 55.03)], [])
+    assert [(z["start"], z["end"]) for z in rz] == [(49.8, 52.06), (52.62, 55.03)], rz
     # a punch that a scene would swallow lands as the scene leaves
     assert [(z["start"], z["end"]) for z in clear_entrances([zp(10.0, 11.4)], [{"start": 10.1, "end": 12.8, "layout": "scene"}])] == [(13.55, 14.95)]
     with tempfile.TemporaryDirectory() as td:   # an audio clip: its cover moves on sentence starts, no zooms

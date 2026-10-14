@@ -25,7 +25,7 @@ import { Sfx } from "./Sfx";
 import { TextItem, Texts } from "./Texts";
 import { SceneCard, SceneView, TR_S, Transition, footageX, phases, sceneBox, sceneGrounds } from "./Scene";
 import { captionFade, groundCovers } from "./ground";
-import { Ground, onGround } from "./look";
+import { Ground, lum, onGround } from "./look";
 import { KINETIC, hidesCaptions } from "./kinetic";
 import { BoardFrame, BoardLayout } from "./Board";
 
@@ -408,7 +408,9 @@ const sceneCaptions = (style: CaptionStyle, chunks: Chunk[], cards: Card[], t: n
   // go under it while the scene is up, in the ground's ink
   const [, by, , bh] = sceneBox(W, H);
   const y = capY > by - 2 && capY < by + bh + 2 ? by + bh + 7 : capY;
-  return { ...style, color: g.ink, highlight_color: g.ink, emphasis_color: g.ink, stroke: false, box: false, flat: true, y_pct: y };
+  // fork: the emphasis captions (emphasis_scale set) keep their colour on a dark ground, where it still reads
+  const em = style.emphasis_scale != null && style.emphasis_color && lum(g.ground) < 0.25 ? style.emphasis_color : g.ink;
+  return { ...style, color: g.ink, highlight_color: g.ink, emphasis_color: em, stroke: false, box: false, flat: true, y_pct: y };
 };
 
 /** The letterbox layout: plain on purpose (no zoom, no card styling), the title and the photo hard on and off. */

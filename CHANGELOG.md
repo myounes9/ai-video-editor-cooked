@@ -6,6 +6,19 @@ What changed for every user, newest first.
 
 Fork base: upstream ai-editor 2.7.8 (the manifests read 2.7.8-cooked.1). The entries below are the fork's own, not released yet.
 
+- Kinetic titles, automatic end to end (fork, opt-in). The beat finder, plan.py and the visuals step now count the
+  graphics one way: `kinetic_beats.py` takes its rate and count from `budget.py` (the style page's `cards.per_min` no
+  longer caps it) and marks each beat's `strength` and the hook, so plan.py keeps the same beats, a tracker's beats
+  standing or falling together; route.py's `want` marks only the room the budget leaves after the number beats and
+  the edit's own pictures (it marked her full card rate on top before), never a `[kinetic]` line, and gives no title
+  hint for the hook. With kinetic titles on, a picture asking for the split panel becomes a full-frame scene instead
+  of opening the panel, which dropped every kinetic card. Fixes found on a real edit: a caption figure keeps its
+  decimal point ("3.5k" was drawn "35k"); two punches on plain footage join into one hold only up to 5 s (a still
+  stretch of over 6 s was left after the last card); over a dark scene ground the emphasis captions keep
+  their colour; `cta_follow`, like `kinetic_title`, keeps the word captions (only number cards hide them); the style
+  check counts kinetic cards as the creator's text cards; `REPLAN:` for the kinetic settings names plan.py.
+  Tests: kinetic_beats.py, budget.py, route.py, plan.py and style_check.py demo asserts.
+
 - Kinetic titles find their own number beats (fork, opt-in). With `graphics.kinetic` on, nobody writes the beats any
   more: plan.py runs the new `kinetic_beats.py` before it reads visuals.json, and it adds the number beats from the
   cut's words (numbers.py spans, by sentence and clause): the hook figure with its duration as the sub-line, a chain
@@ -44,7 +57,7 @@ Fork base: upstream ai-editor 2.7.8 (the manifests read 2.7.8-cooked.1). The ent
   `captions.emphasis_color` and `captions.emphasis_scale`. `taste.py report` and the style's skill show what each
   rule sets, it counts as applied, and `review.py learn` / `taste.py add` print a `REPLAN:` line naming what to run
   again so the note shows on this video. Emphasis captions, on with `captions.emphasis_scale` (upstream ignores it):
-  plan.py marks every spoken number (all its words, read by numbers.py, so "two hundred | and fifty" over two pages
+  plan.py marks every spoken number (all its words, read by numbers.py, so "two hundred | and forty" over two pages
   is marked on both) and the take's key words (a name, else the word held longest for its length, one a sentence),
   on pages of any length, two-word pages included; the renderer draws them in the emphasis colour, one weight
   heavier and about 1.1x through a transform, fitting the line with room for it, so no page re-wraps or changes

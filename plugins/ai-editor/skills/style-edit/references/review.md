@@ -165,7 +165,7 @@ hand-edit plan.json alone):
 | quieter / louder music | `sfx.py music edits/<name> --under-db N` | plan, render |
 | a motion clip: colour, words | motion skill `note` | plan, render |
 | the title | the `title` beat in visuals.json (`plan.py beat`) | plan, render |
-| add motion graphics, kinetic number titles, a graphic for the hook's number (fork) | the taste setting `graphics.kinetic=true` at the note's scope (a rule in those words sets it; `taste.py map`), `graphics.kinetic_per_min` for fewer / more | the `REPLAN:` line: visuals (the beat finder places the kinetic beats), plan, stills, render |
+| add motion graphics, kinetic number titles, a graphic for the hook's number (fork) | the taste setting `graphics.kinetic=true` at the note's scope (a rule in those words sets it; `taste.py map`), `graphics.kinetic_per_min` for fewer / more | the `REPLAN:` line: plan (its beat finder places the kinetic beats), stills, render |
 | key words or numbers in yellow, bigger (fork) | `captions.emphasis_color`, `captions.emphasis_scale` (kinetic.md "From the user's rules") | plan, stills, render |
 
 Every `--reply` is one plain line saying what you did ("Swapped it for the notion.so page"), never "done".

@@ -29,11 +29,12 @@ export const PROBES: Record<string, Prober> = {
   kinetic_title: titleProbe, cta_follow: ctaProbe,
 };
 
-/** Does this card hide the word captions while it is up? A number card (every kinetic format but kinetic_title, which
- *  has no number: the captions keep running under it) does unless its props say hide_captions: false; any other card,
- *  a kinetic_title included, only when its props say hide_captions: true. plan.py hides_captions reads the same. */
+/** Does this card hide the word captions while it is up? A number card (every kinetic format but kinetic_title and
+ *  cta_follow, which have no number: the captions keep running under them) does unless its props say
+ *  hide_captions: false; any other card, those two included, only when its props say hide_captions: true.
+ *  plan.py hides_captions reads the same. */
 export const hidesCaptions = (anim?: { type?: string; props?: Record<string, unknown> }) => {
   if (!anim?.type) return false;
   const v = anim.props?.hide_captions;
-  return typeof v === "boolean" ? v : anim.type in KINETIC && anim.type !== "kinetic_title";
+  return typeof v === "boolean" ? v : anim.type in KINETIC && anim.type !== "kinetic_title" && anim.type !== "cta_follow";
 };

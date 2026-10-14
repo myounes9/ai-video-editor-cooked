@@ -120,7 +120,8 @@ def check(plan, style):
                     rate * dur / 60 else "drop the weakest cards"))
     kinds = {k: v for k, v in (g.get("kinds") or {}).items() if v}
     if kinds and cards:
-        have = {k for c in cards for k in CARD_KIND.get(card_kind(c), ())}
+        # kinetic titles on: a kinetic card is words over the footage, her text cards' place in the mix
+        have = {k for c in cards for k in CARD_KIND.get(card_kind(c), ()) + (("text card",) if kin and card_kind(c) in KINETIC else ())}
         miss = [k for k, v in kinds.items() if v >= 20 and k not in have]
         if miss:
             out.append((f"no {' or '.join(miss)} cards; {h}: " + ", ".join(f"{k} {v}%" for k, v in kinds.items()),
@@ -203,6 +204,9 @@ def demo():
     pushed = {**kp, "zooms": [{"kind": "punch"}] * 2 + [{"kind": "push", "start": 1, "end": 3}]}
     kp["cards"][-1].update(start=0.5, end=4)
     assert check(pushed, ks) == [] and any("zoom kind push" in w for w, _ in check(pushed, style)), check(pushed, ks)
+    tc = {**ks, "graphics": {**ks["graphics"], "kinds": {"text card": 40, "photo": 40}}}
+    assert not any(w.startswith("no text card") for w, _ in check(kp, tc)), check(kp, tc)   # kinetic cards are her text cards
+    assert any(w.startswith("no text card") for w, _ in check({**kp, "cards": plan["cards"]}, tc))
     assert zone(kn("goal_bar")) == "top" and zone({"anim": {"type": "goal_bar", "props": {}}, "box": [0, 0, 100, 100]}) == "top"
     print("style_check ok")
 

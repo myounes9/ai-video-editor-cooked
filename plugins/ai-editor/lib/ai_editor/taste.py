@@ -181,7 +181,9 @@ def parse(v):
 # over (load_json), so a style with those rules gets the behaviour with no value set by hand.
 KEY_YELLOW = "#FFD400"     # the kinetic family's key colour (remotion/src/kinetic/tokens.ts)
 EMPHASIS_SCALE = 1.1       # Captions.tsx emphasis_scale: a stressed word about 1.1x, through a transform
-KINETIC_RATE = 8           # graphics.kinetic_per_min when unset: graphics a minute in total, captures included
+sys.path.insert(1, str(Path(__file__).resolve().parent.parent))
+from ai_editor import budget  # noqa: E402
+KINETIC_RATE = int(budget.DEFAULT_PER_MIN)   # graphics.kinetic_per_min when unset: graphics a minute in all (budget.py)
 COLOURS = {"yellow": KEY_YELLOW, "white": "#FFFFFF", "orange": "#FF9500", "red": "#FF3B30", "green": "#34C759",
            "blue": "#0A84FF", "pink": "#FF2D55"}
 _KINETIC = (r"motion[- ]graphics?|kinetic|animated (?:motion |number |key )?(?:graphics?|titles?|numbers?|figures?|callouts?|text)"
@@ -239,8 +241,9 @@ def mapped(r):
 # What a changed setting needs done again, so a learned rule shows on this video too (review.py learn prints it).
 REPLAN = {"graphics.kinetic": "beats", "graphics.kinetic_per_min": "beats", "captions.emphasis_color": "plan",
           "captions.emphasis_scale": "plan"}
-REPLAN_STEPS = {"beats": "the visuals again: route.py beats and visuals.json, where the beat finder places the kinetic beats "
-                         "(style-edit references/kinetic.md), then plan.py, edit.py stills and the render",
+REPLAN_STEPS = {"beats": "plan.py again: it runs the beat finder (kinetic_beats.py), which places the kinetic beats in "
+                         "visuals.json around the real cards (route.py beats marks their lines [kinetic] for the visuals "
+                         "step; style-edit references/kinetic.md), then edit.py stills and the render",
                 "plan": "plan.py (it marks the caption words), edit.py stills and the render"}
 
 
@@ -689,7 +692,7 @@ def demo_words(d, sp, eb, ed):
     assert m("stressed words #00AAFF, same size", "captions") == {"captions.emphasis_color": "#00AAFF", "captions.emphasis_scale": 1}
     assert m("yellow kinetic number titles over the head") == {"graphics.kinetic": True}   # a title's colour, not the captions'
     assert m("Captions bigger", "captions") == {} and m("fewer zooms") == {} and m("cut the um at 0:12") == {}
-    assert replan(["graphics.kinetic"]).startswith("REPLAN: graphics.kinetic changed: run the visuals again")
+    assert replan(["graphics.kinetic"]).startswith("REPLAN: graphics.kinetic changed: run plan.py again: it runs the beat finder")
     assert "plan.py" in replan(["captions.emphasis_scale"]) and replan(["captions.size_pct"]) == ""
     # a word rule on a style: its edits get the settings, other edits do not; counted as applied
     st, r = add("visuals", "Add motion graphics on the number beats", scope="style:alice", edit=eb, style=sp)

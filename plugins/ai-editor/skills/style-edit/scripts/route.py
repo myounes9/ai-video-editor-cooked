@@ -14,7 +14,9 @@ under the user's own cards cap), her count for this length is printed and that m
 (want()): named ones first, then the longest, spread out. Claude gives each a real card at her place in the frame.
 
 kinetic titles (style.json graphics.kinetic): the sentences kinetic_beats.py gives a number beat get "kinetic": <type>,
-printed [kinetic]; plan.py places those beats itself, so Claude leaves those lines to them.
+printed [kinetic]; plan.py places those beats itself, so Claude leaves those lines to them. Her card rate then gives
+way to the graphics budget (lib/ai_editor/budget.py, graphics.kinetic_per_min): "want" marks only the room it leaves
+once the number beats and the user's own cards (images.json, visuals.json) are counted, never a [kinetic] line.
 
 logo-pack: when edits/NAME/logos.json exists, its names count as named things and each sentence gets "logos"
 (the brands whose files logo-pack checked, for a `logo` beat's "brand"); two or more in one sentence print a
@@ -110,24 +112,29 @@ def prefer(style):
 OFF_SCENE_S = 3.0   # a cut-away's length, for counting how many reach a b-roll-led creator's off-screen share
 
 
-def want(beats, style):
+def want(beats, style, room=None):
     """Marks "want": true on as many beats as the creator shows cards in a video this long (plan.card_rate: her
     graphics.per_min under the user's own cards cap),
     named sentences first, then the longest, never two closer than half her mean gap, none ending in the first
-    second. Returns (n wanted, her per_min); (0, None) when the style copies no card rate."""
+    second. Returns (n wanted, her per_min); (0, None) when the style copies no card rate.
+    room (kinetic titles on): the graphics budget's room left (budget.remaining), at budget.per_min's spacing; a
+    sentence with a number beat ("kinetic") is never wanted."""
     from plan import card_rate
     pm = card_rate(style or {})
+    if room is not None:
+        from ai_editor import budget
+        pm = budget.per_min(style)
     if not pm or not beats:
         return 0, None
-    n = max(1, round(beats[-1]["end"] / 60 * pm))
+    n = max(1, round(beats[-1]["end"] / 60 * pm)) if room is None else room
     gap = 30 / pm
     from plan import off_screen
-    if off_screen(style or {}) and not (style.get("cards") or {}).get("per_min"):   # a b-roll-led creator (the user's cap wins): enough cut-aways of OFF_SCENE_S to reach her off-screen share
+    if room is None and off_screen(style or {}) and not (style.get("cards") or {}).get("per_min"):   # a b-roll-led creator (the user's cap wins): enough cut-aways of OFF_SCENE_S to reach her off-screen share
         away = 1 - style["face"]["present_pct"] / 100
         n, gap = max(n, round(beats[-1]["end"] * away / OFF_SCENE_S)), min(gap, 2.0)
     picked = []
     for b in sorted(beats, key=lambda b: (not b.get("names"), -(b["end"] - b["start"]), b["start"])):
-        if len(picked) < n and b["end"] > 1.0 and all(abs(b["start"] - x["start"]) >= gap for x in picked):
+        if len(picked) < n and b["end"] > 1.0 and not b.get("kinetic") and all(abs(b["start"] - x["start"]) >= gap for x in picked):
             picked.append(b)
     for b in beats:
         b["want"] = b in picked
@@ -222,6 +229,7 @@ def demo():
     hs = style_hints({"hook": {"title_on_screen_pct": 80}, "face": {"present_pct": 44}})
     assert len(hs) == 2 and "title" in hs[0] and "56%" in hs[1], hs
     assert style_hints({"hook": {"title_on_screen_pct": 20}, "face": {"present_pct": 95}}) == []
+    assert style_hints({"hook": {"title_on_screen_pct": 80}, "graphics": {"kinetic": True}}) == []
     assert style_hints({"hook": {"title_on_screen_pct": 80}, "blend": {"take": ["captions"]}}) == []
     # kinetic titles on: the sentence with a number beat is marked, so the agent leaves it to plan.py
     kw = [{"text": t, "start": i * 0.4, "end": i * 0.4 + 0.3} for i, t in enumerate(
@@ -229,16 +237,23 @@ def demo():
     kb = sentences(kw)
     assert mark_kinetic(kb, kw, {"graphics": {"kinetic": True}}) == 1 and [b["kinetic"] for b in kb] == ["kinetic_number", None, None]
     assert mark_kinetic(kb, kw, {"graphics": {"kinetic": True, "kinetic_auto": False}}) is None
+    # ... and the budget, not her rate, says how many more cards: 8 a minute over 30 s is 4, one number beat and one
+    # photo of the user's counted, so 2 wanted, never the [kinetic] line
+    ks = {"graphics": {"kinetic": True, "per_min": 20}}
+    wb[3]["kinetic"] = "kinetic_number"
+    assert want(wb, ks, room=2) == (2, 8.0) and not wb[3]["want"] and sum(b["want"] for b in wb) == 2, wb
+    assert want(wb, ks, room=0) == (0, 8.0) and not any(b["want"] for b in wb)
     print("route ok")
 
 
-def mark_kinetic(beats, words, style):
+def mark_kinetic(beats, words, style, visuals=(), images=()):
     """With kinetic titles on (and graphics.kinetic_auto not false): each sentence kinetic_beats.py gives a number beat
-    gets "kinetic": its type (plan.py places them itself). Returns how many, or None when off."""
+    gets "kinetic": its type (plan.py places them itself, around the edit's own cards: visuals, images). Returns how
+    many, or None when off."""
     import kinetic_beats
     if not kinetic_beats.auto_on(style or {}):
         return None
-    kept = kinetic_beats.find(words, style)[0]
+    kept = kinetic_beats.find(words, style, [v for v in visuals if v.get("auto") != kinetic_beats.AUTO], images)[0]
     for b in beats:
         b["kinetic"] = next((c.type for c in kept if b["start"] <= c.s + kinetic_beats.LEAD_S <= b["end"] + 0.05), None)
     return len(kept)
@@ -252,7 +267,8 @@ def style_hints(style):
     if not took(style, "graphics"):
         return out
     pct = (style.get("hook") or {}).get("title_on_screen_pct")
-    if pct and pct >= 50:
+    from plan import kinetic_on
+    if pct and pct >= 50 and not kinetic_on(style):   # kinetic titles on: the hook's figure is the opening graphic
         out.append(f"the creator opens with words on screen in {pct}% of her videos: add a \"title\" beat at the open, "
                    "a few of the speaker's own words of the hook (shapes.md)")
     face = (style.get("face") or {}).get("present_pct")
@@ -300,17 +316,29 @@ def main():
         pref = prefer(style)
         if pref:
             print("the creator's mix: " + ", ".join(f"{k} {v:.0%}" for k, v in sorted(pref.items(), key=lambda kv: -kv[1])))
-        n, pm = want(beats, style)
-        if n:
+        load = lambda n: json.loads((edit / n).read_text(encoding="utf-8")) if (edit / n).exists() else []  # noqa: E731
+        vis, imgs = load("visuals.json"), load("images.json")
+        nk = mark_kinetic(beats, words, style, vis, imgs)
+        room = None
+        if nk is not None:   # one graphics budget: the number beats and the user's own cards first (budget.py)
+            import kinetic_beats
+            from ai_editor import budget
+            dur = words[-1]["end"] if words else 0
+            mine = len(kinetic_beats.real_cards(kinetic_beats.Take(words), [v for v in vis if v.get("auto") != kinetic_beats.AUTO],
+                                                imgs, style, dur))
+            room = budget.remaining(style, dur, nk + mine)
+            print(f"kinetic titles: plan.py places the number beats itself (kinetic_beats.py): {nk} here, marked "
+                  "[kinetic] below. Give those lines no card of your own unless a real page shows the figure (it then takes "
+                  "the beat's place); never write kinetic beats by hand")
+            print(f"the graphics budget: {budget.per_min(style):g} a minute in all (graphics.kinetic_per_min), "
+                  f"{budget.allowance(style, dur)} here: {nk} number beats and {mine} of the edit's own cards, so room for "
+                  f"{room} more" + (" (\"want\" marks them)" if room else ": add no other card"))
+        n, pm = want(beats, style, room)
+        if n and room is None:
             print(f"the creator's rate: {pm:g} cards a minute, so {n} in this video; \"want\" marks the sentences to give one"
                   + (f", placed at the {where(style)}" if where(style) else "") + " (SKILL.md step 3, \"Pacing\")")
         for line in style_hints(style):
             print(line)
-        nk = mark_kinetic(beats, words, style)
-        if nk is not None:
-            print(f"kinetic titles: plan.py places the number beats itself (kinetic_beats.py): {nk} here, marked "
-                  "[kinetic] below. Give those lines no card of your own unless a real page shows the figure (it then takes "
-                  "the beat's place); never write kinetic beats by hand")
         for b in beats:
             b["pick"] = None   # Claude routes each sentence
             b["motion"] = motion_kind(b["text"])   # a hint: the motion skill builds a clip where the pick is a moving format

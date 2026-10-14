@@ -35,8 +35,10 @@ before it reads visuals.json, so every new video gets its number beats with nobo
    same tracker joins instead); never over a real card, except a stat_stack beside a capture.
 
 Settings (style.json, taste.json): graphics.kinetic (on), graphics.kinetic_per_min (KINETIC_PER_MIN, every graphic a
-minute, real ones included), graphics.kinetic_auto (false: only hand-written kinetic beats). The user's cards.per_min
-caps the rate (plan.py thin_cards would cut evenly past it); cards.on false places none.
+minute, real ones included), graphics.kinetic_auto (false: only hand-written kinetic beats). The rate and the count
+are lib/ai_editor/budget.py's, the same plan.py budget_cards keeps to: it wins over the style page's cards.per_min,
+and cards.on false places none. Each beat carries its "strength" (its score, 0-1; a tracker's beats share their best)
+and the hook "hook": true, so plan.py keeps the same ones when it counts the cards again.
 
 refresh() keeps its beats ("auto": "kinetic" in visuals.json) while the cut's words, the real cards and the rate stay
 the same (kinetic.auto.json holds their fingerprint), so a review note's change to one survives the next plan; any of
@@ -52,10 +54,10 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 sys.path.insert(1, str(HERE.parents[2] / "lib"))
-from ai_editor import numbers  # noqa: E402
+from ai_editor import budget, numbers  # noqa: E402
 
 VERSION = 1            # bump when the rules change: the fingerprint changes and every edit's beats are found again
-KINETIC_PER_MIN = 8    # graphics a minute in all (real captures and screenshots included), graphics.kinetic_per_min
+KINETIC_PER_MIN = budget.DEFAULT_PER_MIN   # graphics a minute in all (real ones included), graphics.kinetic_per_min
 GAP_S = 1.0            # plain footage kept between two kinetic cards (plan.py bridges any closer than its 1 s)
 REAL_GAP_S = 0.5       # and at the least beside a real card (GAP_S when the beat's hold allows it)
 LEAD_S = 0.1           # plan.CARD_LEAD_S: a card starts this long before its word
@@ -114,7 +116,7 @@ def low(text):
 
 
 def shown(text):
-    """A word as said, for the screen: no punctuation round it, its own case ("SaaS")."""
+    """A word as said, for the screen: no punctuation round it, its own case ("iPhone")."""
     return re.sub(r"^[^\w€$£]+|[^\w%]+$", "", text.replace("’", "'"))
 
 
@@ -207,7 +209,7 @@ def figure_text(take, sp):
 
 
 def currency(take, sp):
-    """The sign of the currency said with a money figure (in the word, or the word after or before it); "" for MRR."""
+    """The sign of the currency said with a money figure (in the word, or the word after or before it); "" for a bare figure."""
     for i in range(sp["i0"], sp["i1"] + 1):
         m = re.search(r"[€$£]", take.w[i]["text"])
         if m:
@@ -311,8 +313,12 @@ class Card:
                 for v in node.values():
                     fill(v)
         fill(props)
-        return {"word": shown(tk.w[self.i0]["text"]), "nth": tk.nth(self.i0), "kind": "anim", "type": self.type,
-                "hold_s": round(self.e - self.s, 2), "props": props, "auto": AUTO}
+        out = {"word": shown(tk.w[self.i0]["text"]), "nth": tk.nth(self.i0), "kind": "anim", "type": self.type,
+               "hold_s": round(self.e - self.s, 2), "props": props, "auto": AUTO,
+               "strength": round(min(1.0, max(0.0, getattr(self, "strength", self.score) / 100)), 2)}
+        if self.cls == "hook":
+            out["hook"] = True
+        return out
 
     def line(self):
         said = " ".join(self.take.w[i]["text"] for i in range(self.i0, min(len(self.take.w), self.i0 + 8)))
@@ -649,15 +655,9 @@ def real_cards(take, visuals, images, style, duration):
 
 
 def rate(style):
-    """Graphics a minute in all: graphics.kinetic_per_min (KINETIC_PER_MIN), under the user's cards.per_min; 0 with
-    cards off."""
-    g = style.get("graphics") or {}
-    cfg = style.get("cards") or {}
-    if cfg.get("on") is False:
-        return 0.0
-    pm = g.get("kinetic_per_min")
-    pm = KINETIC_PER_MIN if pm is None else float(pm)
-    return min(pm, float(cfg["per_min"])) if cfg.get("per_min") is not None else pm
+    """Graphics a minute in all: budget.per_min, graphics.kinetic_per_min (KINETIC_PER_MIN unset), over the style
+    page's cards.per_min; 0 with cards off. Read as on: this runs only once the style opted in."""
+    return budget.per_min({**style, "graphics": {**(style.get("graphics") or {}), "kinetic": True}})
 
 
 def select(cands, real, duration, per_min):
@@ -667,11 +667,11 @@ def select(cands, real, duration, per_min):
         for c in cands:
             c.drop = "cards are off"
         return []
-    total = round(per_min * duration / 60)
-    budget = max(0, total - len(real))
+    total = budget.count(per_min, duration)
+    room = max(0, total - len(real))
     kept = []
     for c in sorted(cands, key=lambda c: (-c.score, c.s, c.cls)):
-        if c.cls != "hook" and len(kept) >= budget:
+        if c.cls != "hook" and len(kept) >= room:
             c.drop = f"over the budget ({total} graphics at {per_min:g} a minute, {len(real)} already placed)"
             continue
         if c.cls == "tracker" and not any(o.tracker == c.tracker and o.cls == "fill" for o in kept):
@@ -695,6 +695,8 @@ def select(cands, real, duration, per_min):
         if not c.drop:
             kept.append(c)
     kept.sort(key=lambda c: c.s)
+    for c in kept:   # a tracker's beats stand or fall together when plan.py counts the cards (budget.pick)
+        c.strength = max(o.score for o in kept if o is c or (c.tracker and o.tracker == c.tracker))
     walls = sorted([(c.s, c) for c in kept] + [(s, None) for s, e, kind, pic in real], key=lambda x: x[0])
     for c in kept:
         e, joined = c.e_want, None
@@ -796,13 +798,13 @@ def timed(text, t0=0.0, step=0.32):
     return out
 
 
-BAKERY = ("We made 4.5k dollars in three and a half weeks, and here's everything we did to get there. So we bake two main "
+BAKERY = ("We made 4.5k dollars in three and a half weeks, and this is how we did it. So we bake two main "
           "kinds of bread. One is a sourdough that we launched last month, and the other is a seeded rye. To find buyers we "
-          "printed three hundred and forty flyers. We got six cafe tastings, and we were able to sign one. And right now we "
-          "are at forty percent of our 20k goal, and we need another kind of bread to get there.")
+          "printed three hundred and forty flyers. We got six cafe tastings, and we managed to sign one. And right now we "
+          "are at forty percent of our 20k goal, and we need another kind of bread for it.")
 GYM = ("This year our little gym grew a lot. Right now we have eighty members, twelve coaches, and 9.2k dollars in "
-       "monthly revenue. To get there I sent a hundred and twenty emails to local offices and got ignored every single "
-       "time. Then we tested eighteen different workouts with our members. So come and train with us.")
+       "monthly revenue. To get there I sent a hundred and twenty emails to local offices and got ignored by all of "
+       "them. Then we tested eighteen different workouts with our members. So come and train with us.")
 PODCAST = ("Our podcast hit 50k downloads in six months. So here's the plan. Step one, we record the episode. Step two, we "
            "cut the clips. Step three, we post every clip. Last week a sponsor paid us 2.5k dollars for one episode. "
            "That is it.")
@@ -887,7 +889,11 @@ def demo():
     assert [c.cls for c in k8] == ["hook", "fill", "chain", "goal"], [c.line() for c in k8]
     assert [c.cls for c in find(bake, {"graphics": {"kinetic": True, "kinetic_per_min": 1}})[0]] == ["hook"], "the hook stays"
     assert find(bake, {"graphics": {"kinetic": True}, "cards": {"on": False}})[0] == [], "cards off: none"
-    assert len(find(bake, {**many, "cards": {"per_min": 4}})[0]) == 2, "the user's cards cap wins"
+    assert [c.line() for c in find(bake, {**many, "cards": {"per_min": 4}})[0]] == [c.line() for c in find(bake, many)[0]], \
+        "the graphics budget wins over the style page's cards.per_min (budget.py)"
+    sb = beats(bake, {"graphics": {"kinetic": True}})
+    assert sb[0]["hook"] is True and sb[0]["strength"] == 1.0 and not any(b.get("hook") for b in sb[1:]), sb
+    assert len({b["strength"] for b in sb if b["type"] == "step_build"}) == 1, "a tracker's beats share their strength"
     # plain footage between cards: GAP_S between any two kept, except the next beat of one tracker, which joins
     for ws in (bake, gym, pod, gar):
         ks = find(ws, {"graphics": {"kinetic": True, "kinetic_per_min": 60}})[0]
@@ -916,10 +922,15 @@ def demo_plan(bake):
     """plan.py reads the beats as written: each lands on its word, every part timed, in the kinetic lane."""
     import plan
     meta = {"video": "cut.mp4", "width": 1080, "height": 1920, "fps": 30, "duration": bake[-1]["end"] + 0.5}
-    vis = beats(bake, {"graphics": {"kinetic": True, "kinetic_per_min": 30}})
-    p = plan.build({"graphics": {"kinetic": True}, "captions": {"words_per_caption": 3}}, bake, meta, visuals=vis)
+    st = {"graphics": {"kinetic": True, "kinetic_per_min": 30}}
+    vis = beats(bake, st)
+    p = plan.build({**st, "captions": {"words_per_caption": 3}}, bake, meta, visuals=vis)
     kc = [c for c in p["cards"] if c.get("lane") == "kinetic"]
     assert len(kc) == len(vis) and p["kinetic"] is True, (len(kc), len(vis))
+    # at the default rate plan.py's own count (budget.py) keeps exactly the beats the finder chose
+    v8 = beats(bake, {"graphics": {"kinetic": True}})
+    p8 = plan.build({"graphics": {"kinetic": True}, "captions": {"words_per_caption": 3}}, bake, meta, visuals=v8)
+    assert [c["trigger_word"] for c in p8["cards"]] == [b["word"] for b in v8], (p8["cards"], v8)
     first = {c["anim"]["type"]: c for c in reversed(kc)}
     assert first["number_chain"]["anim"]["props"]["items"][2]["label_at"] > 0, first["number_chain"]
     gb = first["goal_bar"]["anim"]["props"]
@@ -943,7 +954,7 @@ def demo_refresh(bake):
     new = refresh(d, style, log=quiet)
     vis = json.loads((d / "visuals.json").read_text(encoding="utf-8"))
     assert vis[0] == mine[0] and vis[1:] == new and all(v["auto"] == AUTO for v in new) and new[0]["type"] == "kinetic_number", vis
-    assert len(new) == round(KINETIC_PER_MIN * bake[-1]["end"] / 60) - 1, len(new)   # the capture counted first
+    assert len(new) == budget.allowance(style, bake[-1]["end"]) - 1, len(new)   # the capture counted first
     vis[1]["hold_s"] = 2.0   # a review note changed the hook
     (d / "visuals.json").write_text(json.dumps(vis), encoding="utf-8")
     assert refresh(d, style, log=quiet)[0]["hold_s"] == 2.0, "kept while the cut, the cards and the rate are the same"

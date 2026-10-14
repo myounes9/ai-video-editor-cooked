@@ -41,14 +41,17 @@ def per_min(style):
     return float(v) if isinstance(v, (int, float)) and not isinstance(v, bool) and v >= 0 else DEFAULT_PER_MIN
 
 
-def allowance(style, duration_s):
-    """The most graphics in a video this long (at least one when the rate is above 0), or None with kinetic off."""
-    pm = per_min(style)
-    if pm is None:
-        return None
+def count(pm, duration_s):
+    """The most graphics at pm a minute in a video this long: rounded half up, at least one when the rate is above 0."""
     if pm <= 0 or duration_s <= 0:
         return 0
     return max(1, math.floor(duration_s / 60 * pm + 0.5))
+
+
+def allowance(style, duration_s):
+    """The most graphics in a video this long (count()), or None with kinetic off."""
+    pm = per_min(style)
+    return None if pm is None else count(pm, duration_s)
 
 
 def remaining(style, duration_s, taken):
@@ -75,6 +78,13 @@ def is_hook(item):
     return bool(item.get("hook", item.get("_hook")))
 
 
+def group(item):
+    """The beats of one step_build tracker (its props "id") are one graphic coming back: never apart in the picks'
+    spacing."""
+    a = item.get("anim") or item
+    return (a.get("props") or {}).get("id") if a.get("type") == "step_build" else None
+
+
 def pick(items, n, start=lambda i: i["start"], end=lambda i: i.get("end", i["start"])):
     """The n items to keep (None: all), in their own order: the hook, then one at a time the strongest, a beat that
     would leave under MIN_PLAIN_S beside one already kept counting TOUCH_PENALTY less (ties: the earlier)."""
@@ -89,7 +99,7 @@ def pick(items, n, start=lambda i: i["start"], end=lambda i: i.get("end", i["sta
         hook = next((i for i in order if start(items[i]) < HOOK_S), None)
     keep = [] if hook is None else [hook]
     touches = lambda i: any(start(items[i]) - end(items[k]) < MIN_PLAIN_S and start(items[k]) - end(items[i]) < MIN_PLAIN_S
-                            for k in keep)
+                            and not (group(items[i]) and group(items[i]) == group(items[k])) for k in keep)
     while len(keep) < n:
         rest = [i for i in order if i not in keep]
         keep.append(max(rest, key=lambda i: (strength(items[i]) - TOUCH_PENALTY * touches(i), -start(items[i]))))
@@ -121,6 +131,10 @@ def demo():
     # all fit: all kept
     assert pick(cards, 5) == [cards[0], cards[1], cards[2], cards[4], cards[5]] and pick(cards, 9) == cards and pick(cards, 0) == []
     assert pick(cards, None) == cards
+    # a tracker's next beat joins the one before: no spacing penalty between them, so it is kept with it
+    tk = lambda s, e, **x: c(s, e, "step_build", **x) | {"anim": {"type": "step_build", "props": {"id": "t"}}}  # noqa: E731
+    tr = [c(0.4, 2.0), tk(5.0, 7.0, strength=0.3), tk(7.0, 9.0, strength=0.3), c(9.2, 11.0, strength=0.25)]
+    assert pick(tr, 3) == tr[:3] and count(8, 30) == 4 and count(8, 4) == 1 and count(0, 60) == 0
     print("budget demo ok")
 
 

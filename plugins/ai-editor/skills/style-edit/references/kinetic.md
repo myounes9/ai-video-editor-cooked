@@ -37,10 +37,12 @@ visuals.json, and it adds them there from the cut's words (`"auto": "kinetic"` o
   A chain or tracker whose labels would not fit (check.py `kinetic_fit`) keeps one word each, else it is left out.
 - **Ranking**: hook > chain = goal > stat run > counter > money > lone figure = tally > tracker beats (an item's
   fill before the count's empty wells, which are kept only with a fill), plus clarity (labels, a stamp, more items).
-- **Density** (`graphics.kinetic_per_min`, default 8): at most round(rate x minutes) graphics in all; the real cards
-  already there (images.json, visuals.json captures, posts, logos, titles, ctas, kinetic beats written by hand) count
-  first, the strongest candidates take the rest, and the hook is kept even past it. The user's `cards.per_min` caps
-  the rate (plan.py `thin_cards` would cut evenly past it); `cards.on` false places none. 1 s of plain footage between
+- **Density** (`graphics.kinetic_per_min`, default 8; the count is `budget.py`'s, "How many" below): at most rate x
+  minutes graphics in all; the real cards already there (images.json, visuals.json captures, posts, logos, titles,
+  ctas, kinetic beats written by hand) count first, the strongest candidates take the rest, and the hook is kept even
+  past it. Each beat carries its `strength` (its score, a tracker's beats sharing their best) and the hook `"hook":
+  true`, so plan.py `budget_cards` keeps the same ones. The style page's `cards.per_min` does not cap it; `cards.on`
+  false places none. 1 s of plain footage between
   two kinetic cards (the next beat of the same tracker joins instead) and 0.5 s at the least beside a real card, which
   a kinetic card never covers, except a `stat_stack` beside the capture of its figures. Each card holds 2 s after its
   last word, cut to leave the gap, never under 1.5 s.
@@ -79,8 +81,9 @@ visuals.json, and it adds them there from the cut's words (`"auto": "kinetic"` o
   reaches the eyes and WARNs one past the brows. A band that is not [top, bottom] with top under bottom, inside 0-50%,
   stops the render. Over a full-frame scene plan.py passes the scene's picture as `beside` and the band stops 24 px above it
   (when that leaves 7% of the frame; else check.py plan WARNs that the card covers the picture).
-- **Captions**: the word captions fade out only while a number card is up (every format but `kinetic_title`) and back
-  right after it (`hide_captions`, default true for those, false for `kinetic_title`; a card's own value wins). Two
+- **Captions**: the word captions fade out only while a number card is up (every format but `kinetic_title` and
+  `cta_follow`) and back right after it (`hide_captions`, default true for those, false for the two; a card's own
+  value wins). Two
   cards under 0.6 s apart keep them hidden in between. Everywhere else the word captions carry the line.
 - **Hold**: a lockup holds at least 1.2 s after its last landing and leaves in time to be gone when the card ends
   (`hold_s`, or the next speech, wins over the hold). `out_at` (optional) asks it to stay until then. A kinetic card
@@ -95,7 +98,9 @@ visuals.json, and it adds them there from the cut's words (`"auto": "kinetic"` o
   (48 px, 44 at the least), wrapping onto two lines before they shrink, never closer than 40 px to the next. A
   number_chain whose labels or figures cannot fit so across the grid stops the render; check.py plan FAILs it first
   (an estimate, WARN near the limit): make it a `stat_stack` (`columns`), or shorten the labels.
-- Not with the split or board layout (plan.py drops them there: they float over the full-frame speaker). A style whose
+- Not with the split or board layout (plan.py drops them there: they float over the full-frame speaker). With
+  them on, a picture asking for the split panel (`"layout": "split"`) is a full-frame scene instead, unless the split
+  layout was set by hand (`--layout split` or style.json `layout.mode`). A style whose
   creator is off screen (her pictures become scenes) keeps them over the footage. A visuals.json `title` or `cta` owns
   the band: a kinetic card up when one lands ends there, and one that would start under it is dropped (plan.py
   `under_titles`).
@@ -108,7 +113,8 @@ still means none). `lib/ai_editor/budget.py` holds it, so the beat finder and pl
 `allowance(style, duration_s)`, `remaining(style, duration_s, taken)`, `pick(items, n)`. plan.py `budget_cards` keeps
 the strongest: the hook always (a beat with `"hook": true`, else the first graphic in the opening 3 s), then by each
 beat's `strength` (0-1; a real source with none counts 0.75, a kinetic beat 0.5), a beat that would leave under 1 s
-of plain footage beside one already kept counting 0.2 less, so the picks spread out. Each card left out is named on
+of plain footage beside one already kept counting 0.2 less, so the picks spread out (the beats of one tracker
+are one graphic coming back: never penalised beside each other). Each card left out is named on
 stderr. plan.json records `graphics_budget`; style_check.py and quality.py compare the cards a minute with it, and do
 not flag a kinetic kind the copied creator hardly uses, or a soft push under a kinetic card, as hers to match.
 
@@ -131,8 +137,8 @@ not flag a kinetic kind the copied creator hardly uses, or a soft push under a k
   and its line breaks (the fit leaves the room), and a stressed word keeps its colour while it is said. "Key words in
   yellow, slightly bigger" sets #FFD400 and 1.1.
 - When a learned rule changes one of these, `review.py learn` and `taste.py add` print `REPLAN:`: run what it names
-  (the visuals step for the kinetic settings, so the beat finder places the beats; plan.py for the emphasis), then
-  the stills and the render, so the note shows on this video too.
+  (plan.py, whose beat finder places the kinetic beats again, and which marks the emphasis), then the stills and the
+  render, so the note shows on this video too.
 
 ## For the AI steps (visual-prep, template-filler, overlays)
 
