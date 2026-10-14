@@ -6,6 +6,8 @@ import { EASES, PERSONALITIES, SplitText, pickMotion, useTl } from "./motion";
 import { footageX } from "./Scene";
 import { ProductVideo, ProductPlan, productMeta } from "./product/ProductVideo";
 import { KineticKit } from "./kinetic/Kit";
+import { PROBES } from "./kinetic";
+import { ProbeProps, probeMeta } from "./kinetic/probe";
 
 // Real values come from plan.json via --props; these only let the studio open.
 const empty: Plan = {
@@ -82,6 +84,8 @@ const ProofInner: React.FC<{ plugin: string; family: string }> = ({ plugin, fami
   );
 };
 
+const NoFrame: React.FC<ProbeProps> = () => null;
+
 export const Root: React.FC = () => (
   <>
     <Composition
@@ -100,6 +104,9 @@ export const Root: React.FC = () => (
     <Composition id="Proof" component={Proof} width={1080} height={1080} fps={30} durationInFrames={90} defaultProps={{ plugin: "drawsvg" }} />
     {/* the kinetic family's primitives on one frame (kinetic/Kit.tsx), for test/determinism.mjs */}
     <Composition id="KineticKit" component={KineticKit} width={1080} height={1920} fps={30} durationInFrames={105} />
+    {/* the kinetic formats' layouts as numbers, computed in calculateMetadata and read back as props (test/templates.mjs) */}
+    <Composition id="KineticProbe" component={NoFrame} calculateMetadata={probeMeta(PROBES)} width={16} height={16} fps={30} durationInFrames={1}
+      defaultProps={{ cases: [] }} />
     {/* product-video skill: a website's real UI as a launch video (plan from skills/product-video/scripts/product.py) */}
     <Composition id="ProductVideo" component={ProductVideo} calculateMetadata={productMeta} width={1920} height={1080} fps={30}
       durationInFrames={90} defaultProps={{ width: 1920, height: 1080, fps: 30, durationInFrames: 90, variant: "apple", url: "",

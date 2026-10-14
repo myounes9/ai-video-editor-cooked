@@ -17,7 +17,8 @@ import { prog } from "../motion";
 import type { TP } from "../Templates";
 import { layoutBox, fitDown } from "./fit";
 import { Behind, FoilDefs, Glyphs, LineMask, MarkerReveal, Lockup, Run, Scaled, landedAt, pullOff, pullOn, settleAt, stagger } from "./primitives";
-import { exitAt, useClock } from "./time";
+import { exitAt, firstLanding, useClock } from "./time";
+import { Part, Prober, R } from "./probe";
 import { EASE, LABEL, TIME, TRACK } from "./tokens";
 import { Faces, adv, ink, runW, useFaces } from "./type";
 
@@ -47,8 +48,8 @@ const SUPPORT = 0.4;
 /** A word not on the marker rises from its word's time less this (as a label does). */
 const EARLY = 0.04;
 
-const solve = (F: Faces, lines: Word[][], w: number, h: number, band: unknown) => {
-  const D = F.display, O = F.text, box = layoutBox(w, h, band), k = box.k;
+const solve = (F: Faces, lines: Word[][], w: number, h: number, band: unknown, beside: unknown) => {
+  const D = F.display, O = F.text, box = layoutBox(w, h, band, beside), k = box.k;
   const anyKey = lines.some((l) => l.some((x) => x.key));
   const hero = lines.map((l) => !anyKey || l.some((x) => x.key));
   const at = (S: number) => {
@@ -98,10 +99,18 @@ const solve = (F: Faces, lines: Word[][], w: number, h: number, band: unknown) =
   return { ...fit, S, box, k, rows: placed, hero };
 };
 
+/** The layout as rectangles: each word's ink (kinetic/probe.ts). */
+export const probe: Prober = (F, p, w, h, dur) => {
+  const lines = titleLines(p), L = solve(F, lines, w, h, p.band, p.beside);
+  firstLanding("kinetic_title", Math.min(...lines.flat().map((x) => x.at)), dur);
+  const parts: Part[] = L.rows.flatMap((r) => r.ws.map((g) => ({ kind: "word", r: [r.x0 + g.x + g.il, r.capTop, r.x0 + g.x + g.ir, r.base] as R })));
+  return { k: L.k, parts, sizes: { figure: L.S } };
+};
+
 const Title: React.FC<TP & { F: Faces }> = ({ p, w, h, dur, id, F }) => {
   const { t, dt, fps } = useClock();
   const lines = useMemo(() => titleLines(p), [JSON.stringify(p.lines)]);
-  const L = useMemo(() => solve(F, lines, w, h, p.band), [F, lines, w, h, JSON.stringify(p.band)]);
+  const L = useMemo(() => solve(F, lines, w, h, p.band, p.beside), [F, lines, w, h, JSON.stringify(p.band), JSON.stringify(p.beside)]);
   const S = L.S, k = L.k;
   // every marker run, in the order it is said: each hands its words to the foil as the next one comes
   const runs = L.rows.flatMap((r, i) => r.runs.map((run) => ({ ...run, i, at: lines[i][run.j0].at })))
@@ -111,9 +120,10 @@ const Title: React.FC<TP & { F: Faces }> = ({ p, w, h, dur, id, F }) => {
   const landed = (x: { at: number; text: string }) => landedAt(x.at - EARLY, x.text.length);
   const last = Math.max(...runs.flatMap((run) => lines[run.i].slice(run.j0, run.j1 + 1).map((x) => x.at)), ...plain.map(landed));
   const first = Math.min(...lines.flat().map((x) => x.at));
+  useMemo(() => firstLanding("kinetic_title", first, dur), [first, dur]);
   const out = exitAt(dur, last, p.out_at);
   return (
-    <Lockup t={t} t0={first - TIME.lead} out={out} box={L.box} oy={L.box.top} w={w} h={h}>
+    <Lockup t={t} t0={first - TIME.lead} out={out} box={L.box} oy={L.box.top} w={w} h={h} bridge={p}>
       {runs.some((_, ri) => Number.isFinite(hand[ri])) ? <FoilDefs id={id} sizes={[S]} /> : null}
       {runs.map((run, ri) => {
         const r = L.rows[run.i], ws = lines[run.i];

@@ -14,7 +14,8 @@ import { figureParts, figureValue, splitFigure, useFaces } from "./type";
 export const KineticKit: React.FC = () => {
   const F = useFaces();
   const { t, dt, fps } = useClock();
-  const w = 1080, h = 1920, box = useMemo(() => layoutBox(w, h, [8.6, 92]), []);
+  // the grid over the whole frame (no face here: a planner's band never reaches below 50%)
+  const w = 1080, h = 1920, box = useMemo(() => ({ ...layoutBox(w, h), bottom: 0.92 * h, height: 0.92 * h - layoutBox(w, h).top }), []);
   if (!F) return <AbsoluteFill style={{ background: "#5E6460" }} />;
   const D = F.display, O = F.text, k = box.k, id = "kit";
   // 1: a foil counter on its word at 0.2 s, its currency sign at 0.6x

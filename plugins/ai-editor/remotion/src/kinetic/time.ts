@@ -19,6 +19,12 @@ export const onGrid = (s: number, fps: number) => toFrame(s, fps) / fps;
 /** A label's start: its own word, never before its figure + TIME.labelAfter. No label_at: figure + labelAfter. */
 export const labelStart = (at: number, labelAt?: number) => Math.max(typeof labelAt === "number" ? labelAt - 0.04 : -Infinity, at + TIME.labelAfter);
 
+/** A card whose first landing comes after it has gone would draw nothing at all: that is a plan error, never a blank
+ *  card (plan.py warns when a word lands after its card ends; raise hold_s). */
+export const firstLanding = (type: string, at: number, dur: number) => {
+  if (at >= dur - TIME.exit) throw new Error(`${type} lands at ${at.toFixed(2)} s, after the card has left (it is ${dur.toFixed(2)} s long): raise hold_s`);
+};
+
 /** When the lockup leaves (the exit sweep starts). It holds at least TIME.hold after its last landing; props.out_at
  *  (the planner's hint) may keep it longer; it always leaves in time to be gone when the card ends (dur), which wins
  *  over the hold (the next speech forced it). */

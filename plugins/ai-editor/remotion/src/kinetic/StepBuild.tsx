@@ -8,7 +8,9 @@
 //     settle), and hands the label to the foil (with a gold edge) as the next slot lands; the last keeps its marker;
 //   - a slot with no `at` is already so when the card comes up (an earlier beat did it): a filled one shows its label in
 //     the foil; a tracker with slots already up sweeps in left to right;
-//   - fixed columns solved once from every slot's label: equal wells on the grid, the slots up centred on it;
+//   - fixed columns solved once from every slot's label: equal wells on the grid, the slots up centred on it; every
+//     label inside its well (wrapped onto two lines, and smaller, when four long labels share the grid; labels that
+//     fit no well even then throw);
 //   - beats close together are joined (plan.py): join_out holds the tracker still to the end of its card (no sweep,
 //     no push; a fill that kept its marker hands it to the foil just before), join_in carries on from it (no sweep in,
 //     the scrim already up), so the next beat continues the same tracker.
@@ -21,6 +23,7 @@ import { fitDown, layoutBox } from "./fit";
 import { wrap2 } from "./NumberChain";
 import { Behind, FoilDefs, Glyphs, Lockup, MarkerReveal, Scaled, f2, lerp, pullOff, pullOn, settleAt } from "./primitives";
 import { exitAt, useClock } from "./time";
+import { Part, Prober, R } from "./probe";
 import { EASE, SLOT, STEP, TIME, TRACK } from "./tokens";
 import { Face, Faces, baseOff, ink, runW, useFaces } from "./type";
 
@@ -46,8 +49,11 @@ export const stepSlots = (p: Record<string, any>): Slot[] => {
 /** Lines of a wrapped label sit this many label sizes apart. */
 const LEAD = 0.98;
 
-const solve = (F: Faces, slots: Slot[], w: number, h: number, band: unknown) => {
-  const D = F.display, box = layoutBox(w, h, band), k = box.k, n = slots.length;
+/** Label sizes (px at 1080): the largest, the smallest that reads as a tracker, and the floor a crowded one may go to. */
+const SIZE = { max: 130, read: 48, floor: 34 };
+
+const solve = (F: Faces, slots: Slot[], w: number, h: number, band: unknown, beside: unknown) => {
+  const D = F.display, box = layoutBox(w, h, band, beside), k = box.k, n = slots.length;
   const G = SLOT.gap * k, W = (box.width - (n - 1) * G) / n;
   // every label any beat may show, so the size is the same in each beat
   const texts = slots.map((s) => (s.state === "question" ? "?" : s.label.toUpperCase()));
@@ -59,12 +65,20 @@ const solve = (F: Faces, slots: Slot[], w: number, h: number, band: unknown) => 
     const fits = lines.every((ls) => ls.every((l) => runW(D, S, TRACK.figure, l) <= W - 2 * padX));
     return { ok: fits && H <= box.height, lines, H };
   };
-  // one line when it reads; two-word labels wrap only when that makes them clearly bigger
-  let fit = fitDown(130 * k, 48 * k, 2 * k, (S) => at(S, false));
-  if ((!fit.ok || fit.size < 72 * k) && texts.some((x) => x.includes(" "))) {
-    const wr = fitDown(130 * k, 48 * k, 2 * k, (S) => at(S, true));
+  // one line when it reads; two-word labels wrap only when that makes them clearly bigger. When neither fits at
+  // SIZE.read, smaller down to SIZE.floor, wrapped first; never a label past its well
+  const words = texts.some((x) => x.includes(" "));
+  let fit = fitDown(SIZE.max * k, SIZE.read * k, 2 * k, (S) => at(S, false));
+  if ((!fit.ok || fit.size < 72 * k) && words) {
+    const wr = fitDown(SIZE.max * k, SIZE.read * k, 2 * k, (S) => at(S, true));
     if (wr.ok && (!fit.ok || wr.size > fit.size * 1.2)) fit = wr;
   }
+  for (const wrap of fit.ok ? [] : words ? [true, false] : [false]) {
+    const f = fitDown(SIZE.read * k, SIZE.floor * k, 2 * k, (S) => at(S, wrap));
+    if (f.ok) { fit = f; break; }
+  }
+  if (!fit.ok) throw new Error(`step_build: the labels ${texts.filter(Boolean).map((x) => JSON.stringify(x)).join(", ")} do not fit ${n} wells ` +
+    "across the grid: shorter labels or fewer slots");
   return { ...fit, S: fit.size, box, k, W, G, cx: box.left + box.width / 2, top: box.top, r: SLOT.radius * k, bw: Math.max(1, SLOT.line * k) };
 };
 
@@ -138,10 +152,27 @@ const Label: React.FC<{ lines: string[]; face: Face; S: number; x: number; y: nu
   );
 };
 
+/** The layout as rectangles, every slot up in its last place (kinetic/probe.ts): each label inside its well. */
+export const probe: Prober = (F, p, w, h) => {
+  const slots = stepSlots(p), L = solve(F, slots, w, h, p.band, p.beside), D = F.display;
+  const up = slots.map((s, i) => (s.state === "off" ? -1 : i)).filter((i) => i >= 0), m = up.length;
+  const parts: Part[] = [];
+  up.forEach((i, j) => {
+    const x = L.cx - (m * L.W + (m - 1) * L.G) / 2 + j * (L.W + L.G), well: R = [x, L.top, x + L.W, L.top + L.H];
+    parts.push({ kind: "slot", r: well });
+    const ls = L.lines[i], capTop = L.top + (L.H - (D.cap * L.S + (ls.length - 1) * L.S * LEAD)) / 2;
+    ls.forEach((l, li) => {
+      const g = ink(D, L.S, TRACK.figure, l), x0 = x + L.W / 2 - (g.il + g.ir) / 2, base = capTop + D.cap * L.S + li * L.S * LEAD;
+      parts.push({ kind: "slot-label", r: [x0 + g.il, base - D.cap * L.S, x0 + g.ir, base], in: well });
+    });
+  });
+  return { k: L.k, parts, sizes: { label: L.S } };
+};
+
 const Tracker: React.FC<TP & { F: Faces }> = ({ p, w, h, dur, id, F }) => {
   const { t, dt, fps } = useClock();
   const slots = useMemo(() => stepSlots(p), [JSON.stringify(p.slots)]);
-  const L = useMemo(() => solve(F, slots, w, h, p.band), [F, slots, w, h, JSON.stringify(p.band)]);
+  const L = useMemo(() => solve(F, slots, w, h, p.band, p.beside), [F, slots, w, h, JSON.stringify(p.band), JSON.stringify(p.beside)]);
   const joinIn = p.join_in === true, joinOut = p.join_out === true;
   const T = useMemo(() => timeline(slots, fps, L, dur, joinOut), [slots, fps, L, dur, joinOut]);
   const D = F.display, S = L.S, k = L.k, y = L.top, H = L.H;
@@ -155,7 +186,7 @@ const Tracker: React.FC<TP & { F: Faces }> = ({ p, w, h, dur, id, F }) => {
   const num = (i: number) => String(i + 1);
   const NS = S * 0.62;
   return (
-    <Lockup t={t} t0={t0} out={out} box={L.box} oy={y} w={w} h={h} joined={joinIn}>
+    <Lockup t={t} t0={t0} out={out} box={L.box} oy={y} w={w} h={h} joined={joinIn} bridge={p}>
       <FoilDefs id={id} sizes={[S]} />
       <div style={{ position: "absolute", inset: 0, maskImage: sweep, WebkitMaskImage: sweep } as React.CSSProperties}>
         {slots.map((s, i) => {

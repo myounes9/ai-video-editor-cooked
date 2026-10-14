@@ -355,6 +355,17 @@ const panelOpen = (t: number, cards: Card[]) => {
   return Math.max(0, ...runs.map(([a, b]) => Math.min(inOut(t, a - PANEL_T, a + PANEL_T), 1 - inOut(t, b - PANEL_T, b + PANEL_T))));
 };
 
+/** Captions back for less than this between two cards that hide them would only blink: the gap stays quiet. */
+const QUIET_BRIDGE_S = 0.6;
+/** The spans the word captions are hidden for: each card that hides them, joined across gaps under QUIET_BRIDGE_S. */
+const quietSpans = (cards: Card[]) => cards.filter((c) => hidesCaptions(c.anim)).map((c): [number, number] => [c.start, c.end])
+  .sort((a, b) => a[0] - b[0])
+  .reduce<[number, number][]>((acc, s) => {
+    const l = acc[acc.length - 1];
+    if (l && s[0] - l[1] < QUIET_BRIDGE_S) l[1] = Math.max(l[1], s[1]);
+    else acc.push([s[0], s[1]]);
+    return acc;
+  }, []);
 const sceneUp = (cards: Card[], t: number) => cards.find((c) => c.layout === "scene" && t >= c.start && t < c.end);
 const words = (v: unknown): string[] => typeof v === "string" ? v.toLowerCase().replace(/\*/g, "").split(/[^\p{L}\p{N}]+/u).filter(Boolean)
     .flatMap((w) => [w, ...(w.match(/\d+/g) ?? [])]) // "200x" also matches a spoken "200"
@@ -423,9 +434,10 @@ export const StyleEdit: React.FC<Plan> = ({ video, captions, zooms, cards, layou
   // captions a scene hides fade out and back in (ground.ts captionFade), never gone in one frame
   const sceneFade = cards.some((c) => c.layout === "scene") ? captionFade((tt) => capAt(tt).present === false, t) : 1;
   // a kinetic title says the beat in its own type: the word captions fade out while it is up and come back after it
-  // (card props.hide_captions, on by default for the kinetic family: kinetic/index.ts)
-  const quiet = cards.filter((c) => hidesCaptions(c.anim));
-  const capFade = Math.min(sceneFade, quiet.length ? captionFade((tt) => quiet.some((c) => tt >= c.start && tt < c.end), t) : 1);
+  // (card props.hide_captions, on by default for the kinetic family: kinetic/index.ts); cards under QUIET_BRIDGE_S apart
+  // hide them as one span, so they never blink up and straight back down between two cards (plan.py quiet_spans)
+  const quiet = quietSpans(cards);
+  const capFade = Math.min(sceneFade, quiet.length ? captionFade((tt) => quiet.some(([a, b]) => tt >= a && tt < b), t) : 1);
   const up = fonts.ready ? slots(cards, split).filter((s) => t >= s.from && t < s.to) : [];
   const view = (s: Slot) => (
     <CardView key={`${s.card.src ?? s.card.anim?.type}${s.card.start}`} card={s.card} t={t} prev={s.prev} next={s.next} covered={s.covered}

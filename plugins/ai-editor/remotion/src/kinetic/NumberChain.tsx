@@ -2,7 +2,9 @@
 // spoken word. The reference template of the kinetic family: the other formats copy its shape (props, clock, fit,
 // lockup, paint). references/kinetic.md has the props; tokens.ts every size, colour and time.
 //   - fixed columns solved once for the whole chain and centred on the grid: nothing moves when a figure lands;
-//     every connector has the same length; a label may overhang its column, never closer than 40 px to the next;
+//     every connector has the same length, never shorter than its minimum; a label may overhang its column, never
+//     closer than 40 px to the next; labels stay at a phone-readable size (they wrap before they shrink). A chain that
+//     cannot fit so at the smallest figure size throws (check.py plan flags it first: use a stat_stack);
 //   - each figure is pulled on as ink on a highlighter marker on its word (1.06 -> 1 settle); the connector to the
 //     next draws just before the next lands; when the next is coming the marker is pulled off its figure and hands it
 //     to the foil (a stacked layer, never a colour blend), so every figure stays key-coloured; the last keeps its marker;
@@ -17,7 +19,8 @@ import type { TP } from "../Templates";
 import { layoutBox, fitDown } from "./fit";
 import { Arrow, Behind, FigureGlyphs, FoilDefs, LineMask, MarkerReveal, Lockup, Run, Scaled, figureSizes, landedAt, pullOff, pullOn, settleAt,
   stagger } from "./primitives";
-import { exitAt, labelStart, useClock } from "./time";
+import { exitAt, firstLanding, labelStart, useClock } from "./time";
+import { Part, Prober, capsRect } from "./probe";
 import { EASE, LABEL, TIME, TRACK } from "./tokens";
 import { Faces, figureParts, runW, splitFigure, useFaces } from "./type";
 
@@ -44,8 +47,13 @@ export const wrap2 = (l: string) => {
 /** Label lines sit this many label sizes apart when a label wraps. */
 const LEAD = 1.1;
 
-const solve = (F: Faces, items: Item[], w: number, h: number, band: unknown) => {
-  const D = F.display, O = F.text, box = layoutBox(w, h, band), k = box.k, n = items.length;
+/** The smallest figure size a chain is drawn at (px at 1080): below it the figures stop reading as the hero. */
+const MIN_S = 64;
+
+const solve = (F: Faces, items: Item[], w: number, h: number, band: unknown, beside: unknown) => {
+  const D = F.display, O = F.text, box = layoutBox(w, h, band, beside), k = box.k, n = items.length;
+  // an outer label may reach this far past the grid, less what the slow push adds at the grid's edge
+  const over = LABEL.over * k - TIME.push * (box.width / 2 + LABEL.over * k);
   const figs = items.map((it) => splitFigure(it.num));
   const labels = items.map((it) => (it.label ?? "").toUpperCase());
   const clear = 24 * k, labGap = 40 * k;
@@ -62,28 +70,34 @@ const solve = (F: Faces, items: Item[], w: number, h: number, band: unknown) => 
     const layoutAt = (Ls: number) => {
       const labW = lines.map((ls) => Math.max(0, ...ls.map((x) => runW(O, Ls, TRACK.label, x))));
       // an outer label may reach LABEL.over past the grid; a figure never does
-      const ext = items.map((_, i) => Math.max(mW[i] / 2, labW[i] / 2 - (i === 0 || i === n - 1 ? LABEL.over * k : 0)));
+      const ext = items.map((_, i) => Math.max(mW[i] / 2, labW[i] / 2 - (i === 0 || i === n - 1 ? over : 0)));
       const need = Math.max(0, ...items.slice(1).map((_, j) => labW[j] / 2 + labGap + labW[j + 1] / 2 - span[j]));
       const free = (box.width - ext[0] - ext[n - 1] - span.reduce((a, b) => a + b, 0)) / (n - 1);
       const A = Math.min(free, Math.max(need, minA, S * 0.5));
       const rows = Math.max(0, ...lines.map((x) => x.length));
       const mH = D.cap * S + 2 * padY, gapL = S * 0.11;
       const totalH = mH + (rows ? gapL + O.cap * Ls + (rows - 1) * Ls * LEAD : 0);
-      return { ok: free >= Math.max(need, minA) && totalH <= box.height, Ls, labW, ext, A, mH, gapL };
+      return { ok: free >= Math.max(need, minA) && totalH <= box.height, Ls, labW, ext, A, mH, gapL, minA, need, free };
     };
     const hi = Math.max(LABEL.size * k, S * LABEL.k), lo = Math.min(hi, Math.max(floor * k, S * LABEL.kMin));
     let g = layoutAt(hi);
     for (let Ls = hi - 2 * k; Ls >= lo - 1e-6 && !g.ok; Ls -= 2 * k) g = layoutAt(Ls);
     return { ...g, padX, padY, parts, lines, mW, span };
   };
-  // the biggest figures whose labels fit on one line at LABEL.soft or more; else at LABEL.floor; else wrapped onto two
-  // lines. Never two labels closer than labGap, never a figure past the grid.
-  const tries = [[LABEL.soft, false], [LABEL.floor, false], [LABEL.soft, true], [LABEL.floor, true]] as const;
-  let fit = fitDown(320 * k, 90 * k, 2 * k, (S) => at(S, tries[0][0], tries[0][1]));
-  for (const [floor, wrap] of tries.slice(1)) {
-    if (fit.ok || (wrap && !labels.some((l) => l.includes(" ")))) break;
-    const next = fitDown(320 * k, 90 * k, 2 * k, (S) => at(S, floor, wrap));
-    if (next.ok) fit = next;
+  // labels at LABEL.soft or more before LABEL.floor (legibility first); at each, the biggest figures with the labels on
+  // one line, or wrapped onto two when that makes the figures clearly bigger. Never two labels closer than labGap,
+  // never a connector under its minimum, never a figure past the grid: a chain that fits none of these at MIN_S throws
+  // rather than draw figures into each other.
+  const words = labels.some((l) => l.includes(" "));
+  const fits = [LABEL.soft, LABEL.floor].map((floor) => (words ? [false, true] : [false])
+    .map((wrap) => fitDown(320 * k, MIN_S * k, 2 * k, (S) => at(S, floor, wrap))).filter((f) => f.ok)
+    .reduce<ReturnType<typeof at> & { size: number } | undefined>((best, f) => (!best || f.size > best.size * 1.15 ? f : best), undefined));
+  const fit = fits[0] ?? fits[1];
+  if (!fit) {
+    const g = at(MIN_S * k, LABEL.floor, words);
+    throw new Error(`number_chain: ${items.map((it) => `${it.num}${it.label ? ` ${it.label}` : ""}`).join(" -> ")} does not fit across the ` +
+      `grid with equal connectors and readable labels (figures at ${MIN_S} px or more; ${Math.round((n - 1) * (Math.max(g.need, g.minA) - g.free))} px ` +
+      "short): use a stat_stack, shorter labels or fewer items");
   }
   const S = fit.size;
   const d = fit.span.map((b) => b + fit.A);
@@ -96,10 +110,31 @@ const solve = (F: Faces, items: Item[], w: number, h: number, band: unknown) => 
     mk: items.map((_, i) => ({ a: centres[i] - fit.mW[i] / 2, b: centres[i] + fit.mW[i] / 2 })) };
 };
 
+/** The connector's stroke and head (px): heavy enough to read on a phone. */
+const arrowSize = (S: number, k: number) => ({ sw: Math.max(10 * k, S * 0.052), hl: Math.max(22 * k, S * 0.115) });
+
+/** The layout as rectangles (kinetic/probe.ts). */
+export const probe: Prober = (F, p, w, h, dur) => {
+  const items = chainItems(p), L = solve(F, items, w, h, p.band, p.beside), D = F.display, O = F.text;
+  firstLanding("number_chain", items[0].at, dur);
+  const parts: Part[] = [];
+  const { sw } = arrowSize(L.S, L.k), midY = L.capTop + D.cap * L.S * 0.5;
+  items.forEach((it, i) => {
+    const fx = L.centres[i] - (L.parts[i].il + L.parts[i].ir) / 2;
+    parts.push({ kind: "figure", r: [fx + L.parts[i].il, L.capTop, fx + L.parts[i].ir, L.base] });
+    L.lines[i].forEach((line, li) => {
+      const lw = runW(O, L.Ls, TRACK.label, line);
+      parts.push({ kind: "label", r: capsRect(L.centres[i] - lw / 2, lw, L.lBase + li * L.Ls * LEAD, O.cap * L.Ls) });
+    });
+    if (i) parts.push({ kind: "arrow", r: [L.mk[i - 1].b + L.clear, midY - sw / 2, L.mk[i].a - L.clear, midY + sw / 2], min: L.minA });
+  });
+  return { k: L.k, parts, sizes: { figure: L.S, label: L.Ls } };
+};
+
 const Chain: React.FC<TP & { F: Faces }> = ({ p, w, h, dur, id, F }) => {
   const { t, dt, fps } = useClock();
   const items = useMemo(() => chainItems(p), [JSON.stringify(p.items)]);
-  const L = useMemo(() => solve(F, items, w, h, p.band), [F, items, w, h, JSON.stringify(p.band)]);
+  const L = useMemo(() => solve(F, items, w, h, p.band, p.beside), [F, items, w, h, JSON.stringify(p.band), JSON.stringify(p.beside)]);
   const D = F.display, O = F.text, S = L.S, k = L.k, n = items.length;
   // labels: each rises through its own mask, no earlier than its figure + TIME.labelAfter
   const labT = items.map((it) => labelStart(it.at, it.label_at));
@@ -109,9 +144,10 @@ const Chain: React.FC<TP & { F: Faces }> = ({ p, w, h, dur, id, F }) => {
   const out = exitAt(dur, last, p.out_at);
   const t0 = items[0].at - TIME.lead;
   const midY = L.capTop + D.cap * S * 0.5;
-  const sw = Math.max(10 * k, S * 0.052), hl = Math.max(22 * k, S * 0.115);   // heavy enough to read on a phone
+  const { sw, hl } = arrowSize(S, k);
+  useMemo(() => firstLanding("number_chain", items[0].at, dur), [items, dur]);
   return (
-    <Lockup t={t} t0={t0} out={out} box={L.box} oy={L.mTop} w={w} h={h}>
+    <Lockup t={t} t0={t0} out={out} box={L.box} oy={L.mTop} w={w} h={h} bridge={p}>
       <FoilDefs id={id} sizes={L.figs.flatMap((f) => figureSizes(f, S))} />
       {/* connectors: each drawn from figure to figure just before the next one lands */}
       <svg width={w} height={h} style={{ position: "absolute", inset: 0, overflow: "visible" }}>

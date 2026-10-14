@@ -5,8 +5,10 @@
 // StyleEdit.tsx LottieCard, entering with a pop) and a product page zoom (ProductVideo.tsx, on two
 // tiles ffmpeg draws), rendered across 6 Chrome tabs (--tabs; each tab
 // jumps several frames at a time and lands on held frames from different places, as a real render does),
-// must equal the same frame rendered in one tab in order. The kinetic family runs too: its primitives (KineticKit)
-// and each format's case marked "determinism" in test/kinetic/*.json. Prints each differing frame with its largest
+// must equal the same frame rendered in one tab in order. The kinetic family runs too: its primitives (KineticKit),
+// each format's case marked "determinism" in test/kinetic/*.json, and a whole StyleEdit plan (a cut ffmpeg draws, two
+// joined step_build beats, a full-frame scene with a stat_stack over it, a punch zoom, and word captions hidden while
+// the kinetic cards are up and back between them). Prints each differing frame with its largest
 // channel difference (0-255) and exits 1 on any difference.
 //   node test/determinism.mjs [outDir] [--only <case-substring>] [--tabs <n>]
 import fs from "node:fs";
@@ -38,6 +40,23 @@ const CARDS = {
 const KINETIC = Object.fromEntries(fs.readdirSync(path.join(HERE, "kinetic")).filter((f) => f.endsWith(".json")).sort()
   .flatMap((f) => JSON.parse(fs.readFileSync(path.join(HERE, "kinetic", f), "utf8")))
   .filter((c) => c.determinism).map(({ name, determinism, ...c }) => [`kinetic-${name}`, c]));
+// StyleEdit's own paths for the kinetic family (StyleEdit.tsx): a tracker carried across two beats (join_out / join_in),
+// a kinetic card drawn over a full-frame scene beside its picture, the caption fade round the kinetic cards. Made up.
+const said = [["Two", "shops"], ["to", "open"], ["first", "the"], ["bakery"], ["then", "we"], ["count"], ["the", "regulars"], ["each", "week"]];
+const STYLE = { video: "cut.mp4", width: 1080, height: 1920, fps: 30, durationInFrames: 135, look: { preset: "neutral" }, motion: "punchy",
+  captions: { style: { y_pct: 71, size_pct: 4, color: "#FFFFFF", weight: 700, animation: "pop", entrance: "pop", ease_s: 0.07 },
+    chunks: said.map((ws, i) => ({ text: ws.join(" "), start: i * 0.55, end: i * 0.55 + 0.5,
+      words: ws.map((w, j) => ({ text: w, start: i * 0.55 + j * 0.22, end: i * 0.55 + j * 0.22 + 0.2 })) })) },
+  zooms: [{ start: 3.6, end: 4.4, scale: 1.2, kind: "punch", ease_s: 0, origin: [50, 6] }],
+  cards: [
+    { start: 0, end: 1.2, entrance: "pop", box: [0, 0, 100, 100], lane: "kinetic", anim: { type: "step_build", props: { id: "shops", join_out: true,
+      slots: [{ label: "bakery", state: "empty", at: 0.1 }, { label: "catering", state: "empty", at: 0.1 }] } } },
+    { start: 1.2, end: 2.0, entrance: "pop", box: [0, 0, 100, 100], lane: "kinetic", anim: { type: "step_build", props: { id: "shops", join_in: true,
+      slots: [{ label: "bakery", state: "filled", at: 0.3 }, { label: "catering", state: "empty" }] } } },
+    { src: "images/dash.png", size: [1600, 640], layout: "scene", start: 2.4, end: 3.6, entrance: "scale", box: [0, 0, 100, 100],
+      transition_in: "push", transition_out: "push", ground: "ink", focus: [50, 30] },
+    { start: 2.9, end: 4.4, entrance: "pop", box: [0, 0, 100, 100], lane: "kinetic", anim: { type: "stat_stack", props: { beside: [12, 31, 76, 31],
+      stats: [{ num: "12", label: "regulars", at: 0.1 }, { num: "€860", label: "this week", at: 0.7 }] } } }] };
 // A page shot: the camera zooms from the whole window onto a small part of it while scrolling.
 const PRODUCT = { width: 1920, height: 1080, fps: 30, durationInFrames: 90, variant: "linear", url: "https://example.com",
   brand: { ground: "#FFFFFF", ink: "#0A0A0A", muted: "#6B6B6B", accent: "#0A0A0A", dark: false, radius_px: 8,
@@ -65,8 +84,10 @@ fs.mkdirSync(outDir, { recursive: true });
 const pub = path.join(outDir, "public");
 fs.mkdirSync(path.join(pub, "images"), { recursive: true });
 fs.cpSync(path.join(HERE, "public"), pub, { recursive: true });   // the Lottie fixture
-for (const [f, src] of [["tile-0.jpg", "testsrc2=s=2880x1800"], ["tile-1.jpg", "mandelbrot=s=2880x1800"]])
+for (const [f, src] of [["tile-0.jpg", "testsrc2=s=2880x1800"], ["tile-1.jpg", "mandelbrot=s=2880x1800"], ["dash.png", "mandelbrot=s=1600x640"]])
   spawnSync("ffmpeg", ["-v", "error", "-y", "-f", "lavfi", "-i", src, "-frames:v", "1", "-q:v", "2", path.join(pub, "images", f)]);
+spawnSync("ffmpeg", ["-v", "error", "-y", "-f", "lavfi", "-i", "testsrc2=s=1080x1920:r=30:d=5", "-c:v", "libx264", "-pix_fmt", "yuv420p",
+  "-g", "1", path.join(pub, "cut.mp4")]);   // every frame a keyframe: each tab seeks to its own frame exactly
 const serveUrl = await bundle({ entryPoint: path.join(HERE, "..", "src", "index.ts"), publicDir: pub });
 // decode to raw RGBA: PNG bytes can differ only by encoder metadata. A file that does not decode stops the
 // test: two missing frames must never compare as the same.
@@ -116,6 +137,7 @@ const cases = [...[...PLUGINS, "eases"].map((plugin) => [plugin, "Proof", { plug
   ...Object.entries({ ...CARDS, ...KINETIC }).map(([name, { edge, ...c }]) => [name, "Preview",
     { width: 1080, height: 1920, ...c, card: { start: 0, end: c.dur, entrance: "pop", ...c.card } }, edge]),
   ["kinetic-kit", "KineticKit", {}],
+  ["styleedit-kinetic", "StyleEdit", STYLE],
   ["product-page", "ProductVideo", PRODUCT]].filter(([n]) => n.includes(only));
 const t0 = Date.now();
 let total = 0, differ = 0;

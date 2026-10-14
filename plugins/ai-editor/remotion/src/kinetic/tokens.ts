@@ -33,9 +33,10 @@ export const TRACK = { figure: -0.005, label: 0.12, line: 0.02 };
 export const PREFIX_K = 0.6;
 export const PERCENT_K = 0.56;
 /** A label's size: k x its figure's size, never under `size` px; to let the figures grow it may step down to kMin x the
- *  figure and `soft` px, and only when nothing else fits to `floor` px (then a two-word label wraps onto two lines).
+ *  figure and `soft` px (a two-word label wraps onto two lines before it goes smaller), and only when nothing else fits
+ *  to `floor` px (caps about 40 px tall at 1080: still read at phone size).
  *  over: how far an outer label may reach past the grid into the side margin. px on a 1080 short side. */
-export const LABEL = { k: 0.2, kMin: 0.16, size: 46, soft: 40, floor: 36, over: 36 };
+export const LABEL = { k: 0.2, kMin: 0.16, size: 48, soft: 48, floor: 44, over: 36 };
 
 // ---------- grid and placement ----------
 /** Every lockup hangs from one left text edge and stops at one right edge: 72 and 1008 px of 1080. */
@@ -45,6 +46,8 @@ export const GRID = { left: 72 / 1080, right: 1008 / 1080 };
 export const BAND: [number, number] = [8.6, 26.2];
 /** The Reels header: no title ever starts above this, % of the frame height. */
 export const HEADER = 8;
+/** A band from the planner never reaches below this, % of the frame height (the eyes and the captions are lower). */
+export const BAND_MAX = 50;
 
 // ---------- timing (seconds unless named in frames) ----------
 export const TIME = {
@@ -119,5 +122,7 @@ export const SLOT = { well: "rgba(12,12,12,0.3)", edge: "rgba(255,255,255,0.55)"
  *  over TIME.exit on enterEase. */
 export const STEP = { popFrom: 0.84, popFrames: 9, popEase: "back.out(2.2)", popStagger: 0.08, reflow: 0.3, reflowEase: "power3.inOut",
   enterEase: "power2.out" };
-/** stat_stack: how far it keeps from the capture it sits beside (px on a 1080 short side). */
+/** stat_stack (and any format over a scene): how far it keeps from the capture it sits beside (px on a 1080 short
+ *  side), and the least room above that capture worth fitting into (% of the frame height). */
 export const BESIDE_GAP = 24;
+export const BESIDE_MIN = 7;

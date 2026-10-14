@@ -4,13 +4,14 @@
 // captions while one is up. The names never collide with plan.py TYPE_ONLY (the removed type cards).
 import type React from "react";
 import type { TP } from "../Templates";
-import { CtaFollow } from "./CtaFollow";
-import { GoalBar } from "./GoalBar";
-import { KineticNumber } from "./KineticNumber";
-import { KineticTitle } from "./KineticTitle";
-import { NumberChain } from "./NumberChain";
-import { StatStack } from "./StatStack";
-import { StepBuild } from "./StepBuild";
+import { CtaFollow, probe as ctaProbe } from "./CtaFollow";
+import { GoalBar, probe as goalProbe } from "./GoalBar";
+import { KineticNumber, probe as numberProbe } from "./KineticNumber";
+import { KineticTitle, probe as titleProbe } from "./KineticTitle";
+import { NumberChain, probe as chainProbe } from "./NumberChain";
+import type { Prober } from "./probe";
+import { StatStack, probe as statProbe } from "./StatStack";
+import { StepBuild, probe as stepProbe } from "./StepBuild";
 
 export const KINETIC: Record<string, React.FC<TP>> = {
   kinetic_number: KineticNumber,
@@ -20,6 +21,12 @@ export const KINETIC: Record<string, React.FC<TP>> = {
   stat_stack: StatStack,
   kinetic_title: KineticTitle,
   cta_follow: CtaFollow,
+};
+
+/** Each format's layout as numbers (kinetic/probe.ts; the KineticProbe composition, test/templates.mjs). */
+export const PROBES: Record<string, Prober> = {
+  kinetic_number: numberProbe, number_chain: chainProbe, goal_bar: goalProbe, step_build: stepProbe, stat_stack: statProbe,
+  kinetic_title: titleProbe, cta_follow: ctaProbe,
 };
 
 /** Does this card hide the word captions while it is up? A kinetic card does unless its props say

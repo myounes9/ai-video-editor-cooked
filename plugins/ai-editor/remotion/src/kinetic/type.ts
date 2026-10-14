@@ -38,6 +38,17 @@ const metrics = (fam: string, weight: number): Face => {
 };
 /** The baseline's offset from the top of a line box whose line-height equals the font size. */
 export const baseOff = (f: Face, size: number) => (size - (f.asc + f.desc) * size) / 2 + f.asc * size;
+/** The baseline for a small sign ("€", "%") at `size` whose ink top sits on `capTop`: aligned by its own ink, not the
+ *  face's cap height (Anton's "€" is shorter than its caps, so cap-aligning the font left it low). */
+export const signBase = (f: Face, size: number, s: string, capTop: number) => capTop + font(f, size, 0).measureText(s).actualBoundingBoxAscent;
+
+/** Anton and Oswald, loaded and measured (a family that falls back to another face throws). */
+export const loadFaces = async (): Promise<Faces> => {
+  const [d, t] = await Promise.all([loadFamily(DISPLAY.family, [DISPLAY.weight]), loadFamily(TEXT.family, [TEXT.weight])]);
+  await document.fonts.ready;
+  if (!d.includes(DISPLAY.family) || !t.includes(TEXT.family)) throw new Error(`kinetic fonts fell back: ${d} / ${t}`);
+  return { display: metrics(d, DISPLAY.weight), text: metrics(t, TEXT.weight) };
+};
 
 /** Anton and Oswald, loaded and measured. null until both are in (the frame waits: delayRender). A family that
  *  falls back to another face stops the render: a title in the wrong face would pass unseen. */
@@ -46,12 +57,8 @@ export const useFaces = (): Faces | null => {
   const [handle] = useState(() => delayRender("kinetic fonts"));
   useEffect(() => {
     let live = true;
-    Promise.all([loadFamily(DISPLAY.family, [DISPLAY.weight]), loadFamily(TEXT.family, [TEXT.weight])])
-      .then(async ([d, t]) => {
-        await document.fonts.ready;
-        if (!d.includes(DISPLAY.family) || !t.includes(TEXT.family)) throw new Error(`kinetic fonts fell back: ${d} / ${t}`);
-        if (live) setFaces({ display: metrics(d, DISPLAY.weight), text: metrics(t, TEXT.weight) });
-      })
+    loadFaces()
+      .then((f) => { if (live) setFaces(f); })
       .finally(() => continueRender(handle));
     return () => { live = false; };
   }, [handle]);

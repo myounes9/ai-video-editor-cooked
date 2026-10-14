@@ -17,7 +17,8 @@ import { prog } from "../motion";
 import type { TP } from "../Templates";
 import { layoutBox, fitDown } from "./fit";
 import { LineMask, Lockup, Run, Scaled, clamp01, f2, lerp, markerPoly, pullOn, stagger, landedAt } from "./primitives";
-import { exitAt, useClock } from "./time";
+import { exitAt, firstLanding, useClock } from "./time";
+import { Part, Prober, capsRect } from "./probe";
 import { EASE, INK, KEY, LABEL, TIME, TRACK, UNDER, WHITE } from "./tokens";
 import { Faces, baseOff, runW, useFaces } from "./type";
 
@@ -27,10 +28,10 @@ const WELL = "rgba(255,255,255,0.14)", RIM = "rgba(255,255,255,0.42)";
  *  its label's type (x the button's height), the gap from the avatar to the column and from the handle to the button.
  *  The avatar's ring stands ring.gap off it, ring.w thick. */
 const U_ = { handle: 0.36, button: 0.46, label: 0.44, gapA: 0.13, gapC: 0.13, ring: { gap: 0.03, w: 0.022 } };
-/** The cta's own timings (s): the avatar opens and its ring draws from `at`; the handle rises from at + handle; the
- *  button wipes in from at + button over wipe. The press dips depth over down and returns over up; the check draws
+/** The cta's own timings (s): the avatar opens and its ring draws from `at` - TIME.lead; the handle rises from at +
+ *  handle (before its word, so it reads on the word, as a figure does); the button wipes in from at + button over wipe. The press dips depth over down and returns over up; the check draws
  *  from follow_at + check over checkDur; two rings leave the button at follow_at + rings[i] over ringDur. */
-const T_ = { open: 0.35, ringDraw: 0.5, handle: 0.08, button: 0.2, wipe: 0.3, down: 0.07, up: 0.32, depth: 0.08,
+const T_ = { open: 0.35, ringDraw: 0.5, handle: -0.1, button: 0.04, wipe: 0.3, down: 0.07, up: 0.32, depth: 0.08,
   check: 0.12, checkDur: 0.22, rings: [0, 0.13], ringDur: 0.55 };
 const src_ = (s: string) => (/^(https?:|data:)/.test(s) ? s : staticFile(s));
 /** KEY at alpha a (the rings fade by their colour, never by opacity). */
@@ -49,8 +50,8 @@ export const ctaProps = (p: Record<string, any>): Cta => {
     button: String(p.button ?? "Follow").toUpperCase(), pressed: String(p.pressed ?? "Following").toUpperCase() };
 };
 
-const solve = (F: Faces, c: Cta, w: number, h: number, band: unknown) => {
-  const O = F.text, box = layoutBox(w, h, band), k = box.k, av = !!c.avatar;
+const solve = (F: Faces, c: Cta, w: number, h: number, band: unknown, beside: unknown) => {
+  const O = F.text, box = layoutBox(w, h, band, beside), k = box.k, av = !!c.avatar;
   const at = (U: number) => {
     const Hs = Math.max(LABEL.size * k, U * U_.handle), bh = U * U_.button, Ls = bh * U_.label;
     const hw = runW(O, Hs, TRACK.line, c.handle);
@@ -63,6 +64,8 @@ const solve = (F: Faces, c: Cta, w: number, h: number, band: unknown) => {
     return { ok: width <= box.width && height <= box.height, U, Hs, bh, Ls, hw, icon, padB, gapI, lw, bw, ring, aw, gA, colW, colH, width, height };
   };
   const fit = fitDown((av ? 280 : 320) * k, 96 * k, 2 * k, at);   // with no avatar the column alone may grow taller
+  if (!fit.ok) throw new Error(`cta_follow: the handle "${c.handle}" and the button "${c.button}" do not fit the grid at a readable size: ` +
+    "a shorter handle or button");
   const x0 = box.left + (box.width - fit.width) / 2, cy = box.top + fit.height / 2, colX = x0 + fit.aw + fit.gA;
   const hBase = cy - fit.colH / 2 + O.cap * fit.Hs, by = hBase + fit.U * U_.gapC;
   // beside an avatar the column hangs from its left edge; alone it is centred
@@ -70,11 +73,13 @@ const solve = (F: Faces, c: Cta, w: number, h: number, band: unknown) => {
   return { ...fit, box, k, cx: x0 + fit.aw / 2, cy, hx, hBase, bx, by };
 };
 
-/** The button's face at one state, centred in it: an icon (a plus, or the check drawn on to `check` 0..1) and its
- *  label. under: a crisp dark copy 2 px below (no blur: it may be scaled by the press) to hold white on a bright wall. */
+/** The button's face at one state: an icon (a plus, or the check drawn on to `check` 0..1) and its label, the pair
+ *  centred as if it held the wider label, so both faces share one left edge and FOLLOW runs on into FOLLOWING as the
+ *  marker passes (each centred on its own width read as a garble mid-wipe). under: a crisp dark copy 2 px below (no
+ *  blur: it may be scaled by the press) to hold white on a bright wall. */
 const ButtonFace: React.FC<{ L: ReturnType<typeof solve>; O: Faces["text"]; text: string; color: string; icon: "plus" | "check"; check?: number;
   under?: boolean }> = ({ L, O, text, color, icon, check = 1, under = false }) => {
-    const tw = runW(O, L.Ls, TRACK.label, text), x = (L.bw - (L.icon + L.gapI + tw)) / 2;
+    const x = (L.bw - (L.icon + L.gapI + L.lw)) / 2;
     const base = L.bh / 2 + (O.cap * L.Ls) / 2, s = L.icon, iy = base - s, sw = Math.max(2.5, L.Ls * 0.13);
     const path = icon === "plus" ? `M${f2(x + s / 2)} ${f2(iy + sw / 2)} V${f2(iy + s - sw / 2)} M${f2(x + sw / 2)} ${f2(iy + s / 2)} H${f2(x + s - sw / 2)}`
       : `M${f2(x + s * 0.06)} ${f2(iy + s * 0.55)} L${f2(x + s * 0.38)} ${f2(iy + s * 0.86)} L${f2(x + s * 0.96)} ${f2(iy + s * 0.14)}`;
@@ -92,15 +97,25 @@ const ButtonFace: React.FC<{ L: ReturnType<typeof solve>; O: Faces["text"]; text
     return <>{under ? layer(UNDER, 2 * L.k) : null}{layer(color, 0)}</>;
   };
 
+/** The layout as rectangles (kinetic/probe.ts). */
+export const probe: Prober = (F, p, w, h, dur) => {
+  const c = ctaProps(p), L = solve(F, c, w, h, p.band, p.beside), O = F.text;
+  firstLanding("cta_follow", c.at, dur);
+  const parts: Part[] = [{ kind: "handle", r: capsRect(L.hx, L.hw, L.hBase, O.cap * L.Hs) }, { kind: "button", r: [L.bx, L.by, L.bx + L.bw, L.by + L.bh] }];
+  if (c.avatar) parts.push({ kind: "avatar", r: [L.cx - L.aw / 2, L.cy - L.aw / 2, L.cx + L.aw / 2, L.cy + L.aw / 2] });
+  return { k: L.k, parts, sizes: { handle: L.Hs } };
+};
+
 const Follow: React.FC<TP & { F: Faces }> = ({ p, w, h, dur, id, F }) => {
   const { t, dt } = useClock();
   const c = useMemo(() => ctaProps(p), [p.handle, p.at, p.follow_at, p.avatar, p.button, p.pressed]);
-  const L = useMemo(() => solve(F, c, w, h, p.band), [F, c, w, h, JSON.stringify(p.band)]);
+  const L = useMemo(() => solve(F, c, w, h, p.band, p.beside), [F, c, w, h, JSON.stringify(p.band), JSON.stringify(p.beside)]);
   const O = F.text, k = L.k, U = L.U, fa = c.follow_at;
+  useMemo(() => firstLanding("cta_follow", c.at, dur), [c, dur]);
   const t0 = c.at - TIME.lead;
   // the avatar and its ring
   const R = U / 2, open = prog(t, t0, T_.open, EASE.settle), ringR = R + U * (U_.ring.gap + U_.ring.w / 2);
-  const ringP = prog(t, c.at, T_.ringDraw, EASE.draw), circ = 2 * Math.PI * ringR;
+  const ringP = prog(t, t0, T_.ringDraw, EASE.draw), circ = 2 * Math.PI * ringR;
   // the handle
   const h0 = c.at + T_.handle, hDist = O.cap * L.Hs * 1.3;
   // the button: wiped in as a well, pressed on "follow", the marker pulled across it
@@ -112,7 +127,7 @@ const Follow: React.FC<TP & { F: Faces }> = ({ p, w, h, dur, id, F }) => {
   const out = exitAt(dur, last, p.out_at);
   const bcx = L.bx + L.bw / 2, bcy = L.by + L.bh / 2;
   return (
-    <Lockup t={t} t0={t0} out={out} box={L.box} oy={L.box.top} w={w} h={h}>
+    <Lockup t={t} t0={t0} out={out} box={L.box} oy={L.box.top} w={w} h={h} bridge={p}>
       {c.avatar && open > 0 ? (
         <>
           <div style={{ position: "absolute", left: L.cx - R, top: L.cy - R, width: U, height: U, clipPath: `circle(${f2(R * open)}px at 50% 50%)` }}>

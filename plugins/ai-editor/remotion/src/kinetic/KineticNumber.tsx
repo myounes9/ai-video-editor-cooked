@@ -8,11 +8,12 @@
 //     the value reads final;
 //   - tally: a counter beside a grid of up to 30 tiles that fill as the count passes each one's share, the last
 //     with a short flare;
-//   - stamp: a hook with a word (REJECTED, SOLD OUT) stamped across the figure on its word. Any variant may carry a
-//     stamp: as it comes the marker is pulled off the figure and hands it to the foil (a stacked layer), so the
-//     figure stays key-coloured and the stamp carries the marker's key plate.
+//   - stamp: a hook with a word (REJECTED, SOLD OUT) stamped across the figure's foot on its word (it covers at most
+//     the bottom fifth of the caps: the figure stays readable; the layout makes room for it under the figure). Any
+//     variant may carry a stamp: as it comes the marker is pulled off the figure and hands it to the foil (a stacked
+//     layer), so the figure stays key-coloured and the stamp carries the marker's key plate.
 // The sub-line rises per character through its mask no earlier than the figure's landing + 0.15 s; key words in
-// the foil. The lockup holds at least 1.2 s after its last landing, pushes 1.5% and leaves in one feathered sweep.
+// the foil. A long sub-line wraps onto two lines rather than shrink the figure. The lockup holds at least 1.2 s after its last landing, pushes 1.5% and leaves in one feathered sweep.
 // props: num, at, variant?, land_at?, sub?: [{text, at?, key?}], stamp?: {text, at?}, tiles? (tally, 1-30), out_at?,
 //        band? ([top, bottom] % of the frame height), hide_captions? (default true: StyleEdit.tsx).
 import React, { useMemo } from "react";
@@ -21,9 +22,10 @@ import type { TP } from "../Templates";
 import { layoutBox, fitDown } from "./fit";
 import { Behind, FigureGlyphs, FoilDefs, Glyphs, LineMask, MarkerReveal, Lockup, Odometer, Run, Scaled, f2, figureSizes, landedAt, lerp,
   odometerLayout, pullOff, pullOn, settleAt, stagger } from "./primitives";
-import { counter, exitAt, labelStart, toFrame, useClock } from "./time";
+import { counter, exitAt, firstLanding, labelStart, toFrame, useClock } from "./time";
+import { Part, Probe, countProbe } from "./probe";
 import { EASE, FOIL, KEY, PERCENT_K, PREFIX_K, TIME, TRACK, UNDER } from "./tokens";
-import { Face, Faces, Figure, Value, adv, baseOff, figureParts, figureValue, ink, runW, splitFigure, useFaces } from "./type";
+import { Face, Faces, Figure, Value, adv, baseOff, figureParts, figureValue, ink, runW, signBase, splitFigure, useFaces } from "./type";
 
 export const VARIANTS = ["hook", "counter", "tally", "stamp"] as const;
 type Variant = (typeof VARIANTS)[number];
@@ -31,11 +33,13 @@ type Word = { text: string; at: number; key: boolean };
 type Spec = { num: string; at: number; variant: Variant; land_at?: number; sub: Word[]; stamp?: { text: string; at: number }; tiles: number };
 
 // The format's own proportions (shares of the figure's size S unless named): the sub-line's cap height against the
-// figure's, the gap above it; the stamp's type against the figure's, its padding, tracking (em), tilt, slam, squash
-// and ring (s), its jolt (frames) and its plate (ink at 94%: the footage barely shows through); the tally's tiles.
-const SUB = { cap: 0.31, gap: 0.085 };
-const STAMP = { cap: 0.24, padX: 0.11, padY: 0.09, track: 0.06, tilt: -6, from: 1.45, slam: 0.13, squash: 0.03, ring: 0.3, shake: 3,
-  plate: "rgba(11,11,11,0.94)" };
+// figure's, the gap above it, its two lines' spacing (x its size); the stamp's type against the figure's, its padding,
+// tracking (em), tilt, slam, squash and ring (s), its jolt (frames), its plate (ink at 94%: the footage barely shows
+// through), how much of the figure's cap height it may cover (from the baseline up) and how wide it may be (x the
+// grid, or 1.25 x the figure's marker when that is wider); the tally's tiles.
+const SUB = { cap: 0.31, gap: 0.085, lead: 1.12 };
+const STAMP = { cap: 0.2, padX: 0.11, padY: 0.09, track: 0.06, tilt: -6, from: 1.45, slam: 0.13, squash: 0.03, ring: 0.3, shake: 3,
+  plate: "rgba(11,11,11,0.94)", over: 0.2, wide: 0.62 };
 const TILE = { gap: 0.22, max: 30, pop: 0.55, flare: 6 };
 /** A tile's empty well (the goal track's): white at 14% with a 1 px border. */
 const WELL = "rgba(255,255,255,0.14)", WELL_LINE = "rgba(255,255,255,0.32)";
@@ -61,7 +65,9 @@ export const numberSpec = (p: Record<string, any>): Spec => {
   const stamp = p.stamp ? { text: String(p.stamp.text).trim(), at: typeof p.stamp.at === "number" ? p.stamp.at : at + 1.2 } : undefined;
   if (p.tiles !== undefined && !(Number.isInteger(p.tiles) && p.tiles >= 1 && p.tiles <= TILE.max))
     throw new Error(`kinetic_number tiles ${JSON.stringify(p.tiles)}: a whole number from 1 to ${TILE.max}`);
-  const tiles = variant !== "tally" ? 0 : p.tiles ?? Math.max(1, Math.min(TILE.max, Math.round(v!.value)));
+  // a tally's tiles: one per unit up to TILE.max, its K/M/B counted ("4.5K" is 4500: a full grid, never 5 tiles)
+  const mult = ({ K: 1e3, M: 1e6, B: 1e9 } as Record<string, number>)[v?.tail.trim().toUpperCase() ?? ""] ?? 1;
+  const tiles = variant !== "tally" ? 0 : p.tiles ?? Math.max(1, Math.min(TILE.max, Math.round(v!.value * mult)));
   return { num, at, variant, land_at: typeof p.land_at === "number" ? p.land_at : undefined, sub, stamp, tiles };
 };
 
@@ -86,54 +92,80 @@ const tileGrid = (n: number, mH: number, maxW: number) => {
   throw new Error("unreachable");
 };
 
-const solve = (F: Faces, sp: Spec, w: number, h: number, band: unknown) => {
-  const D = F.display, O = F.text, box = layoutBox(w, h, band), k = box.k;
+/** Words split onto two lines at the word break that balances them best (one line when there is one word). */
+const twoLines = (O: Face, size: number, words: string[]) => {
+  if (words.length < 2) return [words];
+  let best = [words], bw = Infinity;
+  for (let i = 1; i < words.length; i++) {
+    const ls = [words.slice(0, i), words.slice(i)], w = Math.max(...ls.map((l) => runW(O, size, TRACK.line, l.join(" "))));
+    if (w < bw) { best = ls; bw = w; }
+  }
+  return best;
+};
+
+const solve = (F: Faces, sp: Spec, w: number, h: number, band: unknown, beside: unknown) => {
+  const D = F.display, O = F.text, box = layoutBox(w, h, band, beside), k = box.k;
   const fig = splitFigure(sp.num);
   const v = sp.variant === "counter" || sp.variant === "tally" ? figureValue(fig.body) : null;
   const words = sp.sub.map((s) => s.text.toUpperCase());
-  const line = words.join(" ");
   const stampText = sp.stamp?.text.toUpperCase() ?? "";
-  const at = (S: number) => {
-    const padX = S * 0.1, padY = S * 0.1;
+  const rad = (Math.abs(STAMP.tilt) * Math.PI) / 180;
+  const at = (S: number, wrap: boolean) => {
+    const padX = S * 0.1, padY = S * 0.1, capH = D.cap * S;
     const g = v ? countParts(D, S, fig, v) : figureParts(D, S, TRACK.figure, fig);
-    const mW = g.ir - g.il + 2 * padX, mH = D.cap * S + 2 * padY;
-    const Ss = Math.max((D.cap * S * SUB.cap) / O.cap, 30 * k), gapS = S * SUB.gap;
-    const subW = line ? runW(O, Ss, TRACK.line, line) : 0;
+    const mW = g.ir - g.il + 2 * padX, mH = capH + 2 * padY;
+    const Ss = Math.max((capH * SUB.cap) / O.cap, 30 * k), gapS = S * SUB.gap;
+    const lines = words.length ? (wrap ? twoLines(O, Ss, words) : [words]) : [];
+    const subW = Math.max(0, ...lines.map((l) => runW(O, Ss, TRACK.line, l.join(" "))));
     const gx = S * 0.16;
     const grid = sp.tiles ? tileGrid(sp.tiles, mH, box.width - mW - gx) : null;
     const rowW = mW + (grid ? gx + grid.gw : 0);
-    // the stamp: a key plate across the figure's lower half, as wide as its word (never past the grid when tilted)
-    let Ts = S * STAMP.cap, plate = { w: 0, h: 0 };
+    // the stamp: a key plate as wide as its word, never past the grid (or much wider than the figure) when tilted; its
+    // top on the figure's foot, covering at most STAMP.over of the cap height, the sub-line pushed down under it
+    let Ts = S * STAMP.cap, plate = { w: 0, h: 0 }, half = 0, halfW = 0;
     if (stampText) {
       const fitPlate = (T: number) => ({ w: runW(D, T, STAMP.track, stampText) + 2 * S * STAMP.padX, h: D.cap * T + 2 * S * STAMP.padY });
+      const maxW = Math.min(box.width, Math.max(box.width * STAMP.wide, 1.25 * mW));
       plate = fitPlate(Ts);
-      const rad = (Math.abs(STAMP.tilt) * Math.PI) / 180;
-      while (plate.w * Math.cos(rad) + plate.h * Math.sin(rad) > box.width && Ts > 12 * k) plate = fitPlate((Ts -= 2 * k));
+      while (plate.w * Math.cos(rad) + plate.h * Math.sin(rad) > maxW && Ts > 12 * k) plate = fitPlate((Ts -= 2 * k));
+      half = (plate.h * Math.cos(rad) + plate.w * Math.sin(rad)) / 2;
+      halfW = (plate.w * Math.cos(rad) + plate.h * Math.sin(rad)) / 2;
     }
-    const totalH = mH + (line ? gapS + O.cap * Ss : 0);
-    return { ok: rowW <= box.width && subW <= box.width && totalH <= box.height && (!grid || grid.ok), padX, padY, g, mW, mH, Ss, gapS, subW,
-      gx, grid, rowW, Ts, plate, totalH };
+    // every y from the marker's top
+    const stampY = padY + capH * (1 - STAMP.over) + half, stampBot = stampText ? stampY + half : 0;
+    const subTop = Math.max(mH + gapS, stampText ? stampBot + gapS : 0);
+    const subH = lines.length ? O.cap * Ss + (lines.length - 1) * Ss * SUB.lead : 0;
+    const totalH = lines.length ? subTop + subH : Math.max(mH, stampBot);
+    return { ok: rowW <= box.width && subW <= box.width && totalH <= box.height && (!grid || grid.ok), padX, padY, g, mW, mH, Ss, gapS, lines,
+      subW, gx, grid, rowW, Ts, plate, half, halfW, stampY, subTop, totalH };
   };
-  const fit = fitDown(460 * k, 80 * k, 2 * k, at);
+  // the biggest figure with the sub-line on one line; two lines only when that makes the figure clearly bigger
+  let fit = fitDown(460 * k, 80 * k, 2 * k, (S) => at(S, false));
+  if (words.length > 1) {
+    const two = fitDown(460 * k, 80 * k, 2 * k, (S) => at(S, true));
+    if (two.ok && (!fit.ok || two.size > fit.size * 1.15)) fit = two;
+  }
   const S = fit.size;
-  // the row (figure, and the tally's grid) centred on the grid; the sub-line centred under it
+  // the row (figure, and the tally's grid) centred on the grid; each sub-line centred under it
   const cx = box.left + box.width / 2, rowL = cx - fit.rowW / 2;
   const mk = { a: rowL, b: rowL + fit.mW };
   const fx = mk.a + fit.padX - fit.g.il;   // the figure's origin: its ink sits padX inside the marker
   const mTop = box.top, capTop = mTop + fit.padY, base = capTop + D.cap * S, mBot = base + fit.padY;
-  const subBase = mBot + fit.gapS + O.cap * fit.Ss;
-  let acc = "";
-  const subX = words.map((wd) => {
-    const x = cx - fit.subW / 2 + (acc ? adv(O, fit.Ss, TRACK.line, acc + " ") : 0);
-    acc += (acc ? " " : "") + wd;
-    return x;
+  const subBase = mTop + fit.subTop + O.cap * fit.Ss;
+  const subX: number[] = [], subLine: number[] = [];
+  fit.lines.forEach((l, li) => {
+    const lw = runW(O, fit.Ss, TRACK.line, l.join(" "));
+    l.forEach((_, j) => {
+      subX.push(cx - lw / 2 + (j ? adv(O, fit.Ss, TRACK.line, l.slice(0, j).join(" ") + " ") : 0));
+      subLine.push(li);
+    });
   });
+  const subLast = subBase + (fit.lines.length - 1) * fit.Ss * SUB.lead;
   const gridX = mk.b + fit.gx;
-  // the stamp's centre: on the figure's ink centre, on its baseline (most of the figure stays clear), raised only as
-  // far as its tilted plate needs to stay off the sub-line's caps
-  const rad = (Math.abs(STAMP.tilt) * Math.PI) / 180, half = (fit.plate.h * Math.cos(rad) + fit.plate.w * Math.sin(rad)) / 2;
-  const stampC = { x: fx + (fit.g.il + fit.g.ir) / 2, y: line ? Math.min(base, subBase - O.cap * fit.Ss - S * 0.02 - half) : base };
-  return { ...fit, S, box, k, fig, v, words, line, stampText, cx, mk, fx, mTop, capTop, base, mBot, subBase, subX, gridX, stampC };
+  // the stamp's centre: on the figure's ink centre (kept inside the grid), over the figure's foot
+  const inkC = fx + (fit.g.il + fit.g.ir) / 2;
+  const stampC = { x: Math.max(box.left + fit.halfW, Math.min(box.right - fit.halfW, inkC)), y: mTop + fit.stampY };
+  return { ...fit, S, box, k, fig, v, words, stampText, cx, mk, fx, mTop, capTop, base, mBot, subBase, subLast, subX, subLine, gridX, stampC };
 };
 type L = ReturnType<typeof solve>;
 
@@ -145,19 +177,21 @@ const FigureLayer: React.FC<{ L: L; F: Faces; paint: "ink" | "gold"; valAt?: (u:
   const g = L.g, capTop = L.base - D.cap * L.S;
   return (
     <>
-      {L.fig.prefix ? <Glyphs text={L.fig.prefix} face={D} size={g.ps} x={L.fx} base={capTop + D.cap * g.ps} paint={paint} id={id}
+      {L.fig.prefix ? <Glyphs text={L.fig.prefix} face={D} size={g.ps} x={L.fx} base={signBase(D, g.ps, L.fig.prefix, capTop)} paint={paint} id={id}
         sheen={sheen} sheenW={g.w} sheenX={0} /> : null}
       <Odometer face={D} size={L.S} v={L.v} x={L.fx + g.bx} base={L.base} paint={paint} valAt={valAt} t={t} dt={dt} id={id} k={L.k} />
-      {L.fig.suffix ? <Glyphs text={L.fig.suffix} face={D} size={g.ss} x={L.fx + g.sx} base={capTop + D.cap * g.ss} paint={paint} id={id}
+      {L.fig.suffix ? <Glyphs text={L.fig.suffix} face={D} size={g.ss} x={L.fx + g.sx} base={signBase(D, g.ss, L.fig.suffix, capTop)} paint={paint} id={id}
         sheen={sheen} sheenW={g.w} sheenX={g.sx} /> : null}
     </>
   );
 };
 
-/** The tally's tiles: wells that appear with the lockup, each filled (a key tile popping from TILE.pop to full size)
- *  on the frame the count passes its share; the last one flares as the count lands. No opacity on a scaled layer:
+/** The tally's tiles: wells that appear as the marker crosses the figure, each filled (a key tile popping from TILE.pop
+ *  to full size) on the frame the count passes its share, never before the marker has landed (the ones already due fill
+ *  in a quick run then); the last one flares as the count lands. No opacity on a scaled layer:
  *  a well fades in by its colours' alpha, a fill pops at full colour and drops its transform once settled. */
 const Tiles: React.FC<{ L: L; fills: number[]; t0: number; land: number; t: number; fps: number }> = ({ L, fills, t0, land, t, fps }) => {
+  // read left to right: the wells come in as the marker is pulled across the figure, the tiles fill once it has landed
   const g = L.grid!, n = fills.length, r = Math.max(2, 3 * L.k);
   const fill = `linear-gradient(180deg, ${FOIL[1][0]} 0%, ${KEY} 45%, ${FOIL[4][0]} 100%)`;
   const flare = 1 - prog(t, land, TILE.flare / fps, EASE.count);
@@ -169,7 +203,7 @@ const Tiles: React.FC<{ L: L; fills: number[]; t0: number; land: number; t: numb
       ) : null}
       {fills.map((tf, i) => {
         const x = L.gridX + (i % g.cols) * g.pitch, y = L.mTop + Math.floor(i / g.cols) * g.pitch;
-        const a = prog(t, t0 + i * 0.012, 0.2, EASE.rise);
+        const a = prog(t, t0 + 0.6 * TIME.pull + i * 0.012, 0.2, EASE.rise);
         const s = t < tf ? 0 : lerp(TILE.pop, 1, prog(t, tf, TIME.settleFrames / fps, EASE.settle));
         return (
           <React.Fragment key={i}>
@@ -220,34 +254,54 @@ const jolt = (t: number, at: number, fps: number, k: number) => {
   return `translate(${f2(dir[0] * amp)}px, ${f2(dir[1] * amp)}px)`;
 };
 
+/** The figure's clock, solved once: t0 (the pull), the count (val: the value at any time, from 40% as the marker is
+ *  pulled on, over the window whose first final frame is land_at, its word: it reads final on the word, never early),
+ *  land (the hit fires there) and the tally's fills (each tile on the first frame the shown count reaches its share,
+ *  never before the marker has landed: the figure reads first, then the tiles, left to right; the ones already due fill
+ *  in a quick run that ends by the landing). */
+const timing = (L: L, sp: Spec, fps: number) => {
+  const t0 = sp.at - TIME.lead;
+  if (!L.v) return { t0, val: undefined, land: sp.at, fills: [] as number[] };
+  const v = L.v, want = sp.land_at ?? sp.at + COUNT_S;
+  let cd = 20;
+  for (let n = 3; n < 20 * fps; n++) if (counter(0, v.value, v.decimals, t0, n / fps, fps).land >= want - 0.5 / fps) { cd = n / fps; break; }
+  const c = counter(0, v.value, v.decimals, t0, cd, fps);
+  const unit = 10 ** v.decimals, from = t0 + TIME.pull, q = Math.min(0.012, Math.max(0, c.land - from) / Math.max(1, sp.tiles));
+  const fills = Array.from({ length: sp.tiles }, (_, i) => {
+    const need = ((i + 1) * v.value) / sp.tiles;
+    let tf = c.land;
+    for (let f = toFrame(t0, fps); f <= toFrame(c.land, fps); f++) {
+      if (Math.round(c.val(f / fps) * unit) / unit >= need - 1e-9) { tf = f / fps; break; }
+    }
+    return Math.min(c.land, Math.max(tf, from + i * q));
+  });
+  return { t0, val: c.val, land: c.land, fills };
+};
+
+/** The layout as rectangles and the count frame by frame, for test/templates.mjs (kinetic/probe.ts). */
+export const probe = (F: Faces, p: Record<string, any>, w: number, h: number, dur: number, fps: number): Probe => {
+  const sp = numberSpec(p), L = solve(F, sp, w, h, p.band, p.beside), T = timing(L, sp, fps), D = F.display, O = F.text;
+  firstLanding("kinetic_number", sp.at, dur);
+  const parts: Part[] = [{ kind: "figure", r: [L.fx + L.g.il, L.capTop, L.fx + L.g.ir, L.base] }];
+  L.words.forEach((wd, j) => {
+    const b = L.subBase + L.subLine[j] * L.Ss * SUB.lead;
+    parts.push({ kind: "sub", r: [L.subX[j], b - O.cap * L.Ss, L.subX[j] + runW(O, L.Ss, TRACK.line, wd), b] });
+  });
+  if (L.grid) parts.push({ kind: "tiles", r: [L.gridX, L.mTop, L.gridX + L.grid.gw, L.mTop + L.grid.rows * L.grid.pitch - (L.grid.pitch - L.grid.tile)] });
+  if (L.stampText) parts.push({ kind: "stamp", r: [L.stampC.x - L.halfW, L.stampC.y - L.half, L.stampC.x + L.halfW, L.stampC.y + L.half] });
+  return { k: L.k, parts, counts: L.v && T.val ? [countProbe(T.val, L.v, T.t0, T.land, dur, fps)] : [],
+    fills: T.fills.length ? { first: Math.min(...T.fills), marker: T.t0 + TIME.pull } : undefined, sizes: { figure: L.S, cap: D.cap * L.S } };
+};
+
 const Number_: React.FC<TP & { F: Faces }> = ({ p, w, h, dur, id, F }) => {
   const { t, dt, fps } = useClock();
   const sp = useMemo(() => numberSpec(p), [JSON.stringify(p)]);
-  const L = useMemo(() => solve(F, sp, w, h, p.band), [F, sp, w, h, JSON.stringify(p.band)]);
+  const L = useMemo(() => solve(F, sp, w, h, p.band, p.beside), [F, sp, w, h, JSON.stringify(p.band), JSON.stringify(p.beside)]);
+  const T = useMemo(() => timing(L, sp, fps), [L, sp, fps]);
+  useMemo(() => firstLanding("kinetic_number", sp.at, dur), [sp, dur]);
   const D = F.display, O = F.text, S = L.S, k = L.k;
-  const t0 = sp.at - TIME.lead;
-  // the count: from 40% as the marker is pulled on, over the window whose first final frame is land_at (its word):
-  // the shown value reads final on the word, never early; the hit fires on `land`
-  const cd = useMemo(() => {
-    if (!L.v) return 0;
-    const want = sp.land_at ?? sp.at + COUNT_S;
-    for (let n = 3; n < 20 * fps; n++) if (counter(0, L.v.value, L.v.decimals, t0, n / fps, fps).land >= want - 0.5 / fps) return n / fps;
-    return 20;
-  }, [L, sp, fps]);
-  const c = L.v ? counter(t, L.v.value, L.v.decimals, t0, cd, fps) : null;
-  const land = c ? c.land : sp.at;
-  // the tally's fills: each tile on the first frame the shown count reaches its share (the ones under 40% in a quick run)
-  const fills = useMemo(() => {
-    if (!c || !sp.tiles) return [];
-    const unit = 10 ** L.v!.decimals;
-    return Array.from({ length: sp.tiles }, (_, i) => {
-      const need = ((i + 1) * L.v!.value) / sp.tiles;
-      for (let f = toFrame(t0, fps); f <= toFrame(c.land, fps); f++) {
-        if (Math.round(c.val(f / fps) * unit) / unit >= need - 1e-9) return Math.max(f / fps, t0 + i * 0.02);
-      }
-      return c.land;
-    });
-  }, [L, sp, fps]);
+  const { t0, land, fills } = T;
+  const c = T.val ? { val: T.val } : null;
   // the sub-line: each word no earlier than the figure's landing + TIME.labelAfter; words starting together run on as one stagger
   const subT: number[] = [];
   sp.sub.forEach((s, j) => {
@@ -272,7 +326,7 @@ const Number_: React.FC<TP & { F: Faces }> = ({ p, w, h, dur, id, F }) => {
   const gold = L.words.flatMap((_, j) => (sp.sub[j].key ? [j] : []));
   const shake = Number.isFinite(stampAt) ? jolt(t, stampAt, fps, k) : undefined;
   return (
-    <Lockup t={t} t0={t0} out={out} box={L.box} oy={L.mTop} w={w} h={h}>
+    <Lockup t={t} t0={t0} out={out} box={L.box} oy={L.mTop} w={w} h={h} bridge={p}>
       <div style={{ position: "absolute", inset: 0, transform: shake }}>
         {Number.isFinite(hand) ? <FoilDefs id={id} sizes={figureSizes(L.fig, S)} /> : null}
         {gold.map((j) => <FoilDefs key={j} id={`${id}-s${j}`} sizes={[L.Ss]} />)}
@@ -286,9 +340,10 @@ const Number_: React.FC<TP & { F: Faces }> = ({ p, w, h, dur, id, F }) => {
           </Scaled>
         </MarkerReveal>
         {L.words.length ? (
-          <LineMask on={t < subLanded} y0={L.subBase - O.cap * L.Ss - 10 * k} y1={L.subBase + 10 * k}>
+          <LineMask on={t < subLanded} y0={L.subBase - O.cap * L.Ss - 10 * k} y1={L.subLast + 10 * k}>
             {L.words.map((wd, j) => (
-              <Run key={j} text={wd} face={O} size={L.Ss} track={TRACK.line} x={L.subX[j]} base={L.subBase} paint={sp.sub[j].key ? "gold" : "white"}
+              <Run key={j} text={wd} face={O} size={L.Ss} track={TRACK.line} x={L.subX[j]} base={L.subBase + L.subLine[j] * L.Ss * SUB.lead}
+                paint={sp.sub[j].key ? "gold" : "white"}
                 rise={subRise[j]} t={t} dt={dt} id={`${id}-s${j}`} k={k} />
             ))}
           </LineMask>

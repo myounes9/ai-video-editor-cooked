@@ -19,9 +19,10 @@ import type { TP } from "../Templates";
 import { layoutBox, fitDown } from "./fit";
 import { BlurDefs, FigureGlyphs, FoilDefs, Glyphs, LineMask, Lockup, MarkerReveal, Odometer, Run, Scaled, f2, figureSizes, landedAt, lerp,
   moving, odometerLayout, pullOn, settleAt, sid, stagger } from "./primitives";
-import { counter, exitAt, labelStart, useClock } from "./time";
+import { counter, exitAt, firstLanding, labelStart, useClock } from "./time";
+import { Prober, capsRect, countProbe } from "./probe";
 import { EASE, GOAL, KEY, LABEL, PERCENT_K, TIME, TRACK } from "./tokens";
-import { Faces, Value, adv, figureParts, figureValue, ink, runW, splitFigure, useFaces } from "./type";
+import { Faces, Value, adv, figureParts, figureValue, ink, runW, signBase, splitFigure, useFaces } from "./type";
 
 type Goal = { pct: string; v: Value; target: string; label: string; at: number; count_at: number; at_target: number; at_goal?: number };
 
@@ -41,10 +42,10 @@ export const goalProps = (p: Record<string, any>): Goal => {
     count_at: Math.max(at, num(p.count_at) ?? at + GOAL.countAfter), at_target: num(p.at_target) ?? at + 1, at_goal: num(p.at_goal) };
 };
 
-const solve = (F: Faces, g: Goal, w: number, h: number, band: unknown) => {
+const solve = (F: Faces, g: Goal, w: number, h: number, band: unknown, beside: unknown) => {
   // one module, never wider than the grid of a vertical frame: on a wide frame (where the band, not the width, sets
   // the size) it keeps its vertical proportions, centred on the grid, rather than a hairline track across the frame
-  const g0 = layoutBox(w, h, band), k = g0.k, gw = Math.min(g0.width, GOAL.maxW * k), gl = g0.left + (g0.width - gw) / 2;
+  const g0 = layoutBox(w, h, band, beside), k = g0.k, gw = Math.min(g0.width, GOAL.maxW * k), gl = g0.left + (g0.width - gw) / 2;
   const D = F.display, O = F.text, box = { ...g0, left: gl, right: gl + gw, width: gw };
   const tgt = splitFigure(g.target), label = g.label.toUpperCase();
   // the lockup at figure size S: the % figure on its marker at the grid's left, the target and its label at the right,
@@ -71,15 +72,31 @@ const solve = (F: Faces, g: Goal, w: number, h: number, band: unknown) => {
     dcx: box.right - fit.TH / 2, dcy: fit.trackTop + fit.TH / 2 };   // the marker on the track's end cap
 };
 
+/** The count runs from the pull and first reads final on its count word: its window is stretched so it does. */
+const countDur = (g: Goal) => Math.max(0.2, (g.count_at - (g.at - TIME.lead)) / Math.max(0.05, counter(0, g.v.value, g.v.decimals, 0, 1, 1000).land));
+
+/** The layout as rectangles and the count frame by frame (kinetic/probe.ts). */
+export const probe: Prober = (F, p, w, h, dur, fps) => {
+  const g = goalProps(p), L = solve(F, g, w, h, p.band, p.beside), D = F.display, O = F.text, t0 = g.at - TIME.lead;
+  firstLanding("goal_bar", g.at, dur);
+  const c = counter(0, g.v.value, g.v.decimals, t0, countDur(g), fps);
+  const tg = L.tp;
+  return { k: L.k, sizes: { figure: L.S, label: L.Ls }, counts: [countProbe(c.val, g.v, t0, c.land, dur, fps)], parts: [
+    { kind: "figure", r: [L.box.left + L.padX, L.capTop, L.box.left + L.mW - L.padX, L.base] },
+    { kind: "figure", r: [L.tx + tg.il, L.base - D.cap * L.T, L.tx + tg.ir, L.base] },
+    { kind: "label", r: capsRect(L.lx, L.lW, L.lBase, O.cap * L.Ls) },
+    { kind: "track", r: [L.box.left, L.trackTop, L.box.right, L.trackTop + L.TH] },
+  ] };
+};
+
 const Bar: React.FC<TP & { F: Faces }> = ({ p, w, h, dur, id, F }) => {
   const { t, dt, fps } = useClock();
   const g = useMemo(() => goalProps(p), [p.pct, p.target, p.label, p.at_pct, p.at, p.count_at, p.at_target, p.at_goal]);
-  const L = useMemo(() => solve(F, g, w, h, p.band), [F, g, w, h, JSON.stringify(p.band)]);
+  const L = useMemo(() => solve(F, g, w, h, p.band, p.beside), [F, g, w, h, JSON.stringify(p.band), JSON.stringify(p.beside)]);
+  useMemo(() => firstLanding("goal_bar", g.at, dur), [g, dur]);
   const D = F.display, O = F.text, S = L.S, k = L.k, T = L.T, TH = L.TH, W = L.box.width;
   const t0 = g.at - TIME.lead;
-  // the count runs from the pull and first reads final on its count word: its window is stretched so it does
-  const cd = useMemo(() => Math.max(0.2, (g.count_at - t0) / Math.max(0.05, counter(0, g.v.value, g.v.decimals, 0, 1, 1000).land)),
-    [g, t0]);
+  const cd = useMemo(() => countDur(g), [g]);
   const c = counter(t, g.v.value, g.v.decimals, t0, cd, fps);
   // the figure on its marker, settling as it is pulled on; it keeps its marker
   const mk = pullOn(t, L.box.left, L.box.left + L.mW, L.mH, t0);
@@ -102,7 +119,7 @@ const Bar: React.FC<TP & { F: Faces }> = ({ p, w, h, dur, id, F }) => {
   const ringW = Math.max(2 * k, L.MD * 0.075);
   const out = exitAt(dur, Math.max(c.land, tLanded, labLanded), p.out_at);
   return (
-    <Lockup t={t} t0={t0} out={out} box={L.box} oy={L.mTop} w={w} h={h}>
+    <Lockup t={t} t0={t0} out={out} box={L.box} oy={L.mTop} w={w} h={h} bridge={p}>
       <FoilDefs id={id} sizes={figureSizes(L.tgt, T)} />
       <BlurDefs defs={rise.sig > 0 ? [{ id: tBlur, sy: rise.sig }] : []} />
       {pw > 0 ? (
@@ -152,7 +169,7 @@ const Bar: React.FC<TP & { F: Faces }> = ({ p, w, h, dur, id, F }) => {
       <MarkerReveal m={mk} y0={L.mTop} y1={L.mBot} id={`${id}-m`} w={w} h={h}>
         <Scaled s={sc} ox={L.fx} oy={L.base}>
           <Odometer face={D} size={S} v={g.v} x={L.fx} base={L.base} paint="ink" valAt={c.val} t={t} dt={dt} id={`${id}-o`} k={k} />
-          <Glyphs text="%" face={D} size={L.ss} x={L.fx + L.sx} base={L.capTop + D.cap * L.ss} paint="ink" />
+          <Glyphs text="%" face={D} size={L.ss} x={L.fx + L.sx} base={signBase(D, L.ss, "%", L.capTop)} paint="ink" />
         </Scaled>
       </MarkerReveal>
     </Lockup>

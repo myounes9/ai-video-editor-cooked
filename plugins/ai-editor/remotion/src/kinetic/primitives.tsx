@@ -4,9 +4,10 @@
 // instead), a transform is dropped once its move has settled, and a scaled layer never carries opacity (the fade
 // lives on an unscaled parent or in a colour's alpha).
 import React, { useMemo } from "react";
+import { useVideoConfig } from "remotion";
 import { prog } from "../motion";
 import { BLUR, BRONZE, EASE, FOIL, INK, KEY, SHEEN, SOFT, TIME, UNDER, WHITE } from "./tokens";
-import { Face, Figure, Value, adv, baseOff, figureParts, offsets, runW, writeValue } from "./type";
+import { Face, Figure, Value, adv, baseOff, figureParts, offsets, runW, signBase, writeValue } from "./type";
 import type { Box } from "./fit";
 
 export const lerp = (a: number, b: number, p: number) => a + (b - a) * p;
@@ -116,18 +117,18 @@ export const Glyphs: React.FC<{ text: string; face: Face; size: number; track?: 
   <span style={runStyle(face, size, track, x, base, paint, id, sheen, sheenW, sheenX)}>{text}</span>
 );
 
-/** A figure (currency sign, body, %) on a baseline: the sign and the % set smaller with their cap tops on the
- *  body's cap top. One sheen crosses all of it (gold). */
+/** A figure (currency sign, body, %) on a baseline: the sign and the % set smaller with their ink tops on the
+ *  body's cap top (type.ts signBase). One sheen crosses all of it (gold). */
 export const FigureGlyphs: React.FC<{ fig: Figure; face: Face; size: number; track: number; x: number; base: number; paint: Paint; id?: string;
   sheen?: number }> = ({ fig, face, size, track, x, base, paint, id = "k", sheen = -1 }) => {
   const g = figureParts(face, size, track, fig);
   const capTop = base - face.cap * size;
   return (
     <>
-      {fig.prefix ? <Glyphs text={fig.prefix} face={face} size={g.ps} x={x + g.px} base={capTop + face.cap * g.ps} paint={paint} id={id}
+      {fig.prefix ? <Glyphs text={fig.prefix} face={face} size={g.ps} x={x + g.px} base={signBase(face, g.ps, fig.prefix, capTop)} paint={paint} id={id}
         sheen={sheen} sheenW={g.w} sheenX={g.px} /> : null}
       <Glyphs text={fig.body} face={face} size={size} track={track} x={x + g.bx} base={base} paint={paint} id={id} sheen={sheen} sheenW={g.w} sheenX={g.bx} />
-      {fig.suffix ? <Glyphs text={fig.suffix} face={face} size={g.ss} x={x + g.sx} base={capTop + face.cap * g.ss} paint={paint} id={id}
+      {fig.suffix ? <Glyphs text={fig.suffix} face={face} size={g.ss} x={x + g.sx} base={signBase(face, g.ss, fig.suffix, capTop)} paint={paint} id={id}
         sheen={sheen} sheenW={g.w} sheenX={g.sx} /> : null}
     </>
   );
@@ -181,10 +182,10 @@ export type Mk = { a: number; b: number; k: number };
 export const markerPoly = (m: Mk, y0: number, y1: number) =>
   `polygon(${f2(m.a)}px ${f2(y0)}px, ${f2(m.b + m.k)}px ${f2(y0)}px, ${f2(m.b - m.k)}px ${f2(y1)}px, ${f2(m.a)}px ${f2(y1)}px)`;
 /** The highlighter pull: the left edge stays at a, the leading edge runs to b from t0 over TIME.pull, leaning
- *  TIME.lean degrees while it runs and straightening as it lands. */
+ *  TIME.lean degrees for the first half of the run (so a 5-frame pull shows it) and straightening as it lands. */
 export const pullOn = (t: number, a: number, b: number, h: number, t0: number): Mk => {
   const p = prog(t, t0, TIME.pull, EASE.pull);
-  return { a, b: lerp(a, b, p), k: p > 0 && p < 1 ? h * Math.tan((TIME.lean * Math.PI) / 180) * 0.5 * (1 - p) : 0 };
+  return { a, b: lerp(a, b, p), k: p > 0 && p < 1 ? h * Math.tan((TIME.lean * Math.PI) / 180) * 0.5 * Math.min(1, 2 * (1 - p)) : 0 };
 };
 /** The marker pulled off its figure: its trailing edge runs to the leading one from t0 over TIME.handoff. off: 0..1
  *  (t0 Infinity: never, the figure keeps its marker). */
@@ -233,18 +234,26 @@ export const Scaled: React.FC<{ s: number; ox: number; oy: number; children: Rea
 
 // =========================================================================================== the lockup's life
 /** Every kinetic lockup's frame: a light top scrim under the Reels header (a gradient, enough to carry white type over
- *  a bright wall), the held lockup's slow push (TIME.push over its life, about (ox, oy): the grid's centre unless a
+ *  a bright wall; it fades in from the card's start, over TIME.scrim before the first landing when the card starts
+ *  that early and over 4 frames at least, and out with the sweep, never on or off in one frame), the held lockup's slow push (TIME.push over its life, about (ox, oy): the grid's centre unless a
  *  format hangs from an edge), and the
  *  exit: one feathered edge (240 px at 1080) sweeping left to right, so a glyph fades as it passes, never cut in two.
  *  t0: the first landing; out: when the sweep starts (Infinity: it never leaves, the next beat of the same lockup
  *  takes over, and it holds still: no push). joined: it carries on from the beat before (the scrim is already up). Nothing
- *  is drawn once the sweep has passed. */
+ *  is drawn once the sweep has passed. bridge: the card's props; plan.py bridge_kinetic sets bridge_in / bridge_out when
+ *  it starts as another kinetic card ends, or ends as one starts: the scrim stays up across the hand-over (it breathed
+ *  out and back in over ten frames there). */
 export const Lockup: React.FC<{ t: number; t0: number; out: number; box: Box; oy: number; ox?: number; w: number; h: number; joined?: boolean;
-  children: React.ReactNode }> = ({ t, t0, out, box, oy, ox = box.left + box.width / 2, w, h, joined = false, children }) => {
+  bridge?: Record<string, unknown>; children: React.ReactNode }> = ({ t, t0, out, box, oy, ox = box.left + box.width / 2, w, h, joined = false,
+  bridge, children }) => {
+    const { fps } = useVideoConfig();
+    const held = { in: joined || bridge?.bridge_in === true, out: bridge?.bridge_out === true };
     const stays = !Number.isFinite(out);
     const pe = stays ? 0 : prog(t, out, TIME.exit, EASE.exit);
-    if (pe >= 1 || (!joined && t < t0 - TIME.scrim - 0.5)) return null;
-    const scrimA = (joined ? 1 : prog(t, t0 - TIME.scrim, TIME.scrim, EASE.scrimIn)) * (stays ? 1 : 1 - prog(t, out, TIME.exit + 0.1, EASE.scrimOut));
+    if ((pe >= 1 && !held.out) || (!held.in && t < t0 - TIME.scrim - 0.5)) return null;
+    const s0 = Math.max(0, t0 - TIME.scrim);
+    const scrimA = (held.in ? 1 : prog(t, s0, Math.max(4 / fps, t0 - s0), EASE.scrimIn)) *
+      (stays || held.out ? 1 : 1 - prog(t, out, TIME.exit, EASE.scrimOut));
     const push = stays ? 1 : 1 + TIME.push * clamp01((t - t0) / Math.max(0.5, out - t0));
     const FE = 240 * box.k, ex = lerp(box.left - FE - 30, w + 30, pe);
     const mask = pe > 0 ? `linear-gradient(90deg, rgba(0,0,0,0) ${f2(ex)}px, #000 ${f2(ex + FE)}px)` : undefined;
@@ -252,9 +261,11 @@ export const Lockup: React.FC<{ t: number; t0: number; out: number; box: Box; oy
       <div style={{ position: "absolute", inset: 0 }}>
         {scrimA > 0 ? <div style={{ position: "absolute", left: 0, right: 0, top: 0, height: Math.min(h, box.bottom * 1.4), opacity: scrimA,
           background: "linear-gradient(180deg, rgba(0,0,0,0.25) 0%, rgba(0,0,0,0.16) 45%, rgba(0,0,0,0) 100%)" }} /> : null}
-        <div style={{ position: "absolute", inset: 0, maskImage: mask, WebkitMaskImage: mask } as React.CSSProperties}>
-          <Scaled s={push} ox={ox} oy={oy}>{children}</Scaled>
-        </div>
+        {pe < 1 ? (
+          <div style={{ position: "absolute", inset: 0, maskImage: mask, WebkitMaskImage: mask } as React.CSSProperties}>
+            <Scaled s={push} ox={ox} oy={oy}>{children}</Scaled>
+          </div>
+        ) : null}
       </div>
     );
   };
@@ -285,11 +296,18 @@ export const Arrow: React.FC<{ x0: number; x1: number; y: number; p: number; sw:
   };
 
 // =========================================================================================== counter
-/** An odometer for a figure's body: the ones place is a crisp integer on every frame; each higher place rolls in its
- *  own clipped tabular cell (unwrapped, monotonic) only while the place below passes 9, so it reads as counting, never
- *  as a smear. Places above the number's current length are blank; a separator (".", ",") shows once the digit before
- *  it does. valAt: the number shown at any time (time.ts counter: from COUNT_FROM x the final value), read at t and
- *  either side of it for the roll's blur. Draws v.lead and v.tail (a "K") static around it. Returns nothing else: its width is
+/** The whole number an odometer shows at t (in units of its last decimal): valAt rounded, never past the final value.
+ *  Every place draws its digit from it, so the figure never reads more than it will land on (a higher place rolling
+ *  ahead of the ones once showed "49%" on the way to 40%). */
+export const odometerShown = (valAt: (u: number) => number, v: Value, t: number) => {
+  const unit = 10 ** v.decimals;
+  return Math.round(Math.min(Math.round(v.value * unit), valAt(t) * unit));
+};
+/** An odometer for a figure's body: every place a crisp digit of the same whole number (odometerShown) in its own
+ *  tabular cell, a higher place blurred vertically while it changes fast (its speed as a rolling place), so it reads as
+ *  counting, never as a smear and never past its final value. Places above the number's current length are blank; a
+ *  separator (".", ",") shows once the digit before it does. valAt: the number shown at any time (time.ts counter: from
+ *  COUNT_FROM x the final value). Draws v.lead and v.tail (a "K") static around it. Returns nothing else: its width is
  *  odometerW, the same on every frame, so nothing beside it moves. */
 export const odometerLayout = (face: Face, size: number, v: Value) => {
   const final = `${v.lead}${writeValue(v.value, v)}${v.tail}`;
@@ -314,9 +332,7 @@ export const Odometer: React.FC<{ face: Face; size: number; v: Value; x: number;
   const unit = 10 ** v.decimals;
   const fin = Math.round(v.value * unit);
   const u = (tt: number) => Math.min(fin, valAt(tt) * unit);
-  const n = Math.round(u(t));
-  // the place's position, unwrapped: whole numbers between rolls, rolling only while the place below passes 9
-  const placeU = (xx: number, p: number) => Math.floor(xx / 10 ** p) + Math.max(0, (xx / 10 ** (p - 1)) % 10 - 9);
+  const n = odometerShown(valAt, v, t);
   const cellTop = base - face.cap * size - size * 0.3, cellH = face.cap * size + size * 0.55;
   const glyphTop = base - baseOff(face, size) - cellTop; // a glyph's line box top inside its cell
   const lenNow = String(n).length;
@@ -330,16 +346,9 @@ export const Odometer: React.FC<{ face: Face; size: number; v: Value; x: number;
       if (prev && prev.place >= 0 && shown(prev.place)) out.push(<Glyphs key={i} text={c.ch} face={face} size={size} x={x + c.x} base={base} paint={paint} id={id} />);
       return;
     }
-    let rows: { d: number; y: number; idx: number }[];
-    let sig = 0;
-    if (c.place === 0) rows = [{ d: n % 10, y: 0, idx: n }];
-    else {
-      const roll = moving(t, dt, (tt) => placeU(u(tt) + 0.5, c.place) * cellH, k);
-      sig = roll.sig;
-      const pos = roll.y / cellH, r0 = Math.floor(pos + 1e-6), fr = pos - r0;
-      rows = [{ d: r0 % 10, y: -fr * cellH, idx: r0 }];
-      if (fr > 0.001) rows.push({ d: (r0 + 1) % 10, y: (1 - fr) * cellH, idx: r0 + 1 });
-    }
+    const idx = Math.floor(n / 10 ** c.place);
+    const rows = [{ d: idx % 10, y: 0, idx }];
+    const sig = c.place === 0 ? 0 : moving(t, dt, (tt) => (u(tt) / 10 ** c.place) * cellH, k).sig;
     const lead = c.place > v.decimals; // a place left of the units: blank while the number is shorter
     const fid = `${sid(id)}-odo${i}`;
     if (sig > 0) defs.push({ id: fid, sy: sig });
