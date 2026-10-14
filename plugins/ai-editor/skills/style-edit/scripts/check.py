@@ -36,7 +36,7 @@ sys.dont_write_bytecode = True
 sys.path.insert(0, str(HERE))
 sys.path.insert(1, str(HERE.parents[2] / "lib"))
 from ai_editor import numbers  # noqa: E402
-from plan import GAP_S, KINETIC, QUIET_HOLD_S, card_gaps, INK_MIN_W, OVERLAY_EDGE, READ_XH, SAFE, capture_xh, explain_ink, clean, cut_lines, cut_points, head_during, overlay_led, small_lines, sticker_crop  # noqa: E402
+from plan import GAP_S, KINETIC, QUIET_HOLD_S, card_gaps, scene_capture, INK_MIN_W, OVERLAY_EDGE, READ_XH, SAFE, capture_xh, explain_ink, clean, cut_lines, cut_points, head_during, overlay_led, small_lines, sticker_crop  # noqa: E402
 
 CENTRE_PLAN = 1.5      # % of the width a vertical card's box centre may sit off 50
 CENTRE_INK = 2.0       # % of the width a card's drawn content may sit off centre
@@ -197,6 +197,9 @@ def check_plan(plan, face=None, cuts=(), static_s=STATIC_S, visuals=None, brand=
             out.append(finding("FAIL", c["start"], f"{name} is a kinetic title: words set over the footage, a text card this "
                                "style has not opted in to", "show the real source (a capture, post or logo), or opt the style "
                                "in (\"graphics\": {\"kinetic\": true} in style.json or taste) and plan again"))
+        if (c.get("anim") or {}).get("type") in KINETIC:
+            out += kinetic_fit(c, name, aspect)
+            out += kinetic_over_scene(c, name, cards, aspect)
         if c.get("layout") == "scene" and beats is not None and not any(
                 b.get("layout") in ("scene", "split") and re.sub(r"[^\w'-]+", "", b.get("word") or "").lower() == word for b in beats):
             out.append(finding("FAIL", c["start"], f"{name} is a full-frame scene nobody asked for: the speaker leaves the frame",
@@ -364,11 +367,81 @@ MOTION_KEYS = {"enter", "exit", "ambient", "ease", "stagger", "duration", "dur",
 # ("#ff3300", "rgba(0,0,0,.5)"), a length, an angle or a time ("48px", "-3deg", "0.3s", "1.2").
 # A kinetic card (plan.KINETIC) shows its figures under these keys, a number as well as a string ("pct": 50); its part
 # times are "<part>_at" / "at_<part>" and its "band" is where it sits ("beside": the capture it keeps clear of; a step
-# slot's "state" and a stat_stack's "layout": how it draws). Its "target" is a shown figure, not quoted content.
-FIGURE_KEYS = {"num", "value", "pct", "target", "figure"}
+# slot's "state" and a stat_stack's "layout": how it draws). Its "target" is a shown figure, not quoted content. A bare
+# number under "text" or "label" (a title word, a sub-line word, a slot or stat label) is drawn too (String() in the
+# renderer), so it is read as well.
+FIGURE_KEYS = {"num", "value", "pct", "target", "figure", "text", "label"}
 KINETIC_MOTION = {"band", "label_at", "out_at", "hide_captions", "variant", "beside", "state", "layout", "join_in", "join_out"}
 MOTION_TEXT = re.compile(r"(?i)\s*(#[0-9a-f]{3,8}|rgba?\([^)]*\)|[a-z]+\d?(\.(in|out|inout))?(\([^)]*\))?"
                          r"|-?\d*\.?\d+(px|%|deg|s|ms|em|rem|vh|vw|x)?)\s*")
+
+
+# The kinetic renderer measures with the real fonts and throws when a chain or a tracker cannot be drawn readably
+# (remotion/src/kinetic NumberChain.tsx MIN_S, StepBuild.tsx SIZE); this estimates the same from measured advances so
+# the plan check catches it before a render: em per character of Anton (figures and slot labels: narrow I J 1 , . and
+# wide M W) and of Oswald 500 caps tracked 0.12 (labels), on a grid 936 px wide at 1080.
+KIN_EM = {"narrow": 0.25, "sep": 0.2, "wide": 0.62, "anton": 0.465, "label": 0.62}
+KIN_GRID, KIN_CHAIN_S, KIN_LABEL, KIN_SLOT_S = 936, 64, 44, 34
+
+
+def _anton(s, size):
+    return sum(size * (KIN_EM["sep"] if ch in ",." else KIN_EM["narrow"] if ch in "IJ1" else KIN_EM["wide"] if ch in "MW"
+                       else 0 if ch == " " else KIN_EM["anton"]) for ch in s.upper())
+
+
+def kinetic_fit(c, name, aspect):
+    """A number_chain or step_build the renderer would refuse (too wide to draw readably): a FAIL when clearly so, a
+    WARN within 4% of the grid (the estimate's margin)."""
+    a = c["anim"]
+    p = a.get("props") or {}
+    k = 1 if aspect == "9:16" else 1920 / 1080   # the grid is 936 px of a 1080-wide frame; a wide frame's is wider
+    grid = KIN_GRID * k
+    if a["type"] == "number_chain" and 2 <= len(p.get("items") or []) <= 4:
+        S, Ls, items = KIN_CHAIN_S, KIN_LABEL, p["items"]
+        def fig_w(n):
+            m = re.match(r"^([€$£¥]?)\s*(.*?)\s*(%?)$", str(n).strip())
+            return (0.6 * S * 0.55 + 0.035 * S if m[1] else 0) + _anton(m[2], S) + (0.56 * S * 0.75 if m[3] else 0) + 0.2 * S
+        def lab_w(lb):
+            ws = str(lb or "").upper().split()
+            one = len(" ".join(ws))
+            two = min((max(len(" ".join(ws[:i])), len(" ".join(ws[i:]))) for i in range(1, len(ws))), default=one)
+            return min(one, two) * KIN_EM["label"] * Ls
+        mw, lw = [fig_w(it.get("num", "")) for it in items], [lab_w(it.get("label")) for it in items]
+        over = 36 - 0.015 * (grid / 2 + 36)
+        span = [mw[j] / 2 + mw[j + 1] / 2 + 48 for j in range(len(items) - 1)]
+        need = max(max(lw[j] / 2 + 40 + lw[j + 1] / 2 - span[j] for j in range(len(span))), 64)
+        total = max(mw[0] / 2, lw[0] / 2 - over) + sum(span) + len(span) * need + max(mw[-1] / 2, lw[-1] / 2 - over)
+        if total > grid * 0.96:
+            lvl = "FAIL" if total > grid * 1.04 else "WARN"
+            return [finding(lvl, c["start"], f"{name} needs about {total:.0f} px across a {grid:.0f} px grid at its smallest "
+                            "figures and readable labels: the renderer " + ("refuses it" if lvl == "FAIL" else "may refuse it"),
+                            "make it a stat_stack (columns), or shorten its labels to one short word, or show fewer items")]
+    if a["type"] == "step_build" and 2 <= len(p.get("slots") or []) <= 4:
+        n = len(p["slots"])
+        W = (grid - (n - 1) * 28) / n - 2 * 0.22 * KIN_SLOT_S
+        wide = [s.get("label") for s in p["slots"] if isinstance(s, dict) and s.get("state") != "question"
+                and max((_anton(x, KIN_SLOT_S) for x in str(s.get("label") or "").split()), default=0) > W]
+        if wide:
+            return [finding("FAIL", c["start"], f"{name}: the label(s) {', '.join(map(repr, wide))} have a word wider than its "
+                            f"well even at the smallest size ({n} slots across the grid): the renderer refuses it",
+                            "shorter slot labels (one short word each), or fewer slots")]
+    return []
+
+
+def kinetic_over_scene(c, name, cards, aspect):
+    """A kinetic card over a full-frame scene keeps its band above the scene's picture (plan.py kinetic_links "beside",
+    fit.ts); when the picture starts too high for that (a square or portrait capture), the card draws on top of it."""
+    if c["anim"]["type"] == "stat_stack":   # it finds its own free region round the picture
+        return []
+    band = (c["anim"].get("props") or {}).get("band") or [8.6, 26.2]
+    for sc in cards:
+        if sc.get("layout") == "scene" and sc["start"] < c["end"] and c["start"] < sc["end"] and sc.get("src"):
+            top = scene_capture(sc, aspect)[1] - 24 / (1920 if aspect == "9:16" else 1080) * 100
+            if top < band[1] and top - max(8, band[0]) < 7:
+                return [finding("WARN", max(c["start"], sc["start"]), f"{name} draws over the '{sc['trigger_word']}' scene's picture: "
+                                f"it starts {top + 1.25:.0f}% down, too high to leave room above it for the card",
+                                "end the kinetic card before the scene (hold_s), or move the beat off the scene")]
+    return []
 
 
 def shown_texts(props, kinetic=False):
@@ -576,6 +649,21 @@ def sampled(video, vf, w, h, fps):
             k += 1
 
 
+def kinetic_skip(t, cards, zooms, fps, split=False):
+    """Why a kinetic card is not measured at t, or None. Its box is the whole frame, so it reads every pixel the cut is
+    not: not while a scene is on screen (it draws over it: the face is hidden, and the scene is not its ink), nor while a
+    punch travels (one frame off there moves the whole picture, read as ink on the face). A push eases slowly, and the
+    footage is warped to its state at t, so a card over a push is measured."""
+    if any(o.get("layout") == "scene" and o["start"] <= t <= o["end"] for o in cards):
+        return "scene"
+    for z in [] if split else zooms:
+        if z.get("kind") == "push" and z.get("ease_s", 0) > 0:
+            continue
+        if any(e - 1 / fps <= t <= e + PUNCH_S + 1 / fps for e in (z["start"], z["end"])):
+            return "punch"
+    return None
+
+
 def check_render(edit, plan, video):
     import cv2
     import numpy as np
@@ -627,14 +715,10 @@ def check_render(edit, plan, video):
         grey = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY).astype(np.float32)
         al = None if split or not any(cards[i].get("layer") == "behind" for i in up) else cutout_alpha(edit, plan, t)
         person = None if al is None else cv2.warpAffine(cv2.resize(al, (W, H), interpolation=cv2.INTER_AREA), zm, (W, H)) > 230
-        # a kinetic card's box is the whole frame, so it reads every pixel the cut is not: not while a scene is on
-        # screen (it draws over it: the face is hidden, and the scene is not its ink), nor while a punch travels (one
-        # frame off there moves the whole picture, read as ink on the face)
-        cutaway = any(o.get("layout") == "scene" and o["start"] <= t <= o["end"] for o in cards)
-        moving = not split and len({round(zoom_state(t + d, plan["zooms"])[0], 4) for d in (-1 / fps, 0, 1 / fps)}) > 1
+        skip = kinetic_skip(t, cards, plan["zooms"], fps, split)
         for i in up:
             c, st = cards[i], per[i]
-            if (cutaway or moving) and (c.get("anim") or {}).get("type") in KINETIC:
+            if skip and (c.get("anim") or {}).get("type") in KINETIC:
                 st["prev"] = None
                 continue
             st["n"] += 1
@@ -689,10 +773,15 @@ def check_render(edit, plan, video):
                                    PLAN_FIX + "; then render again" if explain else
                                    "plan again: drop the beat's \"box\" in visuals.json/images.json so plan.py centres it, "
                                    "or give a capture a \"crop\" round the evidence; then render again"))
-        elif c["end"] - c["start"] > 0.8 and st["n"]:   # never measured: a kinetic card up only over a scene
+        elif c["end"] - c["start"] > 0.8 and st["n"]:
             rec["ink"] = None
             out.append(finding("WARN", (c["start"] + c["end"]) / 2, f"{name} card: nothing drawn found in its box",
                                "look at that frame: the card may be missing from the render"))
+        elif c["end"] - c["start"] > 0.8 and (c.get("anim") or {}).get("type") in KINETIC:
+            rec["ink"] = None   # never measured: up only over a scene, or a punch moving at every sample
+            out.append(finding("WARN", (c["start"] + c["end"]) / 2, f"{name} card was never measured (a scene or a moving "
+                               "zoom was up at every sample): its face cover and landing are unchecked",
+                               "look at it in the render: it lands on its word and stays off the face"))
         rec["still"] = still_runs(st["diffs"], STILL_DIFF) if c.get("lane") != "logo" else []
         for a, b in rec["still"]:
             out.append(finding("WARN", a, f"{name} card holds still for {b - a + 1 / FPS:.1f} s ({a:.1f}-{b + 1 / FPS:.1f} s)",
@@ -985,6 +1074,28 @@ def demo():
     assert shown_texts({"layout": "row", "beside": [14, 14, 72, 34], "stats": [{"num": "12", "label": "regulars"}]}, kinetic=True) == ["12", "regulars"]
     bad = {**kp, "cards": kin(55, "30K", chain=(37, "6"))}
     assert sorted(n for _, n, near in unsaid_numbers(bad) if near is None) == ["30K", "37", "55", "6"], unsaid_numbers(bad)
+    # a bare number under "text" or "label" is drawn (String() in the renderer): a sub-line word, a title word, a slot label
+    assert shown_texts({"num": 340, "sub": [{"text": 7, "at": 0.5}]}, kinetic=True) == ["340", "7"]
+    assert shown_texts({"lines": [{"words": [{"text": "340"}, {"text": 12, "at": 0.4}]}]}, kinetic=True) == ["340", "12"]
+    assert shown_texts({"slots": [{"label": "2 shops"}, {"label": 3, "state": "filled"}]}, kinetic=True) == ["2 shops", "3"]
+    # a chain or tracker the renderer would refuse is caught here; one that fits is not
+    chain = lambda *its: {"anim": {"type": "number_chain", "props": {"items": [{"num": n, "label": lb} for n, lb in its]}},
+                          "start": 0, "end": 4}
+    assert kinetic_fit(chain(("340", "flyers"), ("6", "tastings"), ("1", "cafe")), "c", "9:16") == []
+    assert [f["level"] for f in kinetic_fit(chain(("1,200,000", "neighbourhood visitors"), ("85,000", "complimentary tastings"),
+                                                  ("12,000", "wholesale conversations"), ("3,000", "recurring subscriptions")), "c", "9:16")] == ["FAIL"]
+    step = lambda *ls: {"anim": {"type": "step_build", "props": {"slots": [{"label": x, "state": "filled"} for x in ls]}}, "start": 0, "end": 4}
+    assert kinetic_fit(step("sourdough bread", "wedding cakes", "catering", "coffee bar"), "s", "9:16") == []
+    assert [f["level"] for f in kinetic_fit(step("internationalisation", "b", "c", "d"), "s", "9:16")] == ["FAIL"]
+    # a kinetic card over a scene whose picture starts too high to leave room above it is flagged; a wide capture is not
+    kn = {"anim": {"type": "kinetic_number", "props": {"num": "340"}}, "start": 1, "end": 3}
+    scn = lambda size: {"src": "images/x.png", "size": size, "layout": "scene", "box": [0, 0, 100, 100], "start": 0, "end": 4, "trigger_word": "x"}
+    assert kinetic_over_scene(kn, "k", [kn, scn([1600, 640])], "9:16") == []
+    assert [f["level"] for f in kinetic_over_scene(kn, "k", [kn, scn([1080, 1920])], "9:16")] == ["WARN"]
+    # a kinetic card is not measured while a scene is up or a punch travels; a slow push and a held punch are measured
+    zs = [{"start": 2.0, "end": 4.0, "scale": 1.2, "kind": "punch", "ease_s": 0}, {"start": 6.0, "end": 9.0, "scale": 1.1, "kind": "push", "ease_s": 1.0}]
+    sk = lambda t: kinetic_skip(t, [scn([1600, 640])] if t < 1 else [], zs, 30)
+    assert [sk(t) for t in (0.5, 2.05, 3.0, 4.1, 6.5)] == ["scene", "punch", None, "punch", None]
     # an unsaid number anywhere a card shows words: after a dot ("No.1", "...37"), a Lottie's texts, words under a
     # motion key ("size"); never an ease or a colour
     def check(chunks, *texts, heard=None):

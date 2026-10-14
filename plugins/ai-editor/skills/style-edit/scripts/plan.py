@@ -100,6 +100,7 @@ LEGACY = ("logo", "flow")
 # and under the Reels header). Words on the footage, so only when the style opts in: style.json graphics.kinetic.
 KINETIC = ("kinetic_number", "number_chain", "goal_bar", "step_build", "stat_stack", "kinetic_title", "cta_follow")
 KINETIC_JOIN_S = 1.0   # two beats of one step tracker closer than this are joined: it carries on, never leaves and comes back
+KINETIC_BRIDGE_S = 1.0  # a kinetic card this close to the next one (or a scene) holds until it: captions never flash back
 ANIMS = tuple(dict.fromkeys(TEMPLATES + OVERLAYS + LEGACY + KINETIC))
 # Where each card sits (references/motion.md "Layout per template"). "scene": a full-frame cut-away on
 # the look's ground. "split": the split layout's top panel. "box": a card over the footage, only for these.
@@ -295,12 +296,17 @@ def place_zooms(zoom, words, duration, cuts, cut_kinds=None, quiet=(), shot_s=No
 
 
 ENTER_S = (0.15, 0.75)   # a card's entrance window: from just before its start to when it has settled
+KINETIC_PUSH_S = 0.8     # StyleEdit.tsx PUSH_MIN_S: a zoom under a kinetic card's hold eases at least this long each way
 PUNCH_S = 0.16           # StyleEdit.tsx PUNCH_S: how long a punch zoom takes to travel
 
 
 def clear_entrances(zooms, cards):
     """A zoom change never lands while a card is entering: it moves to finish just before the card starts, or,
     for a full-frame scene, to its middle, hidden under it (the footage comes back at the new zoom, like a cut).
+    Nor cuts under a kinetic card's hold (kinetic_hold): the face jumping 1.2x under a lockup that stays still changes
+    its clearance over the head in one frame, so a zoom with an edge there becomes a push (KINETIC_PUSH_S each way).
+    Moving the edges instead would gather every zoom of a video carried by kinetic cards onto the few card changes and
+    join them into one long hold.
     Two zooms closer than a punch's travel join into one (the out move would be cut short: a one-frame snap);
     a zoom that gets shorter than 0.5 s is dropped. Two moves at once compete for the eye, and the render check
     cannot time a card's landing while the footage under it jumps."""
@@ -311,6 +317,10 @@ def clear_entrances(zooms, cards):
             for k in ("start", "end"):
                 if a < z[k] < b:
                     z[k] = to
+    holds = [h for h in map(kinetic_hold, cards) if h]
+    for z in zooms:
+        if any(a < z[k] < b for a, b in holds for k in ("start", "end")):
+            z.update(kind="push", ease_s=max(z.get("ease_s") or 0, KINETIC_PUSH_S))
     out = []
     for z in sorted(zooms, key=lambda z: z["start"]):
         if z["end"] - z["start"] < 0.5:
@@ -320,6 +330,31 @@ def clear_entrances(zooms, cards):
         else:
             out.append(z)
     return out
+
+
+def kinetic_hold(c):
+    """(start, end) of a kinetic card's still hold, where no zoom may cut: from its start to just before its end (a cut
+    under its exit sweep is hidden by it). None for any other card."""
+    if (c.get("anim") or {}).get("type") not in KINETIC:
+        return None
+    return c["start"], max(c["start"], c["end"] - ENTER_S[0] - PUNCH_S)
+
+
+def bridge_kinetic(cards):
+    """A kinetic card that ends under KINETIC_BRIDGE_S before the next kinetic card or scene holds until it starts: its
+    exit sweep hands straight over, and the word captions (hidden while it is up) do not flash back for a word or two.
+    The longer card also gives a title its 1.2 s hold after its last landing. Two kinetic cards so joined keep the top
+    scrim up across the hand-over (props bridge_out / bridge_in, kinetic/primitives.tsx Lockup)."""
+    nxt = sorted((c for c in cards if (c.get("anim") or {}).get("type") in KINETIC or c.get("layout") == "scene"), key=lambda c: c["start"])
+    for c in cards:
+        if (c.get("anim") or {}).get("type") in KINETIC:
+            later = [o for o in nxt if o is not c and o["start"] >= c["end"] - 1e-6]
+            if later and later[0]["start"] - c["end"] < KINETIC_BRIDGE_S:
+                c["end"] = later[0]["start"]
+                if (later[0].get("anim") or {}).get("type") in KINETIC:   # the top scrim stays up across the hand-over
+                    c["anim"]["props"]["bridge_out"] = True
+                    later[0]["anim"]["props"]["bridge_in"] = True
+    return cards
 
 
 def card_defaults(style):
@@ -576,6 +611,21 @@ def hides_captions(card):
     return v if isinstance(v, bool) else a.get("type") in KINETIC
 
 
+QUIET_BRIDGE_S = 0.6   # StyleEdit.tsx: captions back for less than this between two cards that hide them stay hidden
+
+
+def quiet_spans(cards):
+    """(start, end) spans the word captions are hidden for (StyleEdit.tsx quietSpans): each card that hides them
+    (hides_captions), joined across gaps under QUIET_BRIDGE_S."""
+    out = []
+    for a, b in sorted((c["start"], c["end"]) for c in cards if hides_captions(c)):
+        if out and a - out[-1][1] < QUIET_BRIDGE_S:
+            out[-1][1] = max(out[-1][1], b)
+        else:
+            out.append([a, b])
+    return [tuple(x) for x in out]
+
+
 def scene_capture(c, aspect):
     """Where a full-frame scene's picture draws, % of the frame: fitted whole in the scene's type box (Scene.tsx
     sceneBox, Capture.tsx), grown by the scene's slow push (4.5%) and a little more."""
@@ -589,7 +639,8 @@ def kinetic_links(cards, aspect="9:16"):
     within KINETIC_JOIN_S by the next beat of the same tracker (props.id, else the same slot labels) holds until it
     ("join_out") and the next carries on from it ("join_in"): one tracker on screen, never a sweep out and back in.
     A stat_stack with no "beside" gets the box of the card up with it longest (a capture of the same numbers), and keeps
-    to the part of the face band that box leaves free; for a full-frame scene that is where its picture draws.
+    to the part of the face band that box leaves free; for a full-frame scene that is where its picture draws. Any other
+    kinetic card over a scene gets the scene's picture as "beside" too: its band stops above the picture (fit.ts).
     A kinetic card draws over a scene it shares the frame with (StyleEdit.tsx): that scene takes the dark ground
     ("ink"), so the white and gold type reads."""
     is_ = lambda c, t: (c.get("anim") or {}).get("type") == t
@@ -601,12 +652,14 @@ def kinetic_links(cards, aspect="9:16"):
             a["anim"]["props"]["join_out"] = True
             b["anim"]["props"]["join_in"] = True
     for c in cards:
-        if is_(c, "stat_stack") and "beside" not in c["anim"]["props"]:
-            up = lambda o: min(c["end"], o["end"]) - max(c["start"], o["start"])
-            near = [o for o in cards if kind_of(o) not in KINETIC and o.get("box") and up(o) > 0]
-            if near:
-                o = max(near, key=up)
-                c["anim"]["props"]["beside"] = scene_capture(o, aspect) if o.get("layout") == "scene" else list(o["box"])
+        if kind_of(c) not in KINETIC or "beside" in c["anim"]["props"]:
+            continue
+        up = lambda o: min(c["end"], o["end"]) - max(c["start"], o["start"])
+        near = [o for o in cards if kind_of(o) not in KINETIC and o.get("box") and up(o) > 0
+                and (is_(c, "stat_stack") or o.get("layout") == "scene")]
+        if near:
+            o = max(near, key=up)
+            c["anim"]["props"]["beside"] = scene_capture(o, aspect) if o.get("layout") == "scene" else list(o["box"])
     for sc in (c for c in cards if c.get("layout") == "scene"):
         if any(kind_of(k) in KINETIC and k["start"] < sc["end"] and sc["start"] < k["end"] for k in cards):
             sc.setdefault("ground", "ink")
@@ -1925,6 +1978,7 @@ def build(style, words, meta, images=(), aspect="auto", cuts=(), visuals=(), edi
     cards = thin_cards(place_cards(list(images) + anim_items(visuals, edit_dir, style) + logo_items(visuals, edit_dir, logo_y, aspect, pictures_only(style)),
                                    words, duration, style, aspect), duration, style.get("cards"))
     cards, _ = lay_out(cards, aspect, face, style, split_ok)
+    cards = bridge_kinetic(cards)
     gap = card_gap_s(style)
     quiet = [g for g in card_gaps(cards, duration) if g[1] - g[0] > gap]
     cover = audio_cover(edit_dir, words)
@@ -2455,6 +2509,8 @@ def demo():
     assert not set(KINETIC) & set(TYPE_ONLY) and all(t in ANIMS for t in KINETIC)
     assert hides_captions(kc) and not hides_captions({"anim": {"type": "number_chain", "props": {"hide_captions": False}}}) \
         and hides_captions({"anim": {"type": "flow", "props": {"hide_captions": True}}}) and not hides_captions({"src": "images/c.png"})
+    kq = lambda a, b: {"start": a, "end": b, "anim": {"type": "kinetic_title", "props": {}}}
+    assert quiet_spans([kq(1, 2), kq(2.5, 3), kq(4, 5), {"src": "images/c.png", "start": 5.2, "end": 6}]) == [(1, 3), (4, 5)]
     # two beats of one step tracker close together are joined (one tracker carries on); a stat_stack keeps clear of the
     # card up with it longest
     sb = lambda a, b, **p: {"start": a, "end": b, "lane": "kinetic", "box": [0, 0, 100, 100],
@@ -2471,10 +2527,22 @@ def demo():
     sc = {"src": "images/dash.png", "size": [1600, 640], "start": 5.5, "end": 7.5, "layout": "scene", "box": list(SCENE_BOX)}
     lone = {"src": "images/e.png", "start": 20.0, "end": 22.0, "layout": "scene", "box": list(SCENE_BOX)}
     st2 = {**st, "anim": {"type": "stat_stack", "props": {"stats": []}}}
-    ln = kinetic_links([st2, sc, lone])
+    kn = {"start": 6.0, "end": 7.2, "lane": "kinetic", "box": [0, 0, 100, 100], "anim": {"type": "kinetic_number", "props": {"num": "340"}}}
+    ln = kinetic_links([st2, sc, lone, kn])
     bs = st2["anim"]["props"]["beside"]
     assert 11 < bs[0] < 13 and 30 < bs[1] < 33 and 74 < bs[2] < 77 and bs[1] + bs[3] < 50, bs   # 2.5:1 across the type box, pushed
     assert sc["ground"] == "ink" and "ground" not in lone, (sc, lone)
+    assert kn["anim"]["props"]["beside"] == bs, kn   # any kinetic card over a scene stops its band above the picture
+    # a kinetic card under KINETIC_BRIDGE_S before the next kinetic card or scene holds until it (the captions never flash
+    # back for a word); a longer gap is kept
+    br = bridge_kinetic([sb(1.0, 2.0), sb(2.6, 4.0, id="u"), {"src": "images/e.png", "start": 4.7, "end": 6.0, "layout": "scene",
+                         "box": list(SCENE_BOX)}, sb(7.5, 9.0, id="v")])
+    assert [c["end"] for c in br] == [2.6, 4.7, 6.0, 9.0], br
+    assert br[0]["anim"]["props"].get("bridge_out") and br[1]["anim"]["props"].get("bridge_in") and not br[1]["anim"]["props"].get("bridge_out")
+    # no zoom cuts under a kinetic card's hold: a zoom with an edge there eases instead; one clear of it keeps its punch
+    zz = clear_entrances([{"start": 2.0, "end": 6.0, "scale": 1.2, "kind": "punch", "ease_s": 0},
+                          {"start": 7.0, "end": 8.0, "scale": 1.2, "kind": "punch", "ease_s": 0}], [sb(1.0, 4.0)])
+    assert [(z["start"], z["kind"], z["ease_s"]) for z in zz] == [(2.0, "push", KINETIC_PUSH_S), (7.0, "punch", 0)], zz
     # kinetic_title: each title word lands on its own spoken word read in order (the second "bake" on the second one); a
     # word with an "at" and no "word" keeps it; one never said keeps no time (the template spreads it)
     tw = [{"text": t, "start": 0.3 * i, "end": 0.3 * i + 0.2} for i, t in enumerate("we bake to order and bake to sell".split())]

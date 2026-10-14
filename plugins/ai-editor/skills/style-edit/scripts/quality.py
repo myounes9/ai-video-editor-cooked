@@ -699,11 +699,16 @@ def zoom_moves(video, plan, w=270, h=480, behind=None, cuts=()):
     """[(t, kind, scales, wanted, planned log-scale)] for every zoom move on the render: in at start, back out at
     end. behind: (cut.mp4, its proxy filter), read over the same frames. A move under a full-frame scene is
     hidden (not judged); one just before a scene is read up to its start. Frames within 2 of a jump cut in the
-    footage are not measured (the two files can land a frame apart there)."""
+    footage are not measured (the two files can land a frame apart there). A kinetic card sits in the head band by
+    design (its props.band, over the hair): while one is up the band read starts under it, so its still type is not
+    read as footage that failed to zoom (a snap)."""
     import numpy as np
     from check import footage_affine
+    from plan import KINETIC
     fps = plan["fps"]
     scenes = [(c["start"], c["end"]) for c in plan.get("cards") or [] if c.get("layout") == "scene"]
+    kin = [(c["start"], c["end"], ((c["anim"].get("props") or {}).get("band") or [8.6, 26.2])[1]) for c in plan.get("cards") or []
+           if (c.get("anim") or {}).get("type") in KINETIC]
 
     def grab(src, vf, a, d):
         raw = subprocess.run(["ffmpeg", "-v", "error", "-ss", f"{a:.3f}", "-t", f"{d:.3f}", "-i", str(src), "-vf",
@@ -723,7 +728,8 @@ def zoom_moves(video, plan, w=270, h=480, behind=None, cuts=()):
             n = min(len(fr), len(cut))
             o = (z.get("origin") or [50, 30])[1] / 100
             if n >= 3:   # the head down from its top (the origin): not cards, not captions
-                sc = zoom_scales(fr[:n], cut[:n], int(max(0, o) * h), int(min(1, o + 0.3) * h))
+                y0 = max([o] + [b / 100 + 0.02 for s0, e0, b in kin if s0 < a + d and a < e0])
+                sc = zoom_scales(fr[:n], cut[:n], int(max(0, y0) * h), int(min(1, max(o + 0.3, y0 + 0.2)) * h))
                 sc = [None if any(abs(a + k / fps - c) <= 2.5 / fps for c in cuts) else v for k, v in enumerate(sc)]
                 want = [math.log(footage_affine(a + k / fps, plan, w, h)[0][0]) for k in range(n)]
                 out.append((round(t, 2), z.get("kind", "punch"), sc, want, math.log(z.get("scale") or 1)))
@@ -771,7 +777,7 @@ def run(edit, plan, video, plan_path, style=None, cuts=(), brand=None):
     import numpy as np
     from check import INK_DIFF, footage_affine, stream, TEXT_ANIMS, STATIC_S
     from edit import footage_filter, still_frames
-    from plan import CARD_LEAD_S, ENTRANCES, KINETIC, MOTION_K, OVERLAY_LEAD_S, hides_captions, overlay_led, probe
+    from plan import CARD_LEAD_S, ENTRANCES, KINETIC, MOTION_K, OVERLAY_LEAD_S, overlay_led, probe, quiet_spans
     cj = edit / "captions.json"
     cwords = json.loads(cj.read_text(encoding="utf-8")) if cj.exists() else []
     out, meas = [], {}
@@ -1118,7 +1124,7 @@ def run(edit, plan, video, plan_path, style=None, cuts=(), brand=None):
     k_cap = MOTION_K.get(plan.get("motion"), 1.0)
     inked = [(c["start"] + 0.31 * k_cap, c["end"]) for c in cards if c.get("layout") == "scene"]
     # a kinetic title hides the captions while it is up (they fade over 0.24 s either side, ground.ts captionFade)
-    inked += [(c["start"] - 0.24, c["end"] + 0.24) for c in cards if hides_captions(c)]
+    inked += [(a - 0.24, b + 0.24) for a, b in quiet_spans(cards)]
     for t, chunk in caps:
         if any(a <= t < b for a, b in inked):
             continue

@@ -31,13 +31,20 @@ Renderer: `remotion/src/kinetic/` (one file per format, the shared design system
 - **Placement**: plan.py gives the card the whole frame (`box` [0, 0, 100, 100]) and its own lane `kinetic` (it may
   share the frame with a capture). The format fits itself to `band` ([top, bottom] % of the frame height): over the
   hair and forehead, under the Reels header (never above 8%), above the eyes. Unset: [8.6, 26.2], a close talking
-  head. Phase 3 fills it from face.json.
+  head. Phase 3 fills it from face.json. A band that is not [top, bottom] with top under bottom, inside 0-50%, stops
+  the render. Over a full-frame scene plan.py passes the scene's picture as `beside` and the band stops 24 px above it
+  (when that leaves 7% of the frame; else check.py plan WARNs that the card covers the picture).
 - **Captions**: the word captions fade out while a kinetic card is up and back right after it
-  (`hide_captions`, default true; false keeps them).
+  (`hide_captions`, default true; false keeps them). Two cards under 0.6 s apart keep them hidden in between.
 - **Hold**: a lockup holds at least 1.2 s after its last landing and leaves in time to be gone when the card ends
-  (`hold_s`, or the next speech, wins over the hold). `out_at` (optional) asks it to stay until then.
-- **Labels** land no earlier than their figure + 0.15 s. Keep them to one or two words; a long one steps down in
-  size, then wraps onto two lines, never closer than 40 px to the next.
+  (`hold_s`, or the next speech, wins over the hold). `out_at` (optional) asks it to stay until then. A kinetic card
+  that ends under 1 s before the next kinetic card or scene holds until it (plan.py `bridge_kinetic`), so the captions
+  never flash back for a word. A card whose first landing comes after it has gone stops the render (raise `hold_s`).
+- **Zooms**: no zoom cuts under a kinetic card's hold; a zoom with an edge there eases as a push (0.8 s each way).
+- **Labels** land no earlier than their figure + 0.15 s. Keep them to one or two short words: they stay phone-readable
+  (48 px, 44 at the least), wrapping onto two lines before they shrink, never closer than 40 px to the next. A
+  number_chain whose labels or figures cannot fit so across the grid stops the render; check.py plan FAILs it first
+  (an estimate, WARN near the limit): make it a `stat_stack` (`columns`), or shorten the labels.
 - Not with the split layout (plan.py drops them there: they float over the full-frame speaker).
 
 ## The look (tokens.ts)
@@ -55,12 +62,12 @@ held lockup pushes 1.5%; it leaves in one feathered sweep, left to right. Counte
 | type | built | shows | props |
 |---|---|---|---|
 | `number_chain` | yes | 2-4 figures that lead one to the next, each on its word; a connector draws just before the next lands; earlier figures stay, in foil; fixed columns, equal connectors | `items: [{num, label?, at, label_at?}]`, `out_at?`, `band?`, `hide_captions?` |
-| `kinetic_number` | yes | one figure, centred on the grid, with an optional sub-line of words under it, each on its word (key words in foil); variants `hook` (default: the figure on its marker), `counter` (counts from 40% to land on `land_at`), `tally` (a counter beside 1-30 tiles that fill as the count passes each one's share), `stamp` (a word like SOLD OUT stamps across the figure on its word, which hands the figure to the foil); any variant may carry a `stamp` | `num`, `at`, `variant?`, `land_at?` (counter, tally; else `at` + 0.35 s), `sub?: [{text, at, key?}]`, `stamp?: {text, at}`, `tiles?` (tally, 1-30; else the value, capped at 30), `out_at?`, `band?`, `hide_captions?` |
+| `kinetic_number` | yes | one figure, centred on the grid, with an optional sub-line of words under it, each on its word (key words in foil); variants `hook` (default: the figure on its marker), `counter` (counts from 40% to land on `land_at`), `tally` (a counter beside 1-30 tiles that fill as the count passes each one's share, once the figure has landed), `stamp` (a word like SOLD OUT stamps across the figure's foot on its word, covering at most its bottom fifth, which hands the figure to the foil); any variant may carry a `stamp`; a long sub-line wraps onto two lines | `num`, `at`, `variant?`, `land_at?` (counter, tally; else `at` + 0.35 s), `sub?: [{text, at, key?}]`, `stamp?: {text, at}`, `tiles?` (tally, 1-30; else the value with its K/M counted, capped at 30), `out_at?`, `band?`, `hide_captions?` |
 | `goal_bar` | yes | where the speaker is on the way to a goal, without a panel: the % on the left as the key figure on its marker, counting from 40% to land on its count word (its % at 0.56x, cap-aligned); the target in foil on the same baseline at the grid's right edge under a small GOAL label (the label's cap top on the figure's); under both a pill track the width of the grid whose remainder always shows, its fill running with the count, a glow band and a 6-frame flare on the landing; a target marker on the track's end pops on the target's word and sends two rings on "goal"; on a wide frame the module keeps the vertical grid's width, centred | `pct` ("50%" or 50), `target` ("20K", "€20K"), `at_pct` (or `at`), `count_at?` (when the count reads final; default `at_pct` + 0.3), `at_target`, `at_goal?`, `label?` ("GOAL"), `out_at?`, `band?`, `hide_captions?` |
-| `step_build` | yes | a tracker of 2-4 slots in fixed columns that returns at several beats with the same slots and identity: an empty slot is a smoked glass well with its number, a filled one gets its label pulled on by the marker and handed to the foil (gold edge), a question slot is a dashed well with a "?"; a slot popping in makes room first | `slots: [{label?, state: "empty" \| "filled" \| "question" \| "off", at?}]` (2-4), `id?`, `join_in?`, `join_out?`, `out_at?`, `band?`, `hide_captions?` |
-| `stat_stack` | yes | 2-4 stats landing one by one in a compact row or stack (figure on the marker, then foil; label beside it, on its baseline, wrapping onto two lines that span the figure's caps), in the part of the band a capture beside it leaves free | `stats: [{num, label?, at, label_at?}]` (2-4), `layout?: "row" \| "stack"`, `beside?: [x, y, w, h]`, `out_at?`, `band?`, `hide_captions?` |
+| `step_build` | yes | a tracker of 2-4 slots in fixed columns that returns at several beats with the same slots and identity: an empty slot is a smoked glass well with its number, a filled one gets its label pulled on by the marker and handed to the foil (gold edge), a question slot is a dashed well with a "?"; a slot popping in makes room first; every label inside its well (wrapped and smaller for four long ones; a word too wide for its well stops the render, check.py plan FAILs it first) | `slots: [{label?, state: "empty" \| "filled" \| "question" \| "off", at?}]` (2-4), `id?`, `join_in?`, `join_out?`, `out_at?`, `band?`, `hide_captions?` |
+| `stat_stack` | yes | 2-4 stats landing one by one (figure on the marker, then foil) in a compact row or stack (label beside it, on its baseline, wrapping onto two lines that span the figure's caps) or in columns (label under it, at a readable size), in the part of the band a capture beside it leaves free; the layout with the biggest figures wins | `stats: [{num, label?, at, label_at?}]` (2-4), `layout?: "row" \| "stack" \| "columns"`, `beside?: [x, y, w, h]`, `out_at?`, `band?`, `hide_captions?` |
 | `kinetic_title` | yes | a key-word title for a beat with no number: 1-3 lines, each word on its time; a line with a key word is set in Anton, its key words pulled on by the marker (a run of key words shares one marker) and handed to the foil when the next run comes; a line with none is a supporting line in Oswald at 0.4x; centred on the grid | `lines: [{words: [{text, at, key?}]}]` (1-3 lines, one word per entry), `out_at?`, `band?`, `hide_captions?` |
-| `cta_follow` | yes | a handle over a follow button, beside an optional avatar circle with a key-colour ring; the button wipes in as an empty well and on "follow" presses, the marker pulled across it turns it to FOLLOWING with a check, and two rings leave it | `handle` (no spaces; an "@" is added), `at`, `follow_at`, `avatar?` (an image file, "images/..."), `button?` ("Follow"), `pressed?` ("Following"), `out_at?`, `band?`, `hide_captions?` |
+| `cta_follow` | yes | a handle over a follow button, beside an optional avatar circle with a key-colour ring; the handle rises just before its word and the button wipes in as an empty well; on "follow" it presses, the marker pulled across it turns it to FOLLOWING with a check, and two rings leave it | `handle` (no spaces; an "@" is added), `at`, `follow_at`, `avatar?` (an image file, "images/..."), `button?` ("Follow"), `pressed?` ("Following"), `out_at?`, `band?`, `hide_captions?` |
 
 A goal beat in visuals.json: `{"word": "forty", "kind": "anim", "type": "goal_bar", "hold_s": 5, "props": {"pct": "40%",
 "word_pct": "forty", "count_word": "percent", "target": "20K", "word_target": "20k", "word_goal": "goal"}}` (plan.py
@@ -75,7 +82,7 @@ sub-line's and the stamp's `word` -> `at`):
            "sub": [{"text": "croissants", "word": "croissants"}], "stamp": {"text": "sold out", "word": "sold"}}}
 ```
 
-Keep the sub-line to a few words (it sits on one line under the figure); the stamp's word is said, never added.
+Keep the sub-line to a few words (a long one wraps onto two lines under the figure); the stamp's word is said, never added.
 
 ### A tracker over several beats (`step_build`)
 
@@ -103,7 +110,7 @@ one tracker stays on screen.
 A stat_stack may share its beat with a real capture of the same numbers (a dashboard screenshot). plan.py gives it
 that card's box as `beside` (the card up with it longest; a `beside` in props wins) and the stats keep 24 px clear of
 it, in the biggest part of the band it leaves free (above, below, left or right), as a row or a stack, whichever fits
-biggest unless `layout` says.
+biggest unless `layout` says (row, stack, or columns with each label under its figure).
 
 In the overlay layout a capture with `"layout": "split"` (or `"scene"`) is a full-frame scene. A kinetic card up with
 a scene draws over it, and the scene takes the dark ground (`"ground": "ink"`) so the white and gold type reads. For a
@@ -134,13 +141,16 @@ handle and, when they have one, their profile picture as `avatar`; never a made-
 
 Copy `NumberChain.tsx`: `useFaces()` (fonts, null until loaded), `useClock()` (the card's seconds), a `solve()` in
 `useMemo` that fits the type once with `fitDown` against `layoutBox(w, h, p.band)`, then a pure function of `t`
-inside `<Lockup>` (scrim, push, sweep) built from the primitives: `MarkerReveal` + `pullOn` / `pullOff` + `Behind`
+inside `<Lockup>` (scrim fading in from the card's start, push, sweep) built from the primitives: `MarkerReveal` + `pullOn` / `pullOff` + `Behind`
 (the marker and its hand-off to the foil), `FigureGlyphs` (paint `ink`, `white` or `gold`, with `FoilDefs`),
 `Run` + `LineMask` + `stagger` (a line's reveal), `Odometer` + `counter` (a count from 40%), `Arrow`,
 `settleAt` + `Scaled`, `exitAt` and `labelStart` (the hold and label rules). `Lockup` takes `out = Infinity` (it never
 leaves: the next beat takes over) and `joined` (the scrim is already up) for a lockup that spans beats. No GSAP timeline state, no
 Math.random, no clock; no blurred box-shadow on a moving layer, no transform once settled, no opacity on a scaled
-layer. Add made-up cases to `test/kinetic/<type>.json` (one with `"determinism": true`), run
-`node test/templates.mjs <public> test/kinetic <out>` and `node test/determinism.mjs <out> --only kinetic`, and look
-at the stills. Budget: about +0.05 s a frame per card up at 1080x1920 (number_chain measured +0.03, stat_stack +0.01,
+layer. Export a `probe` (kinetic/probe.ts: what it draws as rectangles, its counts frame by frame) and register it in
+`kinetic/index.ts` PROBES. Add made-up cases to `test/kinetic/<type>.json` (one with `"determinism": true`; edge cases
+with `"probe_only"`, and `"expect_error"` for one that must throw), run `node test/templates.mjs <public> test/kinetic
+<out>` (it checks every probe first: nothing past the frame or on top of anything else, labels 40 px apart,
+connectors at their length, a count never past its final value) and `node test/determinism.mjs <out> --only kinetic`,
+and look at the stills. Budget: about +0.05 s a frame per card up at 1080x1920 (number_chain measured +0.03, stat_stack +0.01,
 step_build under +0.01).

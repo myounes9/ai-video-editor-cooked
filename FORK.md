@@ -119,6 +119,11 @@ chain of figures) have no page to capture. The kinetic family sets them over the
 - Integration (`phase2`): a kinetic card draws over a full-frame scene it shares the frame with (`StyleEdit.tsx`), the
   scene on the dark ground, a stat_stack beside the scene's picture (plan.py `scene_capture`, `kinetic_links`), and
   check.py render skips a kinetic card's measures while a scene is up.
+- Review fixes (`phase2`): the counter never reads past its final value, the scrim fades in and out, a stamp keeps to
+  its figure's foot, tiles fill after their figure, readable labels with a chain or tracker that cannot fit stopping
+  the render (and check.py plan catching it first), stat_stack columns; plan.py `bridge_kinetic` (no caption flashes
+  between cards) and pushes instead of cuts under a kinetic card's hold; `beside` for every kinetic card over a scene.
+  Each format exports a `probe` (`kinetic/probe.ts`) that `test/templates.mjs` checks on every kinetic case.
 
 Fork-only: a look this fork chose (words over the footage, a house key colour), against upstream's rule that a
 number is shown inside the page that published it. Off unless a style opts in.

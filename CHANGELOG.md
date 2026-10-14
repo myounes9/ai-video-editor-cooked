@@ -4,6 +4,37 @@ What changed for every user, newest first.
 
 ## Unreleased
 
+- Kinetic titles: review fixes (fork, opt-in). A counter (kinetic_number counter and tally, goal_bar) showed numbers
+  past its final value while it climbed ("49%" on the way to 40%): a higher digit rolled ahead of the ones. Every
+  digit is now drawn from the same whole number, so the figure never reads more than it lands on. The top scrim came
+  on in one frame at every card start and was cut off at its end: it fades in from the card's start (4 frames at the
+  least) and out with the exit sweep. A stamp (REJECTED) sat across the middle of its figure: it now covers at most
+  the figure's foot (the bottom fifth of its caps), the sub-line moves down to make room, and it is never much wider
+  than the figure. A tally's tiles fill once its figure has landed, left to right. Chain labels and a goal's label
+  stay phone-readable (48 px, never under 44), wrapping before they shrink; a number_chain that cannot fit its
+  figures, equal connectors and labels 40 px apart across the grid, or a step_build label wider than its well even
+  when small, stops the render with what to change instead of drawing parts on top of each other, and check.py plan
+  FAILs both before a render (an estimate from measured advances; WARN near the limit). A long kinetic_number
+  sub-line wraps onto two lines before the figure shrinks. stat_stack gains a `columns` layout (each label under its
+  figure), used when it gives bigger figures. A currency sign's ink top now sits on the figure's cap top. The
+  marker's leading edge holds its lean for the first half of the pull, so it shows at 30 fps. cta_follow's handle
+  rises just before its word, and both button faces share one left edge, so FOLLOW runs on into FOLLOWING mid-wipe.
+  A tally of "4.5K" fills 30 tiles (its K counted), not 5. A band that is not [top, bottom] inside 0-50%, or a card
+  whose first landing comes after it has gone, stops the render instead of drawing in the wrong place or nothing.
+  Planning: a kinetic card under 1 s before the next kinetic card or scene holds until it (`bridge_kinetic`), so the
+  word captions no longer flash back for a word between cards (the top scrim stays up across that hand-over), and
+  the renderer keeps them hidden across gaps under 0.6 s; a zoom with an edge under a kinetic card's hold eases as a push (0.8 s) instead of jumping the face under a
+  still lockup; every kinetic card over a full-frame scene gets the scene's picture as `beside`, and its band stops
+  24 px above it (check.py plan WARNs when the picture starts too high for that). check.py: a number given as a JSON
+  number under a kinetic `text` or `label` is now checked against what is said; render no longer skips a kinetic
+  card over a slow push (only while a punch travels), and WARNs when a kinetic card was never measured; quality.py
+  reads a zoom under a kinetic card below the card's band (its still type had read as a zoom that snapped). Tests: every
+  format exports a `probe` of its layout and counts (kinetic/probe.ts, the KineticProbe composition), and
+  `test/templates.mjs` checks every kinetic case with it (nothing past the frame or on top of anything else, labels
+  40 px apart, connectors at their length, a count never past its final value, tiles after their figure, the
+  expected error for a case that must throw), with made-up edge cases in `test/kinetic/*.json`;
+  `test/determinism.mjs` renders a whole StyleEdit plan with joined tracker beats, a stat_stack over a scene, a
+  punch and the caption fade; demo asserts in plan.py and check.py.
 - Kinetic titles over a full-frame scene (fork, opt-in). In the overlay layout a capture planned as a scene (one
   with `"layout": "split"` or `"scene"`) covered every kinetic card up with it, so a stat_stack meant to sit beside the
   capture of its numbers never showed. A kinetic card now draws over a scene it shares the frame with, and plan.py
