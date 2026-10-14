@@ -26,7 +26,7 @@ import { TextItem, Texts } from "./Texts";
 import { SceneCard, SceneView, TR_S, Transition, footageX, phases, sceneGrounds } from "./Scene";
 import { captionFade, groundCovers } from "./ground";
 import { Ground, onGround } from "./look";
-import { hidesCaptions } from "./kinetic";
+import { KINETIC, hidesCaptions } from "./kinetic";
 
 // Shapes follow skills/style-edit/references/contracts.md "plan.json". Times are seconds on the cut's timeline.
 // origin: the top centre of the head over the zoom, % of the frame (plan.py from face.json): the face holds its place, the hair never rises into a card.
@@ -325,6 +325,13 @@ const slots = (cards: Card[], split: boolean): Slot[] => {
         const nx = lane[i + 1];
         const held = nx && nx.layout === "scene" && nx.start - c.end < gap; // the next scene grows over this one
         out.push({ card: c, next: held ? nx : undefined, covered: false, from: c.start, to: held ? nx.start + 1 : c.end + 0.05 });
+        return;
+      }
+      if (c.anim && c.anim.type in KINETIC) {
+        // a kinetic card enters and leaves on its own (no swap); the next card in its lane takes the frame at its start
+        // (a step tracker's next beat carries on from it: kinetic/StepBuild.tsx join_in)
+        const nx = lane[i + 1];
+        out.push({ card: c, covered: false, from: c.start, to: Math.min(c.end + EXIT_S / 2, nx ? nx.start : Infinity) });
         return;
       }
       const prev = i > 0 && c.start - lane[i - 1].end < gap ? lane[i - 1] : undefined;

@@ -84,3 +84,17 @@ export const BLUR = { k: 0.15, minPx: 6, maxPx: 7 };
 // ---------- eases ----------
 export const EASE = { pull: "power3.out", settle: "expo.out", rise: "expo.out", exit: "power2.in", draw: "power3.out",
   handoff: "power3.in", count: "expo.out", sheen: "power1.inOut", scrimIn: "sine.out", scrimOut: "sine.in" };
+
+// ---------- step_build and stat_stack ----------
+/** A tracker slot (step_build): a smoked glass well with a light edge (alpha in the colour, never opacity), so an empty
+ *  slot reads on a bright wall as well as on a dark one; the gold edge a filled slot keeps once its marker has handed it
+ *  to the foil, a question slot's dashed edge, an empty slot's numeral. radius, gap and line: px on a 1080 short side. */
+export const SLOT = { well: "rgba(12,12,12,0.3)", edge: "rgba(255,255,255,0.55)", done: "#E8B400", ask: "rgba(255,255,255,0.85)",
+  numeral: "rgba(255,255,255,0.86)", radius: 14, gap: 28, line: 1.5 };
+/** A slot pops in on its word: popFrom -> 1 over popFrames on popEase (slots on one word popStagger apart); the slots
+ *  already up slide aside over reflow first, so it lands in its own place. A returning tracker sweeps in left to right
+ *  over TIME.exit on enterEase. */
+export const STEP = { popFrom: 0.84, popFrames: 9, popEase: "back.out(2.2)", popStagger: 0.08, reflow: 0.3, reflowEase: "power3.inOut",
+  enterEase: "power2.out" };
+/** stat_stack: how far it keeps from the capture it sits beside (px on a 1080 short side). */
+export const BESIDE_GAP = 24;

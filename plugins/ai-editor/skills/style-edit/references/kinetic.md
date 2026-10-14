@@ -57,12 +57,40 @@ held lockup pushes 1.5%; it leaves in one feathered sweep, left to right. Counte
 | `number_chain` | yes | 2-4 figures that lead one to the next, each on its word; a connector draws just before the next lands; earlier figures stay, in foil; fixed columns, equal connectors | `items: [{num, label?, at, label_at?}]`, `out_at?`, `band?`, `hide_captions?` |
 | `kinetic_number` | planned | one figure with a sub-line of words; variants `hook` (default), `counter` (counts from 40% on its word), `tally` (up to ~30 tiles fill while it counts), `stamp` (a word like SOLD OUT stamps in) | `num`, `at`, `variant?`, `sub?: [{text, at, key?}]`, `stamp?: {text, at}` |
 | `goal_bar` | planned | the goal layout without a panel: the % on the left with a small cap-aligned %, the target on the same baseline under a small GOAL label; a pill track with its remainder, a fill with a glow band and a landing flare, a target marker that pops on the target and rings on "goal" | `pct`, `target`, `at_pct`, `at_target`, `at_goal?` |
-| `step_build` | planned | a tracker of 2-4 slots (`empty`, `filled`, `question`) that returns at several beats with the same slots and identity | `slots: [{label, at, state}]`, `id?` |
-| `stat_stack` | planned | 2-4 stats landing one by one in a compact stack or row, beside a real screenshot card | `stats: [{num, label, at}]`, `layout?: "stack" \| "row"` |
+| `step_build` | yes | a tracker of 2-4 slots in fixed columns that returns at several beats with the same slots and identity: an empty slot is a smoked glass well with its number, a filled one gets its label pulled on by the marker and handed to the foil (gold edge), a question slot is a dashed well with a "?"; a slot popping in makes room first | `slots: [{label?, state: "empty" \| "filled" \| "question" \| "off", at?}]` (2-4), `id?`, `join_in?`, `join_out?`, `out_at?`, `band?`, `hide_captions?` |
+| `stat_stack` | yes | 2-4 stats landing one by one in a compact row or stack (figure on the marker, then foil; label beside it, on its baseline, wrapping onto two lines that span the figure's caps), in the part of the band a capture beside it leaves free | `stats: [{num, label?, at, label_at?}]` (2-4), `layout?: "row" \| "stack"`, `beside?: [x, y, w, h]`, `out_at?`, `band?`, `hide_captions?` |
 | `kinetic_title` | planned | a key-word title for a beat with no number: 1-3 lines, each word on its time, key words in the key colour | `lines: [{words: [{text, at, key?}]}]` |
 | `cta_follow` | planned | a handle and a follow button that presses on "follow", an optional avatar circle | `handle`, `at`, `follow_at`, `avatar?` (an image file) |
 
 A planned format is registered but stops the render with its name until its branch builds it.
+
+### A tracker over several beats (`step_build`)
+
+One visuals.json beat per moment, every beat with the same `id` and the same slots (labels included); only the states
+and words change. A slot with a word changes on it: an `empty` or `question` slot pops in there, a `filled` one fills
+there. A slot with no word is already so when the beat comes up; `off` is not up yet (a later beat adds it) but keeps
+its column, so every beat lays out the same.
+
+```json
+{"word": "two", "kind": "anim", "type": "step_build", "props": {"id": "shops", "slots": [
+  {"label": "bakery", "state": "empty", "word": "two"}, {"label": "catering", "state": "empty", "word": "two"}, {"state": "off"}]}},
+{"word": "first", "kind": "anim", "type": "step_build", "props": {"id": "shops", "slots": [
+  {"label": "bakery", "state": "filled", "word": "bakery"}, {"label": "catering", "state": "empty"}, {"state": "off"}]}},
+{"word": "next", "kind": "anim", "type": "step_build", "props": {"id": "shops", "slots": [
+  {"label": "bakery", "state": "filled"}, {"label": "catering", "state": "filled"}, {"state": "question", "word": "next"}]}}
+```
+
+A beat that comes back sweeps in left to right with its earlier fills already in foil. When the next beat of the same
+tracker follows within 1 s, plan.py joins them: the first holds until the second starts (`join_out`: no sweep out, no
+push; a fill still on its marker hands it to the foil just before) and the second carries on from it (`join_in`), so
+one tracker stays on screen.
+
+### Beside a capture (`stat_stack`)
+
+A stat_stack may share its beat with a real capture of the same numbers (a dashboard screenshot). plan.py gives it
+that card's box as `beside` (the card up with it longest; a `beside` in props wins) and the stats keep 24 px clear of
+it, in the biggest part of the band it leaves free (above, below, left or right), as a row or a stack, whichever fits
+biggest unless `layout` says.
 
 ## Building a format (for the renderer)
 
@@ -71,8 +99,10 @@ Copy `NumberChain.tsx`: `useFaces()` (fonts, null until loaded), `useClock()` (t
 inside `<Lockup>` (scrim, push, sweep) built from the primitives: `MarkerReveal` + `pullOn` / `pullOff` + `Behind`
 (the marker and its hand-off to the foil), `FigureGlyphs` (paint `ink`, `white` or `gold`, with `FoilDefs`),
 `Run` + `LineMask` + `stagger` (a line's reveal), `Odometer` + `counter` (a count from 40%), `Arrow`,
-`settleAt` + `Scaled`, `exitAt` and `labelStart` (the hold and label rules). No GSAP timeline state, no
+`settleAt` + `Scaled`, `exitAt` and `labelStart` (the hold and label rules). `Lockup` takes `out = Infinity` (it never
+leaves: the next beat takes over) and `joined` (the scrim is already up) for a lockup that spans beats. No GSAP timeline state, no
 Math.random, no clock; no blurred box-shadow on a moving layer, no transform once settled, no opacity on a scaled
 layer. Add made-up cases to `test/kinetic/<type>.json` (one with `"determinism": true`), run
 `node test/templates.mjs <public> test/kinetic <out>` and `node test/determinism.mjs <out> --only kinetic`, and look
-at the stills. Budget: about +0.05 s a frame per card up at 1080x1920 (number_chain measured +0.03).
+at the stills. Budget: about +0.05 s a frame per card up at 1080x1920 (number_chain measured +0.03, stat_stack +0.01,
+step_build under +0.01).

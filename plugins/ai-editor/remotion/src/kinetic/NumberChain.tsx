@@ -35,7 +35,7 @@ export const chainItems = (p: Record<string, any>): Item[] => {
 };
 
 /** A label on two lines, split at the space nearest its middle (one word stays whole). */
-const wrap2 = (l: string) => {
+export const wrap2 = (l: string) => {
   const sp = [...l.matchAll(/ /g)].map((m) => m.index!);
   if (!sp.length) return [l];
   const at = sp.reduce((a, b) => (Math.abs(b - l.length / 2) < Math.abs(a - l.length / 2) ? b : a));

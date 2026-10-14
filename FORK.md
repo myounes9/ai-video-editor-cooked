@@ -107,6 +107,11 @@ chain of figures) have no page to capture. The kinetic family sets them over the
 Fork-only: a look this fork chose (words over the footage, a house key colour), against upstream's rule that a
 number is shown inside the page that published it. Off unless a style opts in.
 
+`step_build` and `stat_stack` (`p2-step`): `kinetic/StepBuild.tsx` (a tracker across beats, joined by plan.py
+`kinetic_links` when two beats of one tracker are under 1 s apart) and `kinetic/StatStack.tsx` (stats beside a
+capture, its box passed as `beside` by `kinetic_links`). `StyleEdit.tsx`: a kinetic card gets no lane swap and leaves the
+frame to the next card in its lane at its start; `primitives.tsx` `Lockup` takes `out = Infinity` and `joined`.
+
 ## What to offer upstream, and what stays here
 
 Neutral fixes, worth a pull request to upstream (each a real bug any user hits):
