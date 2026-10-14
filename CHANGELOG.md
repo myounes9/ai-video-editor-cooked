@@ -4,7 +4,9 @@ What changed for every user, newest first.
 
 ## Unreleased
 
-Fork base: upstream ai-editor 2.7.8 (the manifests read 2.7.8-cooked.1). The entries below are the fork's own, not released yet.
+## ai-editor 2.7.8-cooked.1 (fork, 2026-10-14)
+
+Fork release on upstream ai-editor 2.7.8: kinetic number titles placed automatically (opt-in, graphics.kinetic), emphasis captions, and the rules that turn a user's feedback into those settings. See FORK.md.
 
 - Kinetic titles, review fixes (fork, opt-in). A number card's end never hides the start of a number said after it:
   a chain held into "a hundred and sixty-four" showed "sixty-four" once it left, a number nobody said; the card now
